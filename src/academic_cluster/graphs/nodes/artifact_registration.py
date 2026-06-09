@@ -4,6 +4,7 @@
 
 import structlog
 
+from ...services.database import get_database
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -21,19 +22,48 @@ async def artifact_registration_node(state: PipelineState) -> dict:
     """
     logger.info("Starting artifact registration")
 
-    # TODO: 实现产出物注册
-    # 1. 从数据库获取综述内容
-    # 2. 生成最终 Markdown
-    # 3. 生成 BibTeX
-    # 4. 生成引用报告
-    # 5. 计算质量分数
-    # 6. 存储产出物
+    db = get_database()
 
-    artifact_id = None
+    try:
+        # 获取已写章节
+        written_sections = []
+        for section_id in state.written_section_ids:
+            # TODO: 从数据库获取章节内容
+            pass
 
-    logger.info("Artifact registration completed")
+        # 组装最终综述
+        final_review = "\n\n".join([s.get("content", "") for s in written_sections])
 
-    return {
-        "artifact_id": artifact_id,
-        "status": "artifacts_registered",
-    }
+        # 计算统计信息
+        word_count = len(final_review.split())
+        citation_count = len(state.core_paper_ids) + len(state.auxiliary_paper_ids)
+
+        # 保存产出物
+        artifact_data = {
+            "project_id": state.project_id,
+            "final_review": final_review,
+            "bibtex": state.bibtex,
+            "word_count": word_count,
+            "citation_count": citation_count,
+        }
+        artifact_id = await db.save_artifact(artifact_data)
+
+        logger.info(
+            "Artifact registration completed",
+            artifact_id=artifact_id,
+            word_count=word_count,
+            citation_count=citation_count,
+        )
+
+        return {
+            "artifact_id": artifact_id,
+            "status": "artifacts_registered",
+        }
+
+    except Exception as e:
+        logger.error("Artifact registration failed", error=str(e))
+        return {
+            "artifact_id": None,
+            "status": "artifacts_registered",
+            "errors": [f"Artifact registration failed: {str(e)}"],
+        }

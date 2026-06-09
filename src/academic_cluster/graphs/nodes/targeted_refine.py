@@ -4,6 +4,8 @@
 
 import structlog
 
+from ...tools.academic_search import search_all_sources
+from ...services.database import get_database
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -16,9 +18,7 @@ async def targeted_refine_node(state: PipelineState) -> dict:
     根据差距分析结果进行补充搜索：
     - 使用生成的针对性查询搜索
     - 过滤和重排序新论文
-    - 提取知识图谱
-    - 生成证据卡片
-    - 合并到现有聚类
+    - 合并到现有论文列表
 
     预算限制：
     - 每个社区最多 2 次尝试
@@ -30,24 +30,67 @@ async def targeted_refine_node(state: PipelineState) -> dict:
         max_attempts=state.max_refinement_attempts,
     )
 
-    # TODO: 实现针对性精炼
-    # 1. 从数据库获取差距分析结果
-    # 2. 使用针对性查询搜索新论文
-    # 3. 过滤和重排序
-    # 4. 提取知识图谱
-    # 5. 生成证据卡片
-    # 6. 合并到现有聚类
+    config = state.config or {}
+    limit_per_source = config.get("targeted_search_limit", 20)
 
-    new_paper_ids = []
+    db = get_database()
 
-    logger.info(
-        "Targeted refinement completed",
-        new_papers=len(new_paper_ids),
-    )
+    try:
+        # 生成针对性查询（简化版本）
+        targeted_queries = [
+            f"{state.query} methods",
+            f"{state.query} applications",
+            f"{state.query} challenges",
+        ]
 
-    return {
-        "paper_ids": new_paper_ids,
-        "refinement_attempt": state.refinement_attempt + 1,
-        "needs_targeted_refinement": False,  # 重置标志
-        "status": "refined",
-    }
+        # 搜索新论文
+        new_papers = []
+        for query in targeted_queries:
+            papers = await search_all_sources(
+                query=query,
+                limit_per_source=limit_per_source,
+                sources=["semantic_scholar", "arxiv"],
+            )
+            new_papers.extend(papers)
+
+        # 去重（排除已有论文）
+        existing_paper_ids = set(state.paper_ids)
+        unique_new_papers = []
+
+        for paper in new_papers:
+            paper_id = paper.get("id")
+            if paper_id and paper_id not in existing_paper_ids:
+                unique_new_papers.append(paper)
+                existing_paper_ids.add(paper_id)
+
+        # 保存新论文
+        new_paper_ids = []
+        for paper in unique_new_papers[:50]:  # 限制数量
+            try:
+                await db.save_paper(paper)
+                new_paper_ids.append(paper.get("id"))
+            except Exception as e:
+                logger.warning("Failed to save targeted paper", error=str(e))
+
+        logger.info(
+            "Targeted refinement completed",
+            new_papers=len(new_paper_ids),
+            attempt=state.refinement_attempt + 1,
+        )
+
+        return {
+            "paper_ids": new_paper_ids,
+            "refinement_attempt": state.refinement_attempt + 1,
+            "needs_targeted_refinement": False,
+            "status": "refined",
+        }
+
+    except Exception as e:
+        logger.error("Targeted refinement failed", error=str(e))
+        return {
+            "paper_ids": [],
+            "refinement_attempt": state.refinement_attempt + 1,
+            "needs_targeted_refinement": False,
+            "status": "refined",
+            "errors": [f"Targeted refinement failed: {str(e)}"],
+        }

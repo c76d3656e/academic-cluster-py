@@ -4,6 +4,7 @@
 
 import structlog
 
+from ...services.database import get_database
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -13,7 +14,7 @@ async def gap_analysis_node(state: PipelineState) -> dict:
     """
     社区差距分析
 
-    使用 LLM 评估每个社区的证据完整性：
+    评估每个社区的证据完整性：
     - 检查每个社区是否有足够的证据支持
     - 识别缺失的证据类型
     - 生成针对性搜索查询
@@ -21,23 +22,49 @@ async def gap_analysis_node(state: PipelineState) -> dict:
     """
     logger.info("Starting gap analysis")
 
-    # TODO: 实现差距分析
-    # 1. 从数据库获取聚类和证据卡片
-    # 2. 使用 LLM 评估每个社区的完整性
-    # 3. 生成差距分析报告
-    # 4. 决定是否需要针对性搜索
+    db = get_database()
 
-    gap_analysis_ids = []
-    needs_refinement = False
+    try:
+        # 获取聚类和证据信息
+        clusters = []
+        for cluster_id in state.cluster_ids:
+            # TODO: 从数据库获取聚类详情
+            pass
 
-    # 检查是否还有 refinement 尝试次数
-    if needs_refinement and state.refinement_attempt < state.max_refinement_attempts:
-        logger.info("Gaps detected, refinement needed")
-    else:
-        logger.info("No significant gaps, proceeding to writing")
+        evidence_cards = []
+        for card_id in state.evidence_card_ids:
+            # TODO: 从数据库获取证据卡片详情
+            pass
 
-    return {
-        "gap_analysis_ids": gap_analysis_ids,
-        "needs_targeted_refinement": needs_refinement,
-        "status": "gaps_analyzed",
-    }
+        # 简化的差距分析逻辑
+        # 如果证据卡片数量少于核心论文数量的 50%，认为有差距
+        evidence_ratio = len(state.evidence_card_ids) / max(len(state.core_paper_ids), 1)
+        needs_refinement = evidence_ratio < 0.5
+
+        # 检查 refinement 尝试次数
+        if state.refinement_attempt >= state.max_refinement_attempts:
+            needs_refinement = False
+
+        gap_analysis_ids = []
+
+        logger.info(
+            "Gap analysis completed",
+            evidence_ratio=evidence_ratio,
+            needs_refinement=needs_refinement,
+            attempt=state.refinement_attempt,
+        )
+
+        return {
+            "gap_analysis_ids": gap_analysis_ids,
+            "needs_targeted_refinement": needs_refinement,
+            "status": "gaps_analyzed",
+        }
+
+    except Exception as e:
+        logger.error("Gap analysis failed", error=str(e))
+        return {
+            "gap_analysis_ids": [],
+            "needs_targeted_refinement": False,
+            "status": "gaps_analyzed",
+            "errors": [f"Gap analysis failed: {str(e)}"],
+        }

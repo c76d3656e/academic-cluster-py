@@ -3,9 +3,12 @@
 """
 
 import asyncio
+import uuid
 
 import structlog
 
+from ...tools.academic_search import search_all_sources
+from ...services.database import get_database
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -15,34 +18,50 @@ async def search_node(state: PipelineState) -> dict:
     """
     搜索学术论文
 
-    使用 LLM Agent 进行查询规划，然后并行搜索多个数据源：
+    使用多个数据源并行搜索：
     - Semantic Scholar
     - PubMed
     - arXiv
     - OpenAlex
-    - Crossref
     """
     logger.info("Starting paper search", query=state.query, project_id=state.project_id)
 
-    # TODO: 实现查询规划 Agent
-    # query_plan = await query_planning_agent.ainvoke({"query": state.query})
+    # 从配置获取搜索参数
+    config = state.config or {}
+    limit_per_source = config.get("limit_per_source", 50)
+    sources = config.get("sources", ["semantic_scholar", "arxiv"])
 
-    # TODO: 并行搜索多个数据源
-    # results = await asyncio.gather(
-    #     search_semantic_scholar(query_plan),
-    #     search_pubmed(query_plan),
-    #     search_arxiv(query_plan),
-    #     search_openalex(query_plan),
-    # )
+    # 并行搜索多个数据源
+    papers = await search_all_sources(
+        query=state.query,
+        limit_per_source=limit_per_source,
+        sources=sources,
+    )
 
-    # 暂时返回模拟结果
+    # 去重（基于标题相似性）
+    unique_papers = _deduplicate_papers(papers)
+
+    # 保存到数据库并获取 ID
+    db = get_database()
     paper_ids = []
-    total_searched = 0
+
+    for paper in unique_papers:
+        paper_id = paper.get("id", str(uuid.uuid4()))
+        paper["id"] = paper_id
+
+        try:
+            await db.save_paper(paper)
+            paper_ids.append(paper_id)
+        except Exception as e:
+            logger.warning("Failed to save paper", paper_id=paper_id, error=str(e))
+
+    total_searched = len(papers)
 
     logger.info(
         "Search completed",
         total_searched=total_searched,
-        papers_found=len(paper_ids),
+        unique_papers=len(unique_papers),
+        papers_saved=len(paper_ids),
     )
 
     return {
@@ -50,3 +69,26 @@ async def search_node(state: PipelineState) -> dict:
         "total_searched": total_searched,
         "status": "searched",
     }
+
+
+def _deduplicate_papers(papers: list[dict]) -> list[dict]:
+    """
+    去除重复论文
+
+    基于标题相似性去重
+    """
+    seen_titles = set()
+    unique_papers = []
+
+    for paper in papers:
+        title = paper.get("title", "").lower().strip()
+        if not title:
+            continue
+
+        # 简单的标题去重
+        normalized_title = " ".join(title.split())
+        if normalized_title not in seen_titles:
+            seen_titles.add(normalized_title)
+            unique_papers.append(paper)
+
+    return unique_papers

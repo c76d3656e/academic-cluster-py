@@ -4,6 +4,8 @@
 
 import structlog
 
+from ...services.database import get_database
+from ...tools.clustering import generate_community_visualization
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -23,22 +25,53 @@ async def visualize_community_node(state: PipelineState) -> dict:
     """
     logger.info("Generating community visualization")
 
-    # TODO: 实现可视化生成
-    # 1. 从数据库获取聚类结果和混合图
-    # 2. 使用 NetworkX 计算布局
-    # 3. 生成节点和边数据
-    # 4. 推送给前端（WebSocket/SSE）
+    db = get_database()
 
-    visualization = {
-        "nodes": [],
-        "edges": [],
-        "clusters": [],
-        "layout": "force",
-    }
+    try:
+        # 获取聚类结果
+        clusters = []
+        for cluster_id in state.cluster_ids:
+            # TODO: 从数据库获取聚类详情
+            pass
 
-    logger.info("Community visualization generated")
+        # 获取论文详情
+        papers = await db.get_papers_by_ids(state.core_paper_ids)
 
-    return {
-        "community_visualization": visualization,
-        "status": "visualized",
-    }
+        # 获取混合图（简化版本，只包含核心论文间的边）
+        import networkx as nx
+        hybrid_graph = nx.Graph()
+        for paper in papers:
+            hybrid_graph.add_node(paper.get("id"))
+
+        # 生成可视化
+        visualization = generate_community_visualization(
+            graph=hybrid_graph,
+            clusters=clusters,
+            papers=papers,
+            layout="force",
+        )
+
+        logger.info(
+            "Community visualization generated",
+            nodes=len(visualization.get("nodes", [])),
+            edges=len(visualization.get("edges", [])),
+            clusters=len(visualization.get("clusters", [])),
+        )
+
+        return {
+            "community_visualization": visualization,
+            "status": "visualized",
+        }
+
+    except Exception as e:
+        logger.error("Visualization generation failed", error=str(e))
+        return {
+            "community_visualization": {
+                "nodes": [],
+                "edges": [],
+                "clusters": [],
+                "layout": "force",
+            },
+            "status": "visualized",
+            "errors": [f"Visualization generation failed: {str(e)}"],
+        }

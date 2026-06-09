@@ -4,6 +4,8 @@
 
 import structlog
 
+from ...agents.writing import generate_outline
+from ...services.database import get_database
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -23,17 +25,47 @@ async def outline_generation_node(state: PipelineState) -> dict:
     """
     logger.info("Starting outline generation")
 
-    # TODO: 实现大纲生成
-    # 1. 从数据库获取聚类结果和 KG 摘要
-    # 2. 使用 LLM 生成大纲
-    # 3. 存储大纲到数据库
-    # 4. 返回大纲 ID
+    db = get_database()
 
-    outline_id = None
+    try:
+        # 获取聚类信息
+        clusters = []
+        for cluster_id in state.cluster_ids:
+            # TODO: 从数据库获取聚类详情
+            clusters.append({
+                "id": cluster_id,
+                "name": "Cluster",
+                "main_topics": [],
+                "size": 0,
+            })
 
-    logger.info("Outline generation completed")
+        # 获取知识图谱摘要
+        kg_summary = {
+            "entity_types": [],
+            "relation_types": [],
+        }
 
-    return {
-        "outline_id": outline_id,
-        "status": "outline_generated",
-    }
+        # 生成大纲
+        outline_data = await generate_outline(
+            topic=state.query,
+            clusters=clusters,
+            kg_summary=kg_summary,
+        )
+
+        # 保存大纲
+        outline_id = await db.save_outline(outline_data)
+
+        logger.info("Outline generation completed", outline_id=outline_id)
+
+        return {
+            "outline_id": outline_id,
+            "status": "outline_generated",
+        }
+
+    except Exception as e:
+        logger.error("Outline generation failed", error=str(e))
+        return {
+            "outline_id": None,
+            "status": "outline_generated",
+            "errors": [f"Outline generation failed: {str(e)}"],
+        }

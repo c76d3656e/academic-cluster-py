@@ -4,6 +4,8 @@ BM25 节点 - 使用 BM25 文本检索筛选论文
 
 import structlog
 
+from ...services.database import get_database
+from ...tools.text_processing import bm25_search
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -20,16 +22,27 @@ async def bm25_node(state: PipelineState) -> dict:
     """
     logger.info("Starting BM25 selection", paper_count=len(state.filtered_paper_ids))
 
-    # TODO: 实现 BM25 检索
-    # 1. 从数据库获取论文标题和摘要
-    # 2. 使用 rank_bm25 或 tantivy 构建索引
-    # 3. 计算 BM25 分数
-    # 4. 返回 Top-K 论文 ID
+    config = state.config or {}
+    max_papers = config.get("max_embedding_papers", 500)
 
-    # 使用配置中的最大嵌入论文数
-    max_papers = state.config.get("max_embedding_papers", 500)
+    db = get_database()
+    papers = await db.get_papers_by_ids(state.filtered_paper_ids)
 
-    bm25_selected_ids = state.filtered_paper_ids[:max_papers]  # 暂时截断
+    if not papers:
+        logger.warning("No papers to process")
+        return {
+            "paper_ids": [],
+            "status": "bm25_selected",
+        }
+
+    # BM25 搜索
+    results = await bm25_search(
+        query=state.query,
+        documents=papers,
+        top_k=max_papers,
+    )
+
+    bm25_selected_ids = [p.get("id") for p in results]
 
     logger.info(
         "BM25 selection completed",

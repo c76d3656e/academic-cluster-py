@@ -216,7 +216,7 @@ async def search_arxiv(
 
     使用 arXiv API
     """
-    url = "http://export.arxiv.org/api/query"
+    url = "https://export.arxiv.org/api/query"
 
     search_query = query
     if categories:

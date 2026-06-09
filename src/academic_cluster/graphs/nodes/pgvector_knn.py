@@ -4,6 +4,8 @@ pgvector KNN 节点 - 存储嵌入并计算 KNN 图
 
 import structlog
 
+from ...services.vector_store import get_vector_store
+from ...services.database import get_database
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -11,26 +13,44 @@ logger = structlog.get_logger()
 
 async def pgvector_knn_node(state: PipelineState) -> dict:
     """
-    存储嵌入到 pgvector 并计算 KNN 图
+    计算 KNN 图
 
-    - 将嵌入向量存储到 PostgreSQL pgvector
-    - 计算 K 近邻图
-    - 返回 KNN 图 ID
+    使用向量数据库计算 K 近邻图：
+    - 获取所有嵌入向量
+    - 计算余弦相似度
+    - 构建 KNN 图（每个论文的 Top-K 相似论文）
     """
-    logger.info("Starting pgvector KNN", embedding_count=len(state.embedding_ids))
+    logger.info("Starting KNN graph computation", embedding_count=len(state.embedding_ids))
 
-    # TODO: 实现 pgvector KNN
-    # 1. 连接 PostgreSQL
-    # 2. 存储嵌入向量
-    # 3. 使用 pgvector 的 <=> 运算符计算余弦相似度
-    # 4. 构建 KNN 图（每个论文的 Top-K 相似论文）
-    # 5. 存储 KNN 图
+    config = state.config or {}
+    k = config.get("knn_k", 10)
+    threshold = config.get("knn_threshold", 0.5)
 
-    knn_graph_id = None  # 暂时返回 None
+    vector_store = get_vector_store()
 
-    logger.info("pgvector KNN completed")
+    try:
+        # 获取 KNN 图
+        knn_edges = await vector_store.get_knn_graph(k=k, threshold=threshold)
 
-    return {
-        "knn_graph_id": knn_graph_id,
-        "status": "knn_computed",
-    }
+        # 保存到数据库
+        db = get_database()
+        knn_graph_id = f"knn_{state.project_id}"
+        # TODO: 保存 KNN 图到数据库
+
+        logger.info(
+            "KNN graph computed",
+            edges=len(knn_edges),
+        )
+
+        return {
+            "knn_graph_id": knn_graph_id,
+            "status": "knn_computed",
+        }
+
+    except Exception as e:
+        logger.error("KNN computation failed", error=str(e))
+        return {
+            "knn_graph_id": None,
+            "status": "knn_computed",
+            "errors": [f"KNN computation failed: {str(e)}"],
+        }

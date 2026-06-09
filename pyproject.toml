@@ -28,68 +28,23 @@ dependencies = [
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
-    "langchain-community>=0.3.0",
     "langsmith>=0.2.0",
 
     # LLM Providers
     "openai>=1.50.0",
-    "anthropic>=0.34.0",
-    "ollama>=0.4.0",
-
-    # Data Processing
-    "pandas>=2.2.0",
-    "numpy>=1.26.0",
-    "scikit-learn>=1.5.0",
 
     # Graph & Network Analysis
     "networkx>=3.3",
-    "python-igraph>=0.11.0",
-    "leidenalg>=0.10.0",
-
-    # Vector Databases
-    "chromadb>=0.5.0",
-    "qdrant-client>=1.12.0",
-
-    # Database
-    "sqlalchemy>=2.0.0",
-    "asyncpg>=0.30.0",
-    "psycopg2-binary>=2.9.0",
-    "alembic>=1.13.0",
-
-    # Redis
-    "redis>=5.2.0",
-    "aioredis>=2.0.0",
 
     # HTTP & API
     "httpx>=0.27.0",
-    "aiohttp>=3.10.0",
     "fastapi>=0.115.0",
     "uvicorn>=0.30.0",
-
-    # NLP & Text Processing
-    "spacy>=3.8.0",
-    "nltk>=3.9.0",
-    "tiktoken>=0.8.0",
-
-    # Embeddings
-    "sentence-transformers>=3.0.0",
-    "flagembedding>=1.2.0",
-
-    # Clustering & Dimensionality Reduction
-    "umap-learn>=0.5.0",
-    "hdbscan>=0.8.0",
-
-    # Visualization
-    "matplotlib>=3.9.0",
-    "seaborn>=0.13.0",
-    "plotly>=5.24.0",
-    "pyvis>=0.3.0",
 
     # Configuration & Environment
     "pydantic>=2.9.0",
     "pydantic-settings>=2.5.0",
     "python-dotenv>=1.0.0",
-    "toml>=0.10.0",
 
     # Async & Concurrency
     "anyio>=4.6.0",
@@ -99,13 +54,7 @@ dependencies = [
     "structlog>=24.4.0",
     "rich>=13.9.0",
 
-    # Testing
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.24.0",
-    "pytest-cov>=5.0.0",
-
     # Utilities
-    "python-multipart>=0.0.12",
     "pyyaml>=6.0.0",
     "orjson>=3.10.0",
 ]
