@@ -5,6 +5,7 @@
 """
 
 import math
+import uuid
 from collections import defaultdict
 from typing import Optional
 
@@ -220,7 +221,8 @@ def leiden_clustering(
         for i, cluster_nodes in enumerate(partition):
             paper_ids = [nodes[idx] for idx in cluster_nodes]
             clusters.append({
-                "id": f"cluster_{i}",
+                "id": str(uuid.uuid4()),
+                "name": f"cluster_{i}",
                 "paper_ids": paper_ids,
                 "size": len(paper_ids),
             })
@@ -247,7 +249,8 @@ def _fallback_clustering(graph: nx.Graph) -> list[dict]:
     clusters = []
     for i, component in enumerate(nx.connected_components(graph)):
         clusters.append({
-            "id": f"cluster_{i}",
+            "id": str(uuid.uuid4()),
+            "name": f"cluster_{i}",
             "paper_ids": list(component),
             "size": len(component),
         })
@@ -294,7 +297,9 @@ def generate_community_visualization(
     }
 
     # 计算布局
-    if layout == "force":
+    if graph.number_of_nodes() == 0:
+        pos = {}
+    elif layout == "force":
         pos = nx.spring_layout(graph, k=1/math.sqrt(graph.number_of_nodes()), iterations=50)
     elif layout == "circular":
         pos = nx.circular_layout(graph)
