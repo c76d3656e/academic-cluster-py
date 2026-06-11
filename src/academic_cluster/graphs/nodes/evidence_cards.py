@@ -4,6 +4,8 @@
 支持幂等恢复：跳过已有证据卡片的论文。
 """
 
+import traceback
+
 import structlog
 
 from ...agents.evidence_generation import generate_evidence_cards_batch
@@ -20,6 +22,10 @@ async def evidence_cards_node(state: PipelineState) -> dict:
     使用 LLM 为每篇核心论文生成结构化证据卡片。
     支持幂等恢复：查询 DB 跳过已有卡片的论文。
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("evidence_cards", "llm", index=6)
+
     logger.info("Starting evidence card generation", core_papers=len(state.core_paper_ids))
 
     db = get_database()
@@ -66,10 +72,16 @@ async def evidence_cards_node(state: PipelineState) -> dict:
     remaining_papers = [p for p in papers if p["id"] not in already_done_paper_ids]
     if not remaining_papers:
         logger.info("All papers already have evidence cards, skipping")
-        return {
+        result = {
             "evidence_card_ids": existing_card_ids,
             "status": "evidence_generated",
         }
+        if tracker:
+            await tracker.end_node("evidence_cards", "succeeded", output_summary={
+                "card_count": len(existing_card_ids),
+                "skipped": True,
+            })
+        return result
 
     try:
         # 批量生成证据卡片（只处理剩余论文）
@@ -101,12 +113,22 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             skipped_papers=len(already_done_paper_ids),
         )
 
-        return {
+        result = {
             "evidence_card_ids": all_card_ids,
             "status": "evidence_generated",
         }
+        if tracker:
+            await tracker.end_node("evidence_cards", "succeeded", output_summary={
+                "new_cards": len(new_card_ids),
+                "total_cards": len(all_card_ids),
+            })
+        return result
 
     except Exception as e:
+        if tracker:
+            await tracker.end_node("evidence_cards", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
         logger.error("Evidence generation failed", error=str(e))
         return {
             "evidence_card_ids": existing_card_ids,

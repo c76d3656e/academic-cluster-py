@@ -6,6 +6,16 @@ from .database import DatabaseService, get_database
 from .cache import CacheService, get_cache
 from .vector_store import VectorStoreService, get_vector_store
 from .auth import PasswordService, TokenService, get_password_service, get_token_service
+from .observability import (
+    LLMCallbackHandler,
+    PipelineTracker,
+    TokenUsageTracker,
+    create_llm_callback_handler,
+    create_pipeline_tracker,
+    get_current_node,
+    get_current_run_id,
+    setup_structlog,
+)
 
 __all__ = [
     "DatabaseService",
@@ -18,4 +28,12 @@ __all__ = [
     "TokenService",
     "get_password_service",
     "get_token_service",
+    "LLMCallbackHandler",
+    "PipelineTracker",
+    "TokenUsageTracker",
+    "create_llm_callback_handler",
+    "create_pipeline_tracker",
+    "get_current_node",
+    "get_current_run_id",
+    "setup_structlog",
 ]

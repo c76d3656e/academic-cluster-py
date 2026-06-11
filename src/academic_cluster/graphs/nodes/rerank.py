@@ -4,6 +4,8 @@
 使用 Provider Pool 自动负载均衡多个 Rerank 端点。
 """
 
+import traceback
+
 import httpx
 import structlog
 
@@ -74,6 +76,10 @@ async def rerank_node(state: PipelineState) -> dict:
     - 按分数排序
     - 分为核心参考（top 80）和辅助参考（next 160）
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("rerank", "compute", index=2)
+
     logger.info("Starting reranking", paper_count=len(state.paper_ids))
 
     config = state.config or {}
@@ -106,12 +112,23 @@ async def rerank_node(state: PipelineState) -> dict:
             auxiliary_count=len(auxiliary_paper_ids),
         )
 
-        return {
+        result = {
             "core_paper_ids": core_paper_ids,
             "auxiliary_paper_ids": auxiliary_paper_ids,
             "status": "reranked",
         }
 
+        if tracker:
+            await tracker.end_node("rerank", "succeeded", output_summary={
+                "core_count": len(core_paper_ids),
+                "auxiliary_count": len(auxiliary_paper_ids),
+            })
+        return result
+
     except Exception as e:
+        if tracker:
+            await tracker.end_node("rerank", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
         logger.error("Reranking failed", error=str(e))
         raise  # 不再 fallback，直接抛出异常

@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import traceback
 
 import structlog
 
@@ -24,6 +25,10 @@ async def kg_extraction_node(state: PipelineState) -> dict:
     将论文按 KG_BATCH_SIZE 分批，每批打包成一个 LLM prompt。
     支持幂等恢复：开始时查询 DB 跳过已提取的论文。
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("kg_extraction", "llm", index=3)
+
     logger.info("Starting KG extraction", paper_count=len(state.core_paper_ids))
 
     from ...config import get_settings
@@ -95,11 +100,18 @@ async def kg_extraction_node(state: PipelineState) -> dict:
     remaining_papers = [p for p in papers if p["id"] not in already_extracted_paper_ids]
     if not remaining_papers:
         logger.info("All papers already have KG, skipping extraction")
-        return {
+        result = {
             "kg_entity_ids": existing_entity_ids,
             "kg_relation_ids": existing_relation_ids,
             "status": "kg_extracted",
         }
+        if tracker:
+            await tracker.end_node("kg_extraction", "succeeded", output_summary={
+                "entities": len(existing_entity_ids),
+                "relations": len(existing_relation_ids),
+                "skipped": True,
+            })
+        return result
 
     # SSE 进度回调
     sse_manager = get_sse_manager()
@@ -233,13 +245,23 @@ async def kg_extraction_node(state: PipelineState) -> dict:
             ),
         )
 
-        return {
+        result = {
             "kg_entity_ids": all_entity_ids,
             "kg_relation_ids": all_relation_ids,
             "status": "kg_extracted",
         }
+        if tracker:
+            await tracker.end_node("kg_extraction", "succeeded", output_summary={
+                "entities": len(all_entity_ids),
+                "relations": len(all_relation_ids),
+            })
+        return result
 
     except Exception as e:
+        if tracker:
+            await tracker.end_node("kg_extraction", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
         logger.error("KG extraction failed", error=str(e))
         return {
             "kg_entity_ids": existing_entity_ids,

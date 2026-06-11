@@ -8,6 +8,8 @@
 4. 重新组装综述
 """
 
+import traceback
+
 import structlog
 
 from ...services.citation_utils import (
@@ -32,6 +34,10 @@ async def section_revision_node(state: PipelineState) -> dict:
     3. 按首次出现顺序重编号
     4. 重新组装综述 + 参考文献列表
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("section_revision", "compute", index=9)
+
     logger.info("Starting section revision", invalid_citations=state.invalid_citation_count)
 
     db = get_database()
@@ -131,12 +137,22 @@ async def section_revision_node(state: PipelineState) -> dict:
             total_chars=len(final_review),
         )
 
-        return {
+        result = {
             "final_review": final_review,
             "invalid_citation_count": len(all_invalid),
             "status": "revised",
         }
+        if tracker:
+            await tracker.end_node("section_revision", "succeeded", output_summary={
+                "sections_revised": len(revised_contents),
+                "invalid_stripped": len(all_invalid),
+            })
+        return result
 
     except Exception as e:
+        if tracker:
+            await tracker.end_node("section_revision", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
         logger.error("Section revision failed", error=str(e))
         raise

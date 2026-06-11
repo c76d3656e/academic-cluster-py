@@ -79,6 +79,9 @@ class PipelineState(BaseModel):
     invalid_citation_count: int = 0
     needs_revision: bool = False
 
+    # === 可观测性 ===
+    tracker: Any = None  # PipelineTracker 实例（可选）
+
     # === 配置 ===
     config: dict = Field(default_factory=dict)
 

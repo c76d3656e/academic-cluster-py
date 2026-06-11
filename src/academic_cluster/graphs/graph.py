@@ -3,6 +3,7 @@ LangGraph 图定义
 
 定义主 Pipeline 图、子图，以及节点间的边和条件路由。
 使用 AsyncPostgresSaver 实现持久化 checkpoint，支持断点恢复。
+集成 PipelineTracker 实现可观测性。
 """
 
 import structlog
@@ -10,6 +11,7 @@ from langgraph.graph import END, StateGraph
 
 from .state import PipelineState
 from .checkpoint import with_audit
+from ..services.observability import PipelineTracker, LLMCallbackHandler
 from .nodes import (
     search_node,
     deduplicate_node,
@@ -256,6 +258,7 @@ def compile_graph(
     debug: bool = True,
     interrupt_before: list[str] | None = None,
     interrupt_after: list[str] | None = None,
+    callbacks: list | None = None,
 ):
     """
     编译图
@@ -265,6 +268,7 @@ def compile_graph(
         debug: 是否启用调试模式
         interrupt_before: 在哪些节点前中断（用于人工确认）
         interrupt_after: 在哪些节点后中断
+        callbacks: LangChain 回调列表（可选，用于 LLM 追踪）
 
     Returns:
         编译后的图
@@ -274,18 +278,23 @@ def compile_graph(
 
     workflow = create_pipeline_graph()
 
-    compiled = workflow.compile(
-        checkpointer=checkpointer,
-        debug=debug,
-        interrupt_before=interrupt_before,
-        interrupt_after=interrupt_after,
-    )
+    compile_kwargs = {
+        "checkpointer": checkpointer,
+        "debug": debug,
+        "interrupt_before": interrupt_before,
+        "interrupt_after": interrupt_after,
+    }
+    if callbacks:
+        compile_kwargs["callbacks"] = callbacks
+
+    compiled = workflow.compile(**compile_kwargs)
 
     logger.info(
         "Graph compiled",
         debug=debug,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
+        has_callbacks=callbacks is not None and len(callbacks) > 0,
     )
 
     return compiled
@@ -329,12 +338,17 @@ async def run_pipeline(
     # 获取持久化 checkpointer
     checkpointer = await get_checkpointer()
 
+    # 创建 PipelineTracker 实例，注入 db 持久化 callable
+    tracker = PipelineTracker(project_id, topic=query)
+    llm_callback = LLMCallbackHandler(tracker.token_tracker)
+
     # 如果自动确认，则不中断
     interrupt_before = [] if auto_confirm else ["user_confirm"]
     graph = compile_graph(
         checkpointer=checkpointer,
         debug=True,
         interrupt_before=interrupt_before,
+        callbacks=[llm_callback],
     )
 
     # LangGraph thread_id = project_id
@@ -343,16 +357,20 @@ async def run_pipeline(
     # 更新项目状态为 running
     await db.update_project_status(project_id, "running")
 
+    # 启动 tracker 并持久化 pipeline_run
+    await tracker.start(db_create_run=db.create_pipeline_run)
+
     if resume:
         # LangGraph 原生恢复：传 None 作为 input，自动从最后 checkpoint 继续
         logger.info("Resuming pipeline from checkpoint", project_id=project_id)
         input_data = None
     else:
-        # 新建运行
+        # 新建运行（注入 tracker）
         input_data = PipelineState(
             project_id=project_id,
             query=query,
             config=config or {},
+            tracker=tracker,
         )
 
     result = None
@@ -386,6 +404,12 @@ async def run_pipeline(
                         message=detail_msg,
                     )
 
+        # 追踪器结束并记录汇总
+        tracker_summary = await tracker.finish(
+            status="succeeded",
+            db_finish_run=db.finish_pipeline_run,
+        )
+
         # 更新项目状态为 completed
         await db.update_project_status(project_id, "completed")
 
@@ -397,6 +421,15 @@ async def run_pipeline(
             })
 
     except Exception as e:
+        # 追踪器记录失败状态
+        try:
+            await tracker.finish(
+                status="failed",
+                error_message=str(e),
+                db_finish_run=db.finish_pipeline_run,
+            )
+        except Exception:
+            pass
         logger.error("Pipeline failed", error=str(e), project_id=project_id)
         await db.update_project_status(project_id, "failed")
         if sse_manager:

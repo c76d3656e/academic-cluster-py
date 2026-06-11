@@ -8,6 +8,8 @@
 4. 确定性组装
 """
 
+import traceback
+
 import structlog
 
 from ...agents.writing import write_section
@@ -34,6 +36,10 @@ async def write_review_node(state: PipelineState) -> dict:
     3. 引用校验 + 修订
     4. 重编号 + 确定性组装
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("write_review", "llm", index=5)
+
     logger.info("Starting review writing", outline_id=state.outline_id)
 
     db = get_database()
@@ -303,7 +309,7 @@ async def write_review_node(state: PipelineState) -> dict:
             references=len(ref_mappings),
         )
 
-        return {
+        result = {
             "written_section_ids": written_section_ids,
             "final_review_id": final_review_id,
             "final_review": final_review,
@@ -311,9 +317,21 @@ async def write_review_node(state: PipelineState) -> dict:
             "status": "written",
         }
 
+        if tracker:
+            await tracker.end_node("write_review", "succeeded", output_summary={
+                "section_count": len(written_sections),
+                "total_chars": len(final_review),
+                "references": len(ref_mappings),
+            })
+        return result
+
     except Exception as e:
-        import traceback
-        logger.error("Review writing failed", error=str(e), traceback=traceback.format_exc())
+        import traceback as tb_mod
+        if tracker:
+            await tracker.end_node("write_review", "failed",
+                                   error_message=str(e),
+                                   error_traceback=tb_mod.format_exc())
+        logger.error("Review writing failed", error=str(e), traceback=tb_mod.format_exc())
         raise
 
 

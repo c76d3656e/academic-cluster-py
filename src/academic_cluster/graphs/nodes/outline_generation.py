@@ -2,6 +2,8 @@
 大纲生成节点 - 生成综述大纲
 """
 
+import traceback
+
 import structlog
 
 from ...agents.writing import generate_outline
@@ -24,6 +26,10 @@ async def outline_generation_node(state: PipelineState) -> dict:
 
     生成大纲后，图会中断等待用户确认。
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("outline_generation", "llm", index=4)
+
     logger.info("Starting outline generation")
 
     db = get_database()
@@ -136,13 +142,24 @@ async def outline_generation_node(state: PipelineState) -> dict:
             sections=len(outline_data.get("sections", [])),
         )
 
-        return {
+        result = {
             "outline_id": outline_id,
             "outline_data": outline_data,
             "status": "outline_generated",
         }
 
+        if tracker:
+            await tracker.end_node("outline_generation", "succeeded", output_summary={
+                "outline_id": outline_id,
+                "section_count": len(outline_data.get("sections", [])),
+            })
+        return result
+
     except Exception as e:
+        if tracker:
+            await tracker.end_node("outline_generation", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
         logger.error("Outline generation failed", error=str(e))
         raise  # 不再 fallback，直接抛出异常
 

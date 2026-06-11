@@ -2,6 +2,8 @@
 差距分析节点 - 评估社区的证据完整性
 """
 
+import traceback
+
 import structlog
 
 from ...services.database import get_database
@@ -20,6 +22,10 @@ async def gap_analysis_node(state: PipelineState) -> dict:
     - 生成针对性搜索查询
     - 决定是否需要补充搜索
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("gap_analysis", "compute", index=7)
+
     logger.info("Starting gap analysis")
 
     db = get_database()
@@ -72,12 +78,22 @@ async def gap_analysis_node(state: PipelineState) -> dict:
             attempt=state.refinement_attempt,
         )
 
-        return {
+        result = {
             "gap_analysis_ids": [g.get("cluster_id") for g in gaps],
             "needs_targeted_refinement": needs_refinement,
             "status": "gaps_analyzed",
         }
+        if tracker:
+            await tracker.end_node("gap_analysis", "succeeded", output_summary={
+                "gaps": len(gaps),
+                "needs_refinement": needs_refinement,
+            })
+        return result
 
     except Exception as e:
+        if tracker:
+            await tracker.end_node("gap_analysis", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
         logger.error("Gap analysis failed", error=str(e))
         raise  # 不再 fallback，直接抛出异常

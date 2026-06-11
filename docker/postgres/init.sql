@@ -250,6 +250,91 @@ CREATE TRIGGER update_written_content_updated_at BEFORE UPDATE ON written_conten
 CREATE TRIGGER update_pipeline_checkpoints_updated_at BEFORE UPDATE ON pipeline_checkpoints
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+-- ============================================================================
+-- Observability Tables: Pipeline Runs / Node Executions / LLM Calls
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL,
+    topic VARCHAR(500),
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    error_message TEXT,
+    total_nodes INTEGER DEFAULT 0,
+    completed_nodes INTEGER DEFAULT 0,
+    failed_nodes INTEGER DEFAULT 0,
+    total_prompt_tokens BIGINT DEFAULT 0,
+    total_completion_tokens BIGINT DEFAULT 0,
+    total_tokens BIGINT DEFAULT 0,
+    total_cost NUMERIC(12,6) DEFAULT 0,
+    total_llm_calls INTEGER DEFAULT 0,
+    elapsed_seconds FLOAT,
+    config JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP WITH TIME ZONE,
+    created_by UUID
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_project ON pipeline_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status ON pipeline_runs(status);
+CREATE INDEX IF NOT EXISTS idx_pipeline_runs_created ON pipeline_runs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS node_executions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pipeline_run_id UUID NOT NULL REFERENCES pipeline_runs(id) ON DELETE CASCADE,
+    node_name VARCHAR(100) NOT NULL,
+    node_type VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    index INTEGER,
+    error_message TEXT,
+    error_traceback TEXT,
+    input_summary JSONB,
+    output_summary JSONB,
+    prompt_tokens BIGINT DEFAULT 0,
+    completion_tokens BIGINT DEFAULT 0,
+    total_tokens BIGINT DEFAULT 0,
+    cost NUMERIC(12,6) DEFAULT 0,
+    llm_calls_count INTEGER DEFAULT 0,
+    retry_count INTEGER DEFAULT 0,
+    started_at TIMESTAMP WITH TIME ZONE,
+    finished_at TIMESTAMP WITH TIME ZONE,
+    elapsed_ms BIGINT,
+    metadata JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_node_exec_run ON node_executions(pipeline_run_id);
+CREATE INDEX IF NOT EXISTS idx_node_exec_name ON node_executions(node_name);
+CREATE INDEX IF NOT EXISTS idx_node_exec_status ON node_executions(status);
+
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    pipeline_run_id UUID REFERENCES pipeline_runs(id) ON DELETE CASCADE,
+    node_execution_id UUID REFERENCES node_executions(id) ON DELETE CASCADE,
+    call_type VARCHAR(20) NOT NULL,
+    provider_name VARCHAR(100) NOT NULL,
+    model_name VARCHAR(200) NOT NULL,
+    api_base_url VARCHAR(500),
+    api_key_hint VARCHAR(20),
+    status VARCHAR(20) NOT NULL DEFAULT 'success',
+    error_message TEXT,
+    http_status_code INTEGER,
+    is_stream BOOLEAN DEFAULT FALSE,
+    prompt_tokens INTEGER DEFAULT 0,
+    completion_tokens INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    cost NUMERIC(12,8) DEFAULT 0,
+    latency_ms BIGINT NOT NULL,
+    first_token_ms BIGINT,
+    input_preview TEXT,
+    output_preview TEXT,
+    request_metadata JSONB,
+    retry_of UUID,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_run ON llm_calls(pipeline_run_id);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_node ON llm_calls(node_execution_id);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_provider ON llm_calls(provider_name, model_name);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status);
+
 -- Function for KNN vector search
 CREATE OR REPLACE FUNCTION search_similar_papers(
     query_embedding vector(1024),

@@ -6,6 +6,7 @@
 
 import asyncio
 import json
+import traceback
 import uuid
 
 import structlog
@@ -83,6 +84,10 @@ async def targeted_refine_node(state: PipelineState) -> dict:
     根据差距分析结果，使用 LLM 生成有针对性的补充搜索 query，
     然后搜索新论文并合并到现有论文列表。
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("targeted_refine", "llm", index=10)
+
     logger.info(
         "Starting targeted refinement",
         attempt=state.refinement_attempt + 1,
@@ -162,14 +167,24 @@ async def targeted_refine_node(state: PipelineState) -> dict:
             attempt=state.refinement_attempt + 1,
         )
 
-        return {
+        result = {
             "paper_ids": new_paper_ids,
             "refinement_attempt": state.refinement_attempt + 1,
             "needs_targeted_refinement": False,
             "status": "refined",
         }
+        if tracker:
+            await tracker.end_node("targeted_refine", "succeeded", output_summary={
+                "new_papers": len(new_paper_ids),
+                "queries": len(targeted_queries),
+            })
+        return result
 
     except Exception as e:
+        if tracker:
+            await tracker.end_node("targeted_refine", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
         logger.error("Targeted refinement failed", error=str(e))
         return {
             "paper_ids": [],

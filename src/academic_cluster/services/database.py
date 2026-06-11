@@ -1093,6 +1093,401 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
+    # =========================================================================
+    # 可观测性：Pipeline Runs / Node Executions / LLM Calls
+    # =========================================================================
+
+    async def create_pipeline_run(
+        self,
+        project_id: str,
+        topic: str | None = None,
+        config: dict | None = None,
+        created_by: str | None = None,
+    ) -> str:
+        """创建 Pipeline 运行记录，返回 run_id"""
+        run_id = str(uuid.uuid4())
+
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO pipeline_runs (id, project_id, topic, config, created_by)
+                    VALUES (:id, :project_id, :topic, :config, :created_by)
+                """),
+                {
+                    "id": run_id,
+                    "project_id": project_id,
+                    "topic": topic,
+                    "config": json.dumps(config) if config else None,
+                    "created_by": created_by,
+                }
+            )
+
+        logger.info("Created pipeline run", run_id=run_id, project_id=project_id)
+        return run_id
+
+    async def finish_pipeline_run(
+        self,
+        run_id: str,
+        status: str,
+        error_message: str | None = None,
+    ) -> None:
+        """结束 Pipeline 运行"""
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    UPDATE pipeline_runs
+                    SET status = :status,
+                        error_message = :error_message,
+                        finished_at = NOW(),
+                        elapsed_seconds = EXTRACT(EPOCH FROM (NOW() - created_at))
+                    WHERE id = :id
+                """),
+                {
+                    "id": run_id,
+                    "status": status,
+                    "error_message": error_message,
+                }
+            )
+
+        logger.info("Finished pipeline run", run_id=run_id, status=status)
+
+    async def update_pipeline_run_stats(
+        self,
+        run_id: str,
+        total_tokens: int = 0,
+        total_cost: float = 0,
+        llm_calls_count: int = 0,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_nodes: int | None = None,
+        completed_nodes: int | None = None,
+        failed_nodes: int | None = None,
+    ) -> None:
+        """更新 Pipeline 运行的汇总统计"""
+        set_parts = [
+            "total_prompt_tokens = :prompt_tokens",
+            "total_completion_tokens = :completion_tokens",
+            "total_tokens = :total_tokens",
+            "total_cost = :total_cost",
+            "total_llm_calls = :llm_calls_count",
+        ]
+        params: dict[str, Any] = {
+            "id": run_id,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "total_cost": total_cost,
+            "llm_calls_count": llm_calls_count,
+        }
+
+        if total_nodes is not None:
+            set_parts.append("total_nodes = :total_nodes")
+            params["total_nodes"] = total_nodes
+        if completed_nodes is not None:
+            set_parts.append("completed_nodes = :completed_nodes")
+            params["completed_nodes"] = completed_nodes
+        if failed_nodes is not None:
+            set_parts.append("failed_nodes = :failed_nodes")
+            params["failed_nodes"] = failed_nodes
+
+        async with self.session() as session:
+            await session.execute(
+                text(f"UPDATE pipeline_runs SET {', '.join(set_parts)} WHERE id = :id"),
+                params,
+            )
+
+    async def create_node_execution(
+        self,
+        pipeline_run_id: str,
+        node_name: str,
+        node_type: str,
+        index: int | None = None,
+    ) -> str:
+        """创建节点执行记录，返回 execution_id"""
+        execution_id = str(uuid.uuid4())
+
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO node_executions (id, pipeline_run_id, node_name, node_type, index, started_at)
+                    VALUES (:id, :pipeline_run_id, :node_name, :node_type, :index, NOW())
+                """),
+                {
+                    "id": execution_id,
+                    "pipeline_run_id": pipeline_run_id,
+                    "node_name": node_name,
+                    "node_type": node_type,
+                    "index": index,
+                }
+            )
+
+        logger.debug("Created node execution", execution_id=execution_id, node=node_name)
+        return execution_id
+
+    async def finish_node_execution(
+        self,
+        execution_id: str,
+        status: str,
+        error_message: str | None = None,
+        error_traceback: str | None = None,
+        input_summary: dict | None = None,
+        output_summary: dict | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        cost: float = 0,
+        llm_calls_count: int = 0,
+        retry_count: int = 0,
+        metadata: dict | None = None,
+    ) -> None:
+        """结束节点执行"""
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    UPDATE node_executions
+                    SET status = :status,
+                        error_message = :error_message,
+                        error_traceback = :error_traceback,
+                        input_summary = :input_summary,
+                        output_summary = :output_summary,
+                        prompt_tokens = :prompt_tokens,
+                        completion_tokens = :completion_tokens,
+                        total_tokens = :total_tokens,
+                        cost = :cost,
+                        llm_calls_count = :llm_calls_count,
+                        retry_count = :retry_count,
+                        finished_at = NOW(),
+                        elapsed_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
+                        metadata = :metadata
+                    WHERE id = :id
+                """),
+                {
+                    "id": execution_id,
+                    "status": status,
+                    "error_message": error_message,
+                    "error_traceback": error_traceback,
+                    "input_summary": json.dumps(input_summary) if input_summary else None,
+                    "output_summary": json.dumps(output_summary) if output_summary else None,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "cost": cost,
+                    "llm_calls_count": llm_calls_count,
+                    "retry_count": retry_count,
+                    "metadata": json.dumps(metadata) if metadata else None,
+                }
+            )
+
+        logger.debug("Finished node execution", execution_id=execution_id, status=status)
+
+    async def create_llm_call(
+        self,
+        pipeline_run_id: str,
+        node_execution_id: str,
+        call_type: str,
+        provider_name: str,
+        model_name: str,
+        api_base_url: str | None = None,
+        api_key_hint: str | None = None,
+        is_stream: bool = False,
+        latency_ms: int = 0,
+        first_token_ms: int | None = None,
+        input_preview: str | None = None,
+        output_preview: str | None = None,
+        request_metadata: dict | None = None,
+        retry_of: str | None = None,
+    ) -> str:
+        """创建 LLM 调用记录（先插入骨架，完成时更新统计）"""
+        call_id = str(uuid.uuid4())
+
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO llm_calls (
+                        id, pipeline_run_id, node_execution_id, call_type,
+                        provider_name, model_name, api_base_url, api_key_hint,
+                        is_stream, latency_ms, first_token_ms,
+                        input_preview, output_preview, request_metadata, retry_of
+                    ) VALUES (
+                        :id, :pipeline_run_id, :node_execution_id, :call_type,
+                        :provider_name, :model_name, :api_base_url, :api_key_hint,
+                        :is_stream, :latency_ms, :first_token_ms,
+                        :input_preview, :output_preview, :request_metadata, :retry_of
+                    )
+                """),
+                {
+                    "id": call_id,
+                    "pipeline_run_id": pipeline_run_id,
+                    "node_execution_id": node_execution_id,
+                    "call_type": call_type,
+                    "provider_name": provider_name,
+                    "model_name": model_name,
+                    "api_base_url": api_base_url,
+                    "api_key_hint": api_key_hint,
+                    "is_stream": is_stream,
+                    "latency_ms": latency_ms,
+                    "first_token_ms": first_token_ms,
+                    "input_preview": input_preview,
+                    "output_preview": output_preview,
+                    "request_metadata": json.dumps(request_metadata) if request_metadata else None,
+                    "retry_of": retry_of,
+                }
+            )
+
+        return call_id
+
+    async def finish_llm_call(
+        self,
+        call_id: str,
+        status: str = "success",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cost: float = 0,
+        error_message: str | None = None,
+        http_status_code: int | None = None,
+        latency_ms: int | None = None,
+        output_preview: str | None = None,
+    ) -> None:
+        """完成 LLM 调用，更新 token 统计和状态"""
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    UPDATE llm_calls
+                    SET status = :status,
+                        prompt_tokens = :prompt_tokens,
+                        completion_tokens = :completion_tokens,
+                        total_tokens = :prompt_tokens + :completion_tokens,
+                        cost = :cost,
+                        error_message = :error_message,
+                        http_status_code = :http_status_code,
+                        latency_ms = COALESCE(:latency_ms, latency_ms),
+                        output_preview = COALESCE(:output_preview, output_preview)
+                    WHERE id = :id
+                """),
+                {
+                    "id": call_id,
+                    "status": status,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cost": cost,
+                    "error_message": error_message,
+                    "http_status_code": http_status_code,
+                    "latency_ms": latency_ms,
+                    "output_preview": output_preview,
+                }
+            )
+
+    async def get_pipeline_run_stats(self, run_id: str) -> dict | None:
+        """获取 Pipeline 运行的汇总统计"""
+        async with self.session() as session:
+            result = await session.execute(
+                text("SELECT * FROM pipeline_runs WHERE id = :id"),
+                {"id": run_id},
+            )
+            row = result.fetchone()
+
+        if not row:
+            return None
+
+        return _convert_uuid_fields(dict(row._mapping))
+
+    async def get_node_executions(self, run_id: str) -> list[dict]:
+        """获取 Pipeline 运行的所有节点执行记录"""
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT * FROM node_executions
+                    WHERE pipeline_run_id = :run_id
+                    ORDER BY COALESCE(index, 0), started_at
+                """),
+                {"run_id": run_id},
+            )
+            rows = result.fetchall()
+
+        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
+
+    async def get_llm_calls(
+        self,
+        run_id: str,
+        node_name: str | None = None,
+    ) -> list[dict]:
+        """获取 LLM 调用记录，可按 node_name 过滤"""
+        async with self.session() as session:
+            if node_name:
+                result = await session.execute(
+                    text("""
+                        SELECT lc.* FROM llm_calls lc
+                        JOIN node_executions ne ON lc.node_execution_id = ne.id
+                        WHERE lc.pipeline_run_id = :run_id AND ne.node_name = :node_name
+                        ORDER BY lc.created_at
+                    """),
+                    {"run_id": run_id, "node_name": node_name},
+                )
+            else:
+                result = await session.execute(
+                    text("""
+                        SELECT * FROM llm_calls
+                        WHERE pipeline_run_id = :run_id
+                        ORDER BY created_at
+                    """),
+                    {"run_id": run_id},
+                )
+            rows = result.fetchall()
+
+        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
+
+    async def get_provider_usage_summary(
+        self,
+        run_id: str | None = None,
+        project_id: str | None = None,
+        days: int = 30,
+    ) -> list[dict]:
+        """按 provider/model 汇总用量（用于成本分析）"""
+        conditions = ["lc.created_at >= NOW() - (:days || ' days')::interval"]
+        params: dict[str, Any] = {"days": days}
+
+        if run_id:
+            conditions.append("lc.pipeline_run_id = :run_id")
+            params["run_id"] = run_id
+        if project_id:
+            conditions.append("pr.project_id = :project_id")
+            params["project_id"] = project_id
+
+        where_clause = " AND ".join(conditions)
+
+        join_clause = ""
+        if project_id and not run_id:
+            join_clause = "JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id"
+
+        async with self.session() as session:
+            result = await session.execute(
+                text(f"""
+                    SELECT
+                        lc.provider_name,
+                        lc.model_name,
+                        lc.call_type,
+                        COUNT(*) AS call_count,
+                        SUM(CASE WHEN lc.status = 'success' THEN 1 ELSE 0 END) AS success_count,
+                        SUM(CASE WHEN lc.status = 'error' THEN 1 ELSE 0 END) AS error_count,
+                        SUM(lc.prompt_tokens) AS total_prompt_tokens,
+                        SUM(lc.completion_tokens) AS total_completion_tokens,
+                        SUM(lc.total_tokens) AS total_tokens,
+                        SUM(lc.cost) AS total_cost,
+                        AVG(lc.latency_ms) AS avg_latency_ms,
+                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY lc.latency_ms) AS p50_latency_ms,
+                        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY lc.latency_ms) AS p95_latency_ms
+                    FROM llm_calls lc
+                    {join_clause}
+                    WHERE {where_clause}
+                    GROUP BY lc.provider_name, lc.model_name, lc.call_type
+                    ORDER BY total_cost DESC
+                """),
+                params,
+            )
+            rows = result.fetchall()
+
+        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
+
 
 # 全局数据库实例
 _db_service: Optional[DatabaseService] = None

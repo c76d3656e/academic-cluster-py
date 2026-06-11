@@ -6,6 +6,8 @@
 - 计算覆盖率、无效引用数、论文覆盖率
 """
 
+import traceback
+
 import structlog
 
 from ...services.citation_utils import validate_citations
@@ -25,6 +27,10 @@ async def coverage_audit_node(state: PipelineState) -> dict:
     - 计算论文覆盖率
     - 决定是否需要修订
     """
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("coverage_audit", "compute", index=8)
+
     logger.info("Starting coverage audit")
 
     db = get_database()
@@ -85,12 +91,22 @@ async def coverage_audit_node(state: PipelineState) -> dict:
             needs_revision=needs_revision,
         )
 
-        return {
+        result = {
             "coverage_score": coverage_score,
             "invalid_citation_count": total_invalid,
             "status": "audited",
         }
+        if tracker:
+            await tracker.end_node("coverage_audit", "succeeded", output_summary={
+                "coverage_score": coverage_score,
+                "invalid_citations": total_invalid,
+            })
+        return result
 
     except Exception as e:
+        if tracker:
+            await tracker.end_node("coverage_audit", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
         logger.error("Coverage audit failed", error=str(e))
         raise

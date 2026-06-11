@@ -386,6 +386,69 @@ async def get_visualization(
 
 
 # =============================================================================
+# 可观测性路由
+# =============================================================================
+
+@router.get("/runs/{run_id}/stats")
+async def get_run_stats(
+    run_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseService = Depends(get_database),
+):
+    """获取 Pipeline 运行统计"""
+    stats = await db.get_pipeline_run_stats(run_id)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+    return stats
+
+
+@router.get("/runs/{run_id}/nodes")
+async def get_run_nodes(
+    run_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseService = Depends(get_database),
+):
+    """获取 Pipeline 运行的节点执行列表"""
+    stats = await db.get_pipeline_run_stats(run_id)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+    nodes = await db.get_node_executions(run_id)
+    return {"run_id": run_id, "nodes": nodes}
+
+
+@router.get("/runs/{run_id}/llm-calls")
+async def get_run_llm_calls(
+    run_id: str,
+    node_name: str | None = None,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseService = Depends(get_database),
+):
+    """获取 Pipeline 运行的 LLM 调用记录"""
+    stats = await db.get_pipeline_run_stats(run_id)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+    calls = await db.get_llm_calls(run_id, node_name=node_name)
+    return {"run_id": run_id, "llm_calls": calls}
+
+
+@router.get("/usage/summary")
+async def get_usage_summary(
+    run_id: str | None = None,
+    project_id: str | None = None,
+    days: int = 30,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseService = Depends(get_database),
+):
+    """获取用量汇总（按 provider/model 分组）"""
+    summary = await db.get_provider_usage_summary(
+        run_id=run_id,
+        project_id=project_id,
+        days=days,
+    )
+    return {"days": days, "summary": summary}
+
+
+# =============================================================================
 # WebSocket 路由（实时更新）
 # =============================================================================
 

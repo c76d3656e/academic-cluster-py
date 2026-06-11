@@ -4,6 +4,8 @@
 使用 Provider Pool（LiteLLM Router）自动负载均衡多个 Embedding 端点。
 """
 
+import traceback
+
 import structlog
 
 from ...services.database import get_database
@@ -39,76 +41,94 @@ async def embedding_node(state: PipelineState) -> dict:
     - 存储到向量数据库
     - 返回嵌入 ID 列表
     """
-    logger.info("Starting embedding generation", paper_count=len(state.paper_ids))
+    tracker = state.tracker if hasattr(state, 'tracker') else None
+    if tracker:
+        await tracker.begin_node("embedding", "compute", index=1)
 
-    db = get_database()
-    cache = get_cache()
-    vector_store = get_vector_store()
+    try:
+        logger.info("Starting embedding generation", paper_count=len(state.paper_ids))
 
-    # 获取论文详情
-    papers = await db.get_papers_by_ids(state.paper_ids)
+        db = get_database()
+        cache = get_cache()
+        vector_store = get_vector_store()
 
-    embedding_ids = []
-    embeddings_data = []
+        # 获取论文详情
+        papers = await db.get_papers_by_ids(state.paper_ids)
 
-    for paper in papers:
-        paper_id = paper.get("id")
-        title = paper.get("title", "")
-        abstract = paper.get("abstract", "")
-        text = f"{title} {abstract}".strip()
+        embedding_ids = []
+        embeddings_data = []
 
-        if not text:
-            logger.warning("Skipping paper with no text", paper_id=paper_id)
-            continue
+        for paper in papers:
+            paper_id = paper.get("id")
+            title = paper.get("title", "")
+            abstract = paper.get("abstract", "")
+            text = f"{title} {abstract}".strip()
 
-        # 检查缓存
-        cached_embedding = await cache.get_embedding(paper_id, "bge-m3")
-        if cached_embedding:
-            embedding = cached_embedding
-        else:
-            try:
-                # 生成嵌入（通过 Provider Pool 自动负载均衡）
-                embedding = await generate_embedding(text)
-                # 缓存嵌入
-                await cache.set_embedding(paper_id, "bge-m3", embedding)
-            except Exception as e:
-                logger.error("Failed to generate embedding", paper_id=paper_id, error=str(e))
+            if not text:
+                logger.warning("Skipping paper with no text", paper_id=paper_id)
                 continue
 
-        embedding_id = f"emb_{paper_id}"
-        embedding_ids.append(embedding_id)
-        embeddings_data.append({
-            "id": embedding_id,
-            "paper_id": paper_id,
-            "embedding": embedding,
-            "text": text[:500],  # 存储部分文本用于检索
-        })
+            # 检查缓存
+            cached_embedding = await cache.get_embedding(paper_id, "bge-m3")
+            if cached_embedding:
+                embedding = cached_embedding
+            else:
+                try:
+                    # 生成嵌入（通过 Provider Pool 自动负载均衡）
+                    embedding = await generate_embedding(text)
+                    # 缓存嵌入
+                    await cache.set_embedding(paper_id, "bge-m3", embedding)
+                except Exception as e:
+                    logger.error("Failed to generate embedding", paper_id=paper_id, error=str(e))
+                    continue
 
-    # 批量存储到向量数据库
-    if embeddings_data:
-        try:
-            await vector_store.add_embeddings(
-                paper_ids=[e["paper_id"] for e in embeddings_data],
-                embeddings=[e["embedding"] for e in embeddings_data],
+            embedding_id = f"emb_{paper_id}"
+            embedding_ids.append(embedding_id)
+            embeddings_data.append({
+                "id": embedding_id,
+                "paper_id": paper_id,
+                "embedding": embedding,
+                "text": text[:500],  # 存储部分文本用于检索
+            })
+
+        # 批量存储到向量数据库
+        if embeddings_data:
+            try:
+                await vector_store.add_embeddings(
+                    paper_ids=[e["paper_id"] for e in embeddings_data],
+                    embeddings=[e["embedding"] for e in embeddings_data],
+                )
+            except Exception as e:
+                logger.error("Failed to store embeddings in vector DB", error=str(e))
+
+        # 保存嵌入记录到数据库
+        for emb_data in embeddings_data:
+            await db.save_embedding(
+                paper_id=emb_data["paper_id"],
+                embedding=emb_data["embedding"],
+                model_name="bge-m3",
             )
-        except Exception as e:
-            logger.error("Failed to store embeddings in vector DB", error=str(e))
 
-    # 保存嵌入记录到数据库
-    for emb_data in embeddings_data:
-        await db.save_embedding(
-            paper_id=emb_data["paper_id"],
-            embedding=emb_data["embedding"],
-            model_name="bge-m3",
+        logger.info(
+            "Embedding generation completed",
+            papers_processed=len(papers),
+            embeddings_created=len(embedding_ids),
         )
 
-    logger.info(
-        "Embedding generation completed",
-        papers_processed=len(papers),
-        embeddings_created=len(embedding_ids),
-    )
+        result = {
+            "embedding_ids": embedding_ids,
+            "status": "embedded",
+        }
 
-    return {
-        "embedding_ids": embedding_ids,
-        "status": "embedded",
-    }
+        if tracker:
+            await tracker.end_node("embedding", "succeeded", output_summary={
+                "embedding_count": len(embedding_ids),
+            })
+        return result
+
+    except Exception as e:
+        if tracker:
+            await tracker.end_node("embedding", "failed",
+                                   error_message=str(e),
+                                   error_traceback=traceback.format_exc())
+        raise
