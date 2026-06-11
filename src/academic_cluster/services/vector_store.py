@@ -1,116 +1,101 @@
 """
 向量存储服务
 
-提供向量数据库访问（ChromaDB/pgvector）。
+使用 PostgreSQL pgvector 进行向量存储和检索。
 """
 
 from typing import Optional
 
 import structlog
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import get_settings
+from .database import get_database
 
 logger = structlog.get_logger()
 
 
 class VectorStoreService:
-    """向量存储服务"""
+    """基于 pgvector 的向量存储服务"""
 
-    def __init__(self, provider: Optional[str] = None):
-        settings = get_settings()
-
-        if provider is None:
-            provider = settings.vector_db.provider
-
-        self.provider = provider
-        self._client = None
-        self._collection = None
-
-        logger.info("Vector store service initialized", provider=provider)
-
-    async def _get_client(self):
-        """获取向量数据库客户端"""
-        if self._client is None:
-            if self.provider == "chromadb":
-                import chromadb
-                settings = get_settings()
-                self._client = chromadb.HttpClient(
-                    host=settings.vector_db.host,
-                    port=settings.vector_db.port,
-                )
-            else:
-                raise ValueError(f"Unsupported vector store provider: {self.provider}")
-
-        return self._client
-
-    async def _get_collection(self, collection_name: str = "papers"):
-        """获取或创建集合"""
-        client = await self._get_client()
-
-        if self._collection is None:
-            self._collection = client.get_or_create_collection(
-                name=collection_name,
-                metadata={"hnsw:space": "cosine"},
-            )
-
-        return self._collection
+    def __init__(self):
+        self.db = get_database()
+        logger.info("Vector store service initialized (pgvector)")
 
     async def add_embeddings(
         self,
-        ids: list[str],
+        paper_ids: list[str],
         embeddings: list[list[float]],
-        metadatas: Optional[list[dict]] = None,
-        documents: Optional[list[str]] = None,
+        model_name: str = "bge-m3",
     ):
         """
         添加嵌入向量
 
         Args:
-            ids: 向量 ID 列表
+            paper_ids: 论文 ID 列表
             embeddings: 嵌入向量列表
-            metadatas: 元数据列表
-            documents: 文档文本列表
+            model_name: 模型名称
         """
-        collection = await self._get_collection()
+        async with self.db.session() as session:
+            for paper_id, embedding in zip(paper_ids, embeddings):
+                # 使用 UPSERT 语义
+                await session.execute(
+                    text("""
+                        INSERT INTO embeddings (paper_id, model_name, vector, dimensions)
+                        VALUES (:paper_id, :model_name, :vector, :dimensions)
+                        ON CONFLICT (paper_id, model_name)
+                        DO UPDATE SET vector = :vector, dimensions = :dimensions
+                    """),
+                    {
+                        "paper_id": paper_id,
+                        "model_name": model_name,
+                        "vector": str(embedding),
+                        "dimensions": len(embedding),
+                    }
+                )
 
-        collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            documents=documents,
-        )
+        logger.info("Added embeddings", count=len(paper_ids))
 
-        logger.info("Added embeddings", count=len(ids))
-
-    async def query(
+    async def search_similar(
         self,
         query_embedding: list[float],
-        n_results: int = 10,
-        where: Optional[dict] = None,
-    ) -> dict:
+        limit: int = 10,
+        threshold: float = 0.5,
+    ) -> list[dict]:
         """
-        查询相似向量
+        搜索相似向量
 
         Args:
             query_embedding: 查询向量
-            n_results: 返回结果数
-            where: 过滤条件
+            limit: 返回结果数
+            threshold: 相似度阈值
 
         Returns:
-            查询结果
+            相似论文列表
         """
-        collection = await self._get_collection()
+        async with self.db.session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT paper_id, similarity
+                    FROM search_similar_papers(:query_embedding, :limit, :threshold)
+                """),
+                {
+                    "query_embedding": str(query_embedding),
+                    "limit": limit,
+                    "threshold": threshold,
+                }
+            )
 
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where,
-        )
+            rows = result.fetchall()
 
-        return results
+        return [
+            {"paper_id": str(row[0]), "similarity": row[1]}
+            for row in rows
+        ]
 
     async def get_knn_graph(
         self,
+        paper_ids: list[str],
         k: int = 10,
         threshold: float = 0.5,
     ) -> list[dict]:
@@ -118,55 +103,53 @@ class VectorStoreService:
         获取 KNN 图
 
         Args:
+            paper_ids: 论文 ID 列表
             k: 每个节点的近邻数
             threshold: 相似度阈值
 
         Returns:
             边列表 [{source, target, weight}]
         """
-        collection = await self._get_collection()
-
-        # 获取所有向量
-        all_data = collection.get(include=["embeddings"])
-        ids = all_data["ids"]
-        embeddings = all_data["embeddings"]
-
         edges = []
-        for i, (id_a, emb_a) in enumerate(zip(ids, embeddings)):
-            # 查询最近邻
-            results = collection.query(
-                query_embeddings=[emb_a],
-                n_results=k + 1,  # +1 因为包含自身
-            )
 
-            for j, (id_b, distance) in enumerate(zip(
-                results["ids"][0],
-                results["distances"][0],
-            )):
-                if id_a != id_b:
-                    # ChromaDB 返回距离，需要转换为相似度
-                    similarity = 1 - distance
-                    if similarity >= threshold:
+        async with self.db.session() as session:
+            for paper_id in paper_ids:
+                # 获取该论文的嵌入向量
+                result = await session.execute(
+                    text("""
+                        SELECT vector FROM embeddings
+                        WHERE paper_id = :paper_id
+                        LIMIT 1
+                    """),
+                    {"paper_id": paper_id}
+                )
+                row = result.fetchone()
+
+                if not row or not row[0]:
+                    continue
+
+                vector = row[0]
+
+                # 搜索相似论文
+                similar = await self.search_similar(
+                    query_embedding=vector,
+                    limit=k + 1,
+                    threshold=threshold,
+                )
+
+                for item in similar:
+                    if item["paper_id"] != paper_id:
                         edges.append({
-                            "source": id_a,
-                            "target": id_b,
-                            "weight": similarity,
+                            "source": paper_id,
+                            "target": item["paper_id"],
+                            "weight": item["similarity"],
                         })
 
         logger.info("KNN graph built", edges=len(edges))
-
         return edges
-
-    async def delete_collection(self, collection_name: str = "papers"):
-        """删除集合"""
-        client = await self._get_client()
-        client.delete_collection(collection_name)
-        logger.info("Collection deleted", name=collection_name)
 
     async def close(self):
         """关闭连接"""
-        self._client = None
-        self._collection = None
         logger.info("Vector store connection closed")
 
 
@@ -180,11 +163,3 @@ def get_vector_store() -> VectorStoreService:
     if _vector_store is None:
         _vector_store = VectorStoreService()
     return _vector_store
-
-
-async def close_vector_store():
-    """关闭向量存储连接"""
-    global _vector_store
-    if _vector_store is not None:
-        await _vector_store.close()
-        _vector_store = None
