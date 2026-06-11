@@ -8,6 +8,7 @@ import structlog
 
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -27,6 +28,11 @@ async def finalize_node(state: PipelineState) -> dict:
         "Finalizing pipeline",
         project_id=state.project_id,
         query=state.query,
+    )
+
+    await send_progress(
+        state.project_id, "finalize",
+        "生成最终产出...",
     )
 
     db = get_database()
@@ -78,6 +84,12 @@ async def finalize_node(state: PipelineState) -> dict:
         }
 
         logger.info("Pipeline completed successfully", stats=stats)
+
+        await send_progress(
+            state.project_id, "finalize",
+            "Pipeline 执行完成",
+            progress=1.0,
+        )
 
         return {
             "status": "completed",

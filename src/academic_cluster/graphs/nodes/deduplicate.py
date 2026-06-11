@@ -6,6 +6,7 @@ import structlog
 
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -59,6 +60,12 @@ async def deduplicate_node(state: PipelineState) -> dict:
         original_count=len(state.paper_ids),
         deduplicated_count=len(deduplicated_ids),
         removed=len(state.paper_ids) - len(deduplicated_ids),
+    )
+
+    await send_progress(
+        state.project_id, "deduplicate",
+        f"去重完成，保留 {len(deduplicated_ids)} 篇",
+        detail={"removed": len(state.paper_ids) - len(deduplicated_ids)},
     )
 
     return {

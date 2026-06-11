@@ -4,6 +4,7 @@
 使用 Provider Pool 自动负载均衡多个 Rerank 端点。
 """
 
+import asyncio
 import traceback
 
 import httpx
@@ -11,15 +12,17 @@ import structlog
 
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
 
-async def rerank_papers(query: str, papers: list[dict]) -> list[dict]:
+async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) -> list[dict]:
     """
     使用 Rerank 模型对论文进行重排序
 
     通过 Provider Pool 自动选择可用的 Rerank 端点。
+    超时保护：整体调用超过 timeout 秒则抛出 TimeoutError。
     """
     from ...services.provider_pool import get_rerank_pool
 
@@ -64,7 +67,10 @@ async def rerank_papers(query: str, papers: list[dict]) -> list[dict]:
         reranked.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
         return reranked
 
-    return await pool.execute(_do_rerank)
+    return await asyncio.wait_for(
+        pool.execute(_do_rerank),
+        timeout=timeout,
+    )
 
 
 async def rerank_node(state: PipelineState) -> dict:
@@ -81,6 +87,11 @@ async def rerank_node(state: PipelineState) -> dict:
         await tracker.begin_node("rerank", "compute", index=2)
 
     logger.info("Starting reranking", paper_count=len(state.paper_ids))
+
+    await send_progress(
+        state.project_id, "rerank",
+        f"正在重排序 {len(state.paper_ids)} 篇论文...",
+    )
 
     config = state.config or {}
     core_count = config.get("core_reference_count", 80)
@@ -112,6 +123,11 @@ async def rerank_node(state: PipelineState) -> dict:
             auxiliary_count=len(auxiliary_paper_ids),
         )
 
+        await send_progress(
+            state.project_id, "rerank",
+            f"重排序完成，核心 {len(core_paper_ids)} 篇，辅助 {len(auxiliary_paper_ids)} 篇",
+        )
+
         result = {
             "core_paper_ids": core_paper_ids,
             "auxiliary_paper_ids": auxiliary_paper_ids,
@@ -125,10 +141,31 @@ async def rerank_node(state: PipelineState) -> dict:
             })
         return result
 
+    except asyncio.TimeoutError:
+        error_msg = f"Reranking timed out after 120s for {len(papers)} papers"
+        logger.error(
+            "Reranking timed out",
+            project_id=state.project_id,
+            paper_count=len(papers),
+            query=state.query,
+            timeout_seconds=120,
+        )
+        if tracker:
+            await tracker.end_node("rerank", "failed",
+                                   error_message=error_msg)
+        raise TimeoutError(error_msg)
     except Exception as e:
+        logger.error(
+            "Reranking failed",
+            project_id=state.project_id,
+            paper_count=len(papers),
+            query=state.query,
+            error=str(e),
+            error_type=type(e).__name__,
+            traceback=traceback.format_exc(),
+        )
         if tracker:
             await tracker.end_node("rerank", "failed",
                                    error_message=str(e),
                                    error_traceback=traceback.format_exc())
-        logger.error("Reranking failed", error=str(e))
-        raise  # 不再 fallback，直接抛出异常
+        raise

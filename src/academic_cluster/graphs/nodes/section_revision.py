@@ -20,6 +20,7 @@ from ...services.citation_utils import (
 )
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -39,6 +40,11 @@ async def section_revision_node(state: PipelineState) -> dict:
         await tracker.begin_node("section_revision", "compute", index=9)
 
     logger.info("Starting section revision", invalid_citations=state.invalid_citation_count)
+
+    await send_progress(
+        state.project_id, "section_revision",
+        f"章节修订中，处理 {state.invalid_citation_count} 个无效引用...",
+    )
 
     db = get_database()
 
@@ -135,6 +141,11 @@ async def section_revision_node(state: PipelineState) -> dict:
             invalid_stripped=len(all_invalid),
             final_references=len(ref_mappings),
             total_chars=len(final_review),
+        )
+
+        await send_progress(
+            state.project_id, "section_revision",
+            f"章节修订完成，移除 {len(all_invalid)} 个无效引用",
         )
 
         result = {

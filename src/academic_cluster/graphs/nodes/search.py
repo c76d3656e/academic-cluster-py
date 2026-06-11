@@ -17,6 +17,7 @@ from ...prompts import get_parse_topic_prompt
 from ...tools.academic_search import search_all_sources
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -92,8 +93,15 @@ async def search_node(state: PipelineState) -> dict:
         # 使用 LLM 生成优化的搜索 queries
         queries = await _generate_search_queries(state.query)
 
+        await send_progress(
+            state.project_id, "search",
+            f"正在搜索 {len(sources)} 个学术源...",
+            detail={"sources": sources, "queries": queries},
+        )
+
         # 并行搜索所有 queries × 所有数据源
         all_papers = []
+        source_counts: dict[str, int] = {s: 0 for s in sources}
         search_tasks = [
             search_all_sources(
                 query=q,
@@ -103,15 +111,68 @@ async def search_node(state: PipelineState) -> dict:
             for q in queries
         ]
 
-        results = await asyncio.gather(*search_tasks, return_exceptions=True)
+        # 总体超时保护：单个 query 搜索超过 120 秒则跳过
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*search_tasks, return_exceptions=True),
+                timeout=120.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Search timed out after 120s",
+                query=state.query,
+                queries=queries,
+                sources=sources,
+            )
+            # 尝试从已完成的任务中收集结果
+            results = []
+            for task in search_tasks:
+                if task.done() and not task.cancelled():
+                    try:
+                        results.append(task.result())
+                    except Exception:
+                        results.append([])
+                else:
+                    task.cancel()
+                    results.append([])
+
         for result in results:
             if isinstance(result, Exception):
-                logger.warning("Search query failed", error=str(result))
+                logger.warning(
+                    "Search query failed",
+                    query=state.query,
+                    error=str(result),
+                    error_type=type(result).__name__,
+                )
                 continue
-            all_papers.extend(result)
+            if isinstance(result, list):
+                all_papers.extend(result)
+                # 统计每个源的结果数
+                for paper in result:
+                    src = paper.get("source", "unknown")
+                    source_counts[src] = source_counts.get(src, 0) + 1
 
         # 去重（基于标题相似性）
         unique_papers = _deduplicate_papers(all_papers)
+
+        # 构建详细的进度消息
+        source_summary = ", ".join(
+            f"{k}: {v}" for k, v in source_counts.items() if v > 0
+        )
+        progress_msg = f"搜索完成，共找到 {len(all_papers)} 篇论文（去重后 {len(unique_papers)} 篇）"
+        if source_summary:
+            progress_msg += f" [{source_summary}]"
+
+        await send_progress(
+            state.project_id, "search",
+            progress_msg,
+            detail={
+                "total_searched": len(all_papers),
+                "unique": len(unique_papers),
+                "source_counts": source_counts,
+                "sources": sources,
+            },
+        )
 
         # 保存到数据库并获取 ID
         db = get_database()
@@ -152,11 +213,34 @@ async def search_node(state: PipelineState) -> dict:
         return result
 
     except Exception as e:
+        error_msg = f"Search node failed: {type(e).__name__}: {str(e)}"
+        logger.error(
+            "Search node failed",
+            query=state.query,
+            project_id=state.project_id,
+            error=str(e),
+            error_type=type(e).__name__,
+            traceback=traceback.format_exc(),
+        )
+
         if tracker:
             await tracker.end_node("search", "failed",
                                    error_message=str(e),
                                    error_traceback=traceback.format_exc())
-        raise
+
+        # 搜索失败时记录错误但不中断 pipeline，用空结果继续
+        await send_progress(
+            state.project_id, "search",
+            f"搜索出错: {str(e)}，将用空结果继续",
+            detail={"error": str(e), "error_type": type(e).__name__},
+        )
+
+        return {
+            "paper_ids": [],
+            "total_searched": 0,
+            "status": "searched",
+            "errors": [error_msg],
+        }
 
 
 def _deduplicate_papers(papers: list[dict]) -> list[dict]:

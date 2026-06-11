@@ -10,6 +10,7 @@ from ...agents.writing import generate_outline
 from ...config import get_settings
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -104,6 +105,11 @@ async def outline_generation_node(state: PipelineState) -> dict:
                 for p in cluster_papers
             ]
 
+        await send_progress(
+            state.project_id, "outline_generation",
+            "大纲生成中，正在规划章节结构...",
+        )
+
         # 生成大纲
         outline_data = await generate_outline(
             topic=state.query,
@@ -140,6 +146,13 @@ async def outline_generation_node(state: PipelineState) -> dict:
             outline_id=outline_id,
             title=outline_data.get("title"),
             sections=len(outline_data.get("sections", [])),
+        )
+
+        section_count = len(outline_data.get("sections", []))
+        await send_progress(
+            state.project_id, "outline_generation",
+            f"大纲生成完成，规划 {section_count} 个章节",
+            detail={"section_count": section_count, "outline_id": outline_id},
         )
 
         result = {

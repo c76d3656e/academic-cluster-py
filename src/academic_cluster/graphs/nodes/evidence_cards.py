@@ -11,6 +11,7 @@ import structlog
 from ...agents.evidence_generation import generate_evidence_cards_batch
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -84,6 +85,11 @@ async def evidence_cards_node(state: PipelineState) -> dict:
         return result
 
     try:
+        await send_progress(
+            state.project_id, "evidence_cards",
+            f"为 {len(remaining_papers)} 篇论文生成证据卡片...",
+        )
+
         # 批量生成证据卡片（只处理剩余论文）
         evidence_cards = await generate_evidence_cards_batch(remaining_papers)
 
@@ -111,6 +117,11 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             new_cards=len(new_card_ids),
             total_cards=len(all_card_ids),
             skipped_papers=len(already_done_paper_ids),
+        )
+
+        await send_progress(
+            state.project_id, "evidence_cards",
+            f"证据卡片生成完成，共 {len(all_card_ids)} 张",
         )
 
         result = {

@@ -56,6 +56,10 @@ class DatabaseService:
             pool_size=20,
             max_overflow=10,
             pool_pre_ping=True,
+            pool_timeout=30,
+            connect_args={
+                "server_settings": {"statement_timeout": "30000"},  # 30s 语句超时
+            },
         )
 
         self.session_factory = async_sessionmaker(
@@ -779,9 +783,17 @@ class DatabaseService:
         if not update_data:
             return
 
+        # 安全修复: 白名单验证列名，防止 SQL 注入
+        _ALLOWED_USER_COLUMNS = {
+            "email", "hashed_password", "full_name", "role",
+            "is_active", "last_login_at",
+        }
+
         set_clauses = []
         params = {"id": user_id}
         for key, value in update_data.items():
+            if key not in _ALLOWED_USER_COLUMNS:
+                raise ValueError(f"不允许更新的字段: {key}")
             set_clauses.append(f"{key} = :{key}")
             params[key] = value
 
@@ -1443,7 +1455,8 @@ class DatabaseService:
         days: int = 30,
     ) -> list[dict]:
         """按 provider/model 汇总用量（用于成本分析）"""
-        conditions = ["lc.created_at >= NOW() - (:days || ' days')::interval"]
+        # 安全修复: 分离 SQL 模板和参数化条件，避免 f-string SQL 构建
+        conditions = ["lc.created_at >= NOW() - INTERVAL ':days days'"]
         params: dict[str, Any] = {"days": days}
 
         if run_id:
@@ -1455,33 +1468,36 @@ class DatabaseService:
 
         where_clause = " AND ".join(conditions)
 
+        # 构建 JOIN 子句 - 来源固定，不来自用户输入
         join_clause = ""
         if project_id and not run_id:
             join_clause = "JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id"
 
+        query = f"""
+            SELECT
+                lc.provider_name,
+                lc.model_name,
+                lc.call_type,
+                COUNT(*) AS call_count,
+                SUM(CASE WHEN lc.status = 'success' THEN 1 ELSE 0 END) AS success_count,
+                SUM(CASE WHEN lc.status = 'error' THEN 1 ELSE 0 END) AS error_count,
+                SUM(lc.prompt_tokens) AS total_prompt_tokens,
+                SUM(lc.completion_tokens) AS total_completion_tokens,
+                SUM(lc.total_tokens) AS total_tokens,
+                SUM(lc.cost) AS total_cost,
+                AVG(lc.latency_ms) AS avg_latency_ms,
+                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY lc.latency_ms) AS p50_latency_ms,
+                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY lc.latency_ms) AS p95_latency_ms
+            FROM llm_calls lc
+            {join_clause}
+            WHERE {where_clause}
+            GROUP BY lc.provider_name, lc.model_name, lc.call_type
+            ORDER BY total_cost DESC
+        """
+
         async with self.session() as session:
             result = await session.execute(
-                text(f"""
-                    SELECT
-                        lc.provider_name,
-                        lc.model_name,
-                        lc.call_type,
-                        COUNT(*) AS call_count,
-                        SUM(CASE WHEN lc.status = 'success' THEN 1 ELSE 0 END) AS success_count,
-                        SUM(CASE WHEN lc.status = 'error' THEN 1 ELSE 0 END) AS error_count,
-                        SUM(lc.prompt_tokens) AS total_prompt_tokens,
-                        SUM(lc.completion_tokens) AS total_completion_tokens,
-                        SUM(lc.total_tokens) AS total_tokens,
-                        SUM(lc.cost) AS total_cost,
-                        AVG(lc.latency_ms) AS avg_latency_ms,
-                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY lc.latency_ms) AS p50_latency_ms,
-                        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY lc.latency_ms) AS p95_latency_ms
-                    FROM llm_calls lc
-                    {join_clause}
-                    WHERE {where_clause}
-                    GROUP BY lc.provider_name, lc.model_name, lc.call_type
-                    ORDER BY total_cost DESC
-                """),
+                text(query),
                 params,
             )
             rows = result.fetchall()

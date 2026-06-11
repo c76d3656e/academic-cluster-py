@@ -30,8 +30,9 @@ async def get_current_user(
 
     try:
         payload = token_service.decode_access_token(credentials.credentials)
-    except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+    except ValueError:
+        # 安全修复: 不向客户端泄露 JWT 解码的具体错误原因（过期/无效/格式错误）
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user = await db.get_user_by_id(payload["sub"])
     if user is None:

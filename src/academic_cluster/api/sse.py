@@ -9,8 +9,11 @@ import json
 from typing import AsyncGenerator, Optional
 
 import structlog
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+
+from ..services.auth import TokenService, get_token_service
+from ..services.database import DatabaseService, get_database
 
 logger = structlog.get_logger()
 
@@ -78,14 +81,18 @@ class SSEManager:
         status: str,
         progress: float = 0.0,
         message: str = "",
+        detail: dict | None = None,
     ):
         """发送进度事件"""
-        await self.send_event(project_id, "progress", {
+        data = {
             "node": node,
             "status": status,
             "progress": progress,
             "message": message,
-        })
+        }
+        if detail:
+            data["detail"] = detail
+        await self.send_event(project_id, "progress", data)
 
     async def send_community_visualization(self, project_id: str, visualization: dict):
         """发送社区可视化数据"""
@@ -151,25 +158,43 @@ async def sse_generator(
 
 
 @router.get("/stream/{project_id}")
-async def stream_events(project_id: str, request: Request):
+async def stream_events(
+    project_id: str,
+    request: Request,
+    token: str = Query(..., description="JWT access token"),
+):
     """
     SSE 端点
 
     客户端可以通过 EventSource 连接此端点接收实时更新。
+    由于 EventSource 不支持自定义 Header，token 通过 query 参数传递。
 
     示例：
     ```javascript
-    const eventSource = new EventSource('/api/stream/project-id');
+    const eventSource = new EventSource('/api/stream/project-id?token=xxx');
     eventSource.addEventListener('progress', (e) => {
         const data = JSON.parse(e.data);
         console.log('Progress:', data);
     });
-    eventSource.addEventListener('community_visualization', (e) => {
-        const data = JSON.parse(e.data);
-        // 渲染可视化
-    });
     ```
     """
+    # 安全修复: SSE 端点必须认证，防止未授权用户监听项目事件
+    token_service = get_token_service()
+    try:
+        payload = token_service.decode_access_token(token)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    db = get_database()
+    user = await db.get_user_by_id(payload["sub"])
+    if not user or not user.get("is_active", False):
+        raise HTTPException(status_code=401, detail="User not found or deactivated")
+
+    # 权限检查: 验证用户有权访问该项目
+    project = await db.get_project(project_id)
+    if project and project.get("user_id") != user["id"] and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
     return StreamingResponse(
         sse_generator(project_id, request),
         media_type="text/event-stream",

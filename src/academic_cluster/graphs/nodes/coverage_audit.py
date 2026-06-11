@@ -13,6 +13,7 @@ import structlog
 from ...services.citation_utils import validate_citations
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -32,6 +33,11 @@ async def coverage_audit_node(state: PipelineState) -> dict:
         await tracker.begin_node("coverage_audit", "compute", index=8)
 
     logger.info("Starting coverage audit")
+
+    await send_progress(
+        state.project_id, "coverage_audit",
+        "覆盖率审计中...",
+    )
 
     db = get_database()
 
@@ -89,6 +95,17 @@ async def coverage_audit_node(state: PipelineState) -> dict:
             cited_papers=len(all_cited_indices),
             total_papers=total_papers,
             needs_revision=needs_revision,
+        )
+
+        await send_progress(
+            state.project_id, "coverage_audit",
+            f"覆盖率审计完成，引用覆盖率 {coverage_score:.0%}，无效引用 {total_invalid} 个",
+            detail={
+                "coverage_score": coverage_score,
+                "paper_coverage": paper_coverage,
+                "invalid_citations": total_invalid,
+                "needs_revision": needs_revision,
+            },
         )
 
         result = {

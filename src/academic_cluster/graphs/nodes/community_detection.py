@@ -8,6 +8,7 @@ from ...services.database import get_database
 from ...services.vector_store import get_vector_store
 from ...tools.clustering import build_hybrid_graph, leiden_clustering
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -92,6 +93,16 @@ async def community_detection_node(state: PipelineState) -> dict:
             clusters=len(cluster_ids),
             total_nodes=hybrid_graph.number_of_nodes(),
             total_edges=hybrid_graph.number_of_edges(),
+        )
+
+        await send_progress(
+            state.project_id, "community_detection",
+            f"发现 {len(cluster_ids)} 个研究社区",
+            detail={
+                "cluster_count": len(cluster_ids),
+                "total_nodes": hybrid_graph.number_of_nodes(),
+                "total_edges": hybrid_graph.number_of_edges(),
+            },
         )
 
         return {

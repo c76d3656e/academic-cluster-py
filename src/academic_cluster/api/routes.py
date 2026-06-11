@@ -6,7 +6,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import get_settings
 from ..services.database import DatabaseService, get_database
@@ -23,9 +23,9 @@ router = APIRouter()
 
 class CreateProjectRequest(BaseModel):
     """创建项目请求"""
-    name: str
-    query: str
-    description: str | None = None
+    name: str = Field(..., min_length=1, max_length=255)
+    query: str = Field(..., min_length=1, max_length=2000)
+    description: str | None = Field(None, max_length=5000)
     config: dict | None = None
 
 
@@ -116,6 +116,10 @@ async def list_projects(
     db: DatabaseService = Depends(get_database),
 ):
     """列出项目"""
+    # 安全修复: 限制分页参数范围，防止请求过大数据集
+    skip = max(0, skip)
+    limit = max(1, min(limit, 100))
+
     if current_user.get("role") == "admin":
         projects, total = await db.list_all_projects(skip, limit)
     else:
@@ -481,8 +485,33 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws/{project_id}")
-async def websocket_endpoint(websocket: WebSocket, project_id: str):
+async def websocket_endpoint(websocket: WebSocket, project_id: str, token: str = None):
     """WebSocket 端点，用于实时更新"""
+    # 安全修复: WebSocket 连接必须携带有效 token（通过 query 参数传递）
+    from ..services.auth import get_token_service
+    if not token:
+        await websocket.close(code=4001, reason="Missing authentication token")
+        return
+
+    token_service = get_token_service()
+    try:
+        payload = token_service.decode_access_token(token)
+    except ValueError:
+        await websocket.close(code=4001, reason="Invalid or expired token")
+        return
+
+    db = get_database()
+    user = await db.get_user_by_id(payload["sub"])
+    if not user or not user.get("is_active", False):
+        await websocket.close(code=4001, reason="User not found or deactivated")
+        return
+
+    # 权限检查: 验证用户有权访问该项目
+    project = await db.get_project(project_id)
+    if project and project.get("user_id") != user["id"] and user.get("role") != "admin":
+        await websocket.close(code=4003, reason="Access denied")
+        return
+
     await manager.connect(websocket, project_id)
     try:
         while True:

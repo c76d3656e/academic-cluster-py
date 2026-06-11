@@ -33,6 +33,9 @@ logger = structlog.get_logger()
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# TODO[LOW]: 添加 API 速率限制中间件（如 slowapi），防止暴力破解和滥用
+# 建议: /auth/login 限制 5 次/分钟，/auth/register 限制 3 次/分钟
+
 
 # =============================================================================
 # 公开端点
@@ -48,7 +51,8 @@ async def register(
     """用户注册"""
     existing = await db.get_user_by_email(body.email)
     if existing:
-        raise HTTPException(status_code=400, detail="该邮箱已注册")
+        # 安全修复: 使用模糊错误信息，防止用户枚举攻击
+        raise HTTPException(status_code=400, detail="注册失败，请稍后重试")
 
     hashed_password = password_service.hash_password(body.password)
 
@@ -232,6 +236,10 @@ async def list_users(
     db: DatabaseService = Depends(get_database),
 ):
     """列出所有用户（管理员）"""
+    # 安全修复: 限制分页参数范围
+    skip = max(0, skip)
+    limit = max(1, min(limit, 100))
+
     users, total = await db.list_users(skip, limit)
 
     return UserListResponse(

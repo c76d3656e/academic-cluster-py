@@ -73,10 +73,13 @@ class Settings(BaseSettings):
 
     # 应用配置
     app_env: str = "development"
-    app_debug: bool = True
+    app_debug: bool = False  # 安全修复: 默认关闭 debug，避免泄露调试信息
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     app_secret_key: str = "change-me-in-production"
+
+    # CORS 配置（逗号分隔的允许来源列表）
+    cors_origins: Optional[str] = None
 
     # 日志配置
     log_level: str = "INFO"
@@ -171,6 +174,22 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    def validate_security(self) -> None:
+        """生产环境安全配置校验，应在应用启动时调用"""
+        if not self.is_production:
+            return
+        insecure_defaults = []
+        if self.jwt_secret_key in ("change-me-jwt-secret-in-production", "change-me-in-production"):
+            insecure_defaults.append("jwt_secret_key")
+        if self.app_secret_key == "change-me-in-production":
+            insecure_defaults.append("app_secret_key")
+        if self.postgres_password in ("postgres", ""):
+            insecure_defaults.append("postgres_password")
+        if insecure_defaults:
+            raise RuntimeError(
+                f"生产环境检测到不安全的默认配置，请通过环境变量设置: {', '.join(insecure_defaults)}"
+            )
 
     @property
     def embedding(self) -> EmbeddingSettings:

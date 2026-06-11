@@ -6,6 +6,7 @@ import structlog
 
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -55,6 +56,12 @@ async def filter_node(state: PipelineState) -> dict:
         original_count=len(state.paper_ids),
         filtered_count=len(filtered_ids),
         removed=len(state.paper_ids) - len(filtered_ids),
+    )
+
+    await send_progress(
+        state.project_id, "filter",
+        f"筛选完成，保留 {len(filtered_ids)} 篇高质量论文",
+        detail={"removed": len(state.paper_ids) - len(filtered_ids)},
     )
 
     return {

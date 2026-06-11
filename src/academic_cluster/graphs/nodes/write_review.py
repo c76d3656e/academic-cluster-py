@@ -22,6 +22,7 @@ from ...services.citation_utils import (
 )
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -141,7 +142,8 @@ async def write_review_node(state: PipelineState) -> dict:
         written_sections = []
         written_section_ids = []
 
-        for plan in citation_plans:
+        total_sections = len(citation_plans)
+        for plan_idx, plan in enumerate(citation_plans):
             si = plan.section_index
             section = sections[si]
             section_id_key = str(section.get("name", section.get("number", 0)))
@@ -187,6 +189,13 @@ async def write_review_node(state: PipelineState) -> dict:
                     abstract = (p.get("abstract") or "")[:200]
                     sample_parts.append(f"- {p.get('title', '')}: {abstract}")
 
+            section_title = section.get("title", f"章节 {plan_idx + 1}")
+            await send_progress(
+                state.project_id, "write_review",
+                f"正在撰写第 {plan_idx + 1}/{total_sections} 章节: {section_title}",
+                progress=(plan_idx + 1) / total_sections,
+            )
+
             content = await write_section(
                 topic=state.query,
                 review_title=review_title,
@@ -225,6 +234,11 @@ async def write_review_node(state: PipelineState) -> dict:
                 word_count=section_data["word_count"],
                 refs=len(plan.candidate_paper_ids),
             )
+
+        await send_progress(
+            state.project_id, "write_review",
+            f"章节撰写完成，共 {len(written_sections)} 章，正在校验引用...",
+        )
 
         # === Step 3: 引用校验 + 修订 ===
         valid_paper_count = len(papers)

@@ -11,9 +11,9 @@ import traceback
 import structlog
 
 from ...agents.kg_extraction import extract_kg_from_papers_batch, normalize_kg
-from ...api.sse import get_sse_manager
 from ...services.database import get_database
 from ..state import PipelineState
+from .progress import send_progress
 
 logger = structlog.get_logger()
 
@@ -113,18 +113,6 @@ async def kg_extraction_node(state: PipelineState) -> dict:
             })
         return result
 
-    # SSE 进度回调
-    sse_manager = get_sse_manager()
-
-    async def progress_callback(current: int, total: int, message: str):
-        await sse_manager.send_progress(
-            project_id=project_id,
-            node="kg_extraction",
-            status="processing",
-            progress=current / total if total > 0 else 0,
-            message=message,
-        )
-
     try:
         all_raw_entities = []
         all_raw_relations = []
@@ -151,12 +139,11 @@ async def kg_extraction_node(state: PipelineState) -> dict:
 
                     async with completed_lock:
                         completed_count += 1
-                        if progress_callback:
-                            await progress_callback(
-                                completed_count,
-                                total,
-                                f"KG extraction: {completed_count}/{total} papers done (concurrency={concurrency})",
-                            )
+                        await send_progress(
+                            project_id, "kg_extraction",
+                            f"知识图谱抽取中 {completed_count}/{total}...",
+                            progress=completed_count / total if total > 0 else 0,
+                        )
 
                     return result
                 except Exception as e:
@@ -233,16 +220,10 @@ async def kg_extraction_node(state: PipelineState) -> dict:
         )
 
         # 推送完成进度
-        token_summary = token_usage.get("total_tokens", 0)
-        await sse_manager.send_progress(
-            project_id=project_id,
-            node="kg_extraction",
-            status="completed",
+        await send_progress(
+            project_id, "kg_extraction",
+            f"知识图谱抽取完成，{len(all_entity_ids)} 个实体，{len(all_relation_ids)} 条关系",
             progress=1.0,
-            message=(
-                f"KG extraction done: {len(all_entity_ids)} entities, "
-                f"{len(all_relation_ids)} relations, {token_summary} tokens"
-            ),
         )
 
         result = {

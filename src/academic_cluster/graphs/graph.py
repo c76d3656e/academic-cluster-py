@@ -284,8 +284,6 @@ def compile_graph(
         "interrupt_before": interrupt_before,
         "interrupt_after": interrupt_after,
     }
-    if callbacks:
-        compile_kwargs["callbacks"] = callbacks
 
     compiled = workflow.compile(**compile_kwargs)
 
@@ -294,7 +292,6 @@ def compile_graph(
         debug=debug,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
-        has_callbacks=callbacks is not None and len(callbacks) > 0,
     )
 
     return compiled
@@ -348,11 +345,13 @@ async def run_pipeline(
         checkpointer=checkpointer,
         debug=True,
         interrupt_before=interrupt_before,
-        callbacks=[llm_callback],
     )
 
-    # LangGraph thread_id = project_id
-    thread_config = {"configurable": {"thread_id": project_id}}
+    # LangGraph thread_id = project_id，callbacks 通过 config 注入
+    thread_config = {
+        "configurable": {"thread_id": project_id},
+        "callbacks": [llm_callback],
+    }
 
     # 更新项目状态为 running
     await db.update_project_status(project_id, "running")

@@ -176,23 +176,33 @@ async def _request_with_retry(
 
         if response.status_code == 429:
             # 解析 Retry-After 头，否则指数退避
+            # 限制最大等待时间为 60 秒，避免被恶意/异常的 Retry-After 值阻塞数小时
             retry_after = response.headers.get("Retry-After")
             if retry_after and retry_after.isdigit():
-                wait = float(retry_after)
+                wait = min(float(retry_after), 60)
             else:
                 wait = min(2 ** (attempt + 1), 30)
             logger.warning(
                 "Rate limited (429), retrying",
                 source=source,
                 attempt=attempt + 1,
+                max_retries=max_retries,
                 wait_seconds=wait,
+                url=url,
             )
             await asyncio.sleep(wait)
             continue
 
         return response
 
-    # 所有重试用尽，返回最后一次响应让调用方处理
+    # 所有重试用尽，raise 让调用方捕获异常
+    logger.error(
+        "All retries exhausted for HTTP request",
+        source=source,
+        url=url,
+        status_code=response.status_code,
+        max_retries=max_retries,
+    )
     response.raise_for_status()
     return response
 
@@ -290,7 +300,23 @@ async def search_semantic_scholar(
             return papers
 
         except httpx.HTTPError as e:
-            logger.error("Semantic Scholar search failed", error=str(e))
+            logger.error(
+                "Semantic Scholar search failed",
+                query=query,
+                limit=limit,
+                year_range=year_range,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return []
+        except Exception as e:
+            logger.error(
+                "Semantic Scholar search failed with unexpected error",
+                query=query,
+                limit=limit,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return []
 
 
@@ -409,7 +435,24 @@ async def search_pubmed(
             return papers
 
         except httpx.HTTPError as e:
-            logger.error("PubMed search failed", error=str(e))
+            logger.error(
+                "PubMed search failed",
+                query=query,
+                limit=limit,
+                min_date=min_date,
+                max_date=max_date,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return []
+        except Exception as e:
+            logger.error(
+                "PubMed search failed with unexpected error",
+                query=query,
+                limit=limit,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return []
 
 
@@ -515,7 +558,14 @@ async def search_arxiv(
             return papers
 
         except Exception as e:
-            logger.error("arXiv search failed", error=str(e))
+            logger.error(
+                "arXiv search failed",
+                query=query,
+                limit=limit,
+                categories=categories,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return []
 
 
@@ -608,7 +658,24 @@ async def search_openalex(
             return papers
 
         except httpx.HTTPError as e:
-            logger.error("OpenAlex search failed", error=str(e))
+            logger.error(
+                "OpenAlex search failed",
+                query=query,
+                limit=limit,
+                from_year=from_year,
+                to_year=to_year,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return []
+        except Exception as e:
+            logger.error(
+                "OpenAlex search failed with unexpected error",
+                query=query,
+                limit=limit,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return []
 
 
@@ -620,6 +687,7 @@ async def search_all_sources(
     query: str,
     limit_per_source: int = 100,
     sources: Optional[list[str]] = None,
+    timeout: float = 120.0,
 ) -> list[dict]:
     """
     并行搜索所有数据源
@@ -628,6 +696,7 @@ async def search_all_sources(
         query: 搜索查询
         limit_per_source: 每个源的最大结果数
         sources: 要搜索的源列表，默认全部
+        timeout: 总体超时时间（秒），默认 120 秒
 
     Returns:
         合并的论文列表
@@ -643,23 +712,62 @@ async def search_all_sources(
     }
 
     tasks = []
+    active_sources = []
     for source in sources:
         if source in search_functions:
             tasks.append(search_functions[source](query, limit=limit_per_source))
+            active_sources.append(source)
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
+    # 使用 wait_for 添加总体超时，避免某个源卡住阻塞整个搜索
+    source_counts: dict[str, int] = {}
     all_papers = []
-    for result in results:
-        if isinstance(result, Exception):
-            logger.error("Search source failed", error=str(result))
-            continue
-        all_papers.extend(result)
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True),
+            timeout=timeout,
+        )
+        for source_name, result in zip(active_sources, results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "Search source failed",
+                    source=source_name,
+                    query=query,
+                    error=str(result),
+                    error_type=type(result).__name__,
+                )
+                source_counts[source_name] = 0
+                continue
+            source_counts[source_name] = len(result)
+            all_papers.extend(result)
+    except asyncio.TimeoutError:
+        logger.error(
+            "Multi-source search timed out",
+            query=query,
+            timeout_seconds=timeout,
+            sources=active_sources,
+        )
+        # 超时时尝试从已完成的任务中收集结果
+        for i, task in enumerate(tasks):
+            source_name = active_sources[i]
+            if task.done() and not task.cancelled():
+                try:
+                    result = task.result()
+                    if isinstance(result, list):
+                        source_counts[source_name] = len(result)
+                        all_papers.extend(result)
+                    else:
+                        source_counts[source_name] = 0
+                except Exception:
+                    source_counts[source_name] = 0
+            else:
+                source_counts[source_name] = 0
+                task.cancel()
 
     logger.info(
         "Multi-source search completed",
         query=query,
-        sources=sources,
+        sources=active_sources,
+        source_counts=source_counts,
         total_results=len(all_papers),
     )
 
