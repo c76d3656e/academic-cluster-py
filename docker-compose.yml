@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
-  # PostgreSQL Database
+  # PostgreSQL with pgvector
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: academic-cluster-postgres
     restart: unless-stopped
     environment:
@@ -11,7 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_EXTERNAL_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -30,7 +28,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis}
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -41,27 +39,7 @@ services:
     networks:
       - academic-cluster-network
 
-  # ChromaDB Vector Database
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: academic-cluster-chromadb
-    restart: unless-stopped
-    environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
-    ports:
-      - "${CHROMADB_PORT:-8000}:8000"
-    volumes:
-      - chromadb_data:/chroma/chroma
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - academic-cluster-network
-
-  # Application (optional - for production deployment)
+  # Backend API
   app:
     build:
       context: .
@@ -70,6 +48,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     ports:
       - "${APP_PORT:-8000}:8000"
     depends_on:
@@ -77,11 +60,23 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      chromadb:
-        condition: service_healthy
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+    networks:
+      - academic-cluster-network
+
+  # Frontend (Vue 3 + Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: academic-cluster-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - app
     networks:
       - academic-cluster-network
 
@@ -89,8 +84,6 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
-    driver: local
-  chromadb_data:
     driver: local
 
 networks:

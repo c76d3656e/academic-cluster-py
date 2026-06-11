@@ -1,72 +1,63 @@
-# Multi-stage build for academic-cluster
-FROM python:3.10-slim as base
+# ---- Build stage ----
+FROM ghcr.io/astral-sh/uv:0.7-python3.12-bookworm-slim AS builder
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 使用国内 apt 镜像加速
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    curl \
-    git \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
-
-# Builder stage
-FROM base as builder
 
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.toml requirements.txt ./
+# 先复制依赖定义，利用 Docker layer cache
+COPY pyproject.toml uv.lock ./
 
-# Create virtual environment and install dependencies
-RUN uv venv .venv && \
-    . .venv/bin/activate && \
-    uv pip install --no-cache-dir -r requirements.txt
+# 使用国内 PyPI 镜像 + 安装生产依赖
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-workspace
 
-# Production stage
-FROM python:3.10-slim as production
+# 复制源码并安装项目本身
+COPY src/ src/
+COPY pyproject.toml README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+# ---- Production stage ----
+FROM python:3.12-slim AS production
+
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
 RUN useradd -m -u 1000 appuser
 
 WORKDIR /app
 
-# Copy virtual environment from builder
-COPY --from=builder /app/.venv .venv
+# 从 builder 复制已安装好的虚拟环境
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+COPY --from=builder --chown=appuser:appuser /app/pyproject.toml /app/pyproject.toml
 
-# Copy application code
-COPY src/ src/
-COPY pyproject.toml ./
+# 复制源码
+COPY --chown=appuser:appuser src/ src/
 
-# Create data directories
+# 创建数据目录
 RUN mkdir -p data/raw data/processed data/embeddings logs && \
     chown -R appuser:appuser /app
 
-# Switch to non-root user
+# 设置虚拟环境 PATH
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/src
+
 USER appuser
 
-# Activate virtual environment
-ENV PATH="/app/.venv/bin:$PATH"
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Expose port
 EXPOSE 8000
 
-# Run application
 CMD ["uvicorn", "academic_cluster.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
