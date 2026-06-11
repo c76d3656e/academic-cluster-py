@@ -29,10 +29,7 @@ async def visualize_community_node(state: PipelineState) -> dict:
 
     try:
         # 获取聚类结果
-        clusters = []
-        for cluster_id in state.cluster_ids:
-            # TODO: 从数据库获取聚类详情
-            pass
+        clusters = await db.get_clusters_by_ids(state.cluster_ids)
 
         # 获取论文详情
         papers = await db.get_papers_by_ids(state.core_paper_ids)
@@ -58,6 +55,9 @@ async def visualize_community_node(state: PipelineState) -> dict:
             clusters=len(visualization.get("clusters", [])),
         )
 
+        # 保存可视化数据到数据库
+        await db.save_visualization(state.project_id, visualization)
+
         return {
             "community_visualization": visualization,
             "status": "visualized",
@@ -65,13 +65,4 @@ async def visualize_community_node(state: PipelineState) -> dict:
 
     except Exception as e:
         logger.error("Visualization generation failed", error=str(e))
-        return {
-            "community_visualization": {
-                "nodes": [],
-                "edges": [],
-                "clusters": [],
-                "layout": "force",
-            },
-            "status": "visualized",
-            "errors": [f"Visualization generation failed: {str(e)}"],
-        }
+        raise  # 不再 fallback，直接抛出异常

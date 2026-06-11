@@ -26,45 +26,58 @@ async def gap_analysis_node(state: PipelineState) -> dict:
 
     try:
         # 获取聚类和证据信息
-        clusters = []
-        for cluster_id in state.cluster_ids:
-            # TODO: 从数据库获取聚类详情
-            pass
+        clusters = await db.get_clusters_by_ids(state.cluster_ids)
+        evidence_cards = await db.get_evidence_cards_by_ids(state.evidence_card_ids)
 
-        evidence_cards = []
-        for card_id in state.evidence_card_ids:
-            # TODO: 从数据库获取证据卡片详情
-            pass
+        # 分析每个聚类的证据覆盖情况
+        cluster_evidence_map = {}
+        for card in evidence_cards:
+            cluster_id = card.get("cluster_id")
+            if cluster_id:
+                if cluster_id not in cluster_evidence_map:
+                    cluster_evidence_map[cluster_id] = []
+                cluster_evidence_map[cluster_id].append(card)
 
-        # 简化的差距分析逻辑
-        # 如果证据卡片数量少于核心论文数量的 50%，认为有差距
-        evidence_ratio = len(state.evidence_card_ids) / max(len(state.core_paper_ids), 1)
-        needs_refinement = evidence_ratio < 0.5
+        # 计算证据覆盖率
+        clusters_with_evidence = len(cluster_evidence_map)
+        total_clusters = len(clusters)
+        evidence_ratio = clusters_with_evidence / max(total_clusters, 1)
+
+        # 检查每个聚类的证据质量
+        gaps = []
+        for cluster in clusters:
+            cluster_id = cluster.get("id")
+            cards = cluster_evidence_map.get(cluster_id, [])
+            if len(cards) < 2:  # 每个聚类至少需要2个证据卡片
+                gaps.append({
+                    "cluster_id": cluster_id,
+                    "cluster_name": cluster.get("name"),
+                    "evidence_count": len(cards),
+                    "needed": 2 - len(cards),
+                })
+
+        needs_refinement = len(gaps) > 0
 
         # 检查 refinement 尝试次数
         if state.refinement_attempt >= state.max_refinement_attempts:
             needs_refinement = False
 
-        gap_analysis_ids = []
-
         logger.info(
             "Gap analysis completed",
+            total_clusters=total_clusters,
+            clusters_with_evidence=clusters_with_evidence,
             evidence_ratio=evidence_ratio,
+            gaps=len(gaps),
             needs_refinement=needs_refinement,
             attempt=state.refinement_attempt,
         )
 
         return {
-            "gap_analysis_ids": gap_analysis_ids,
+            "gap_analysis_ids": [g.get("cluster_id") for g in gaps],
             "needs_targeted_refinement": needs_refinement,
             "status": "gaps_analyzed",
         }
 
     except Exception as e:
         logger.error("Gap analysis failed", error=str(e))
-        return {
-            "gap_analysis_ids": [],
-            "needs_targeted_refinement": False,
-            "status": "gaps_analyzed",
-            "errors": [f"Gap analysis failed: {str(e)}"],
-        }
+        raise  # 不再 fallback，直接抛出异常

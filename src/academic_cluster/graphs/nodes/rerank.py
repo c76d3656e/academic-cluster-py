@@ -1,11 +1,12 @@
 """
 重排序节点 - 使用 Rerank 模型对论文进行重排序
+
+使用 Provider Pool 自动负载均衡多个 Rerank 端点。
 """
 
 import httpx
 import structlog
 
-from ...config import get_settings
 from ...services.database import get_database
 from ..state import PipelineState
 
@@ -16,15 +17,11 @@ async def rerank_papers(query: str, papers: list[dict]) -> list[dict]:
     """
     使用 Rerank 模型对论文进行重排序
 
-    调用 Rerank API（如 BAAI/bge-reranker-v2-m3）
+    通过 Provider Pool 自动选择可用的 Rerank 端点。
     """
-    settings = get_settings()
+    from ...services.provider_pool import get_rerank_pool
 
-    url = f"{settings.rerank.api_url}/rerank"
-    headers = {
-        "Authorization": f"Bearer {settings.rerank.api_key}",
-        "Content-Type": "application/json",
-    }
+    pool = get_rerank_pool()
 
     # 构建文档列表
     documents = []
@@ -33,34 +30,39 @@ async def rerank_papers(query: str, papers: list[dict]) -> list[dict]:
         abstract = paper.get("abstract", "")
         documents.append(f"{title} {abstract}".strip())
 
-    payload = {
-        "model": settings.rerank.model,
-        "query": query,
-        "documents": documents,
-        "top_n": len(documents),
-    }
+    async def _do_rerank(provider) -> list[dict]:
+        url = f"{provider.api_url}/rerank"
+        headers = {
+            "Authorization": f"Bearer {provider.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": provider.model,
+            "query": query,
+            "documents": documents,
+            "top_n": len(documents),
+        }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, headers=headers, timeout=60)
-        response.raise_for_status()
-        data = response.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, headers=headers, timeout=60)
+            response.raise_for_status()
+            data = response.json()
 
-    # 整理结果
-    results = data.get("results", [])
-    reranked_papers = []
+        # 整理结果
+        results = data.get("results", [])
+        reranked = []
+        for result in results:
+            idx = result.get("index", 0)
+            score = float(result.get("relevance_score", 0.0))
+            if idx < len(papers):
+                paper = papers[idx].copy()
+                paper["rerank_score"] = score
+                reranked.append(paper)
 
-    for result in results:
-        idx = result.get("index", 0)
-        score = result.get("relevance_score", 0.0)
-        if idx < len(papers):
-            paper = papers[idx].copy()
-            paper["rerank_score"] = score
-            reranked_papers.append(paper)
+        reranked.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
+        return reranked
 
-    # 按分数排序
-    reranked_papers.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
-
-    return reranked_papers
+    return await pool.execute(_do_rerank)
 
 
 async def rerank_node(state: PipelineState) -> dict:
@@ -90,7 +92,7 @@ async def rerank_node(state: PipelineState) -> dict:
         }
 
     try:
-        # 重排序
+        # 重排序（通过 Provider Pool 自动负载均衡）
         reranked_papers = await rerank_papers(state.query, papers)
 
         # 分为核心和辅助参考
@@ -112,14 +114,4 @@ async def rerank_node(state: PipelineState) -> dict:
 
     except Exception as e:
         logger.error("Reranking failed", error=str(e))
-        # 回退：按引用数量排序
-        papers.sort(key=lambda x: x.get("citation_count", 0), reverse=True)
-        core_paper_ids = [p.get("id") for p in papers[:core_count]]
-        auxiliary_paper_ids = [p.get("id") for p in papers[core_count:core_count + auxiliary_count]]
-
-        return {
-            "core_paper_ids": core_paper_ids,
-            "auxiliary_paper_ids": auxiliary_paper_ids,
-            "status": "reranked",
-            "errors": [f"Reranking failed, fallback to citation count: {str(e)}"],
-        }
+        raise  # 不再 fallback，直接抛出异常

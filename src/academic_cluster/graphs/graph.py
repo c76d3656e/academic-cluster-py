@@ -2,13 +2,14 @@
 LangGraph 图定义
 
 定义主 Pipeline 图、子图，以及节点间的边和条件路由。
+使用 AsyncPostgresSaver 实现持久化 checkpoint，支持断点恢复。
 """
 
 import structlog
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
 from .state import PipelineState
+from .checkpoint import with_audit
 from .nodes import (
     search_node,
     deduplicate_node,
@@ -36,17 +37,73 @@ logger = structlog.get_logger()
 
 
 # =============================================================================
+# Checkpointer 管理
+# =============================================================================
+
+_default_checkpointer = None
+
+
+async def get_checkpointer():
+    """获取或创建 AsyncPostgresSaver 单例（fallback 到 MemorySaver）"""
+    global _default_checkpointer
+    if _default_checkpointer is not None:
+        return _default_checkpointer
+
+    try:
+        # 让 msgpack 支持 numpy 类型序列化
+        import ormsgpack
+        from langgraph.checkpoint.serde import jsonplus as _serde_mod
+        if hasattr(_serde_mod, '_option'):
+            _serde_mod._option = _serde_mod._option | ormsgpack.OPT_SERIALIZE_NUMPY
+            logger.info("Patched msgpack options: OPT_SERIALIZE_NUMPY enabled")
+
+        from psycopg import AsyncConnection
+        from psycopg.rows import dict_row
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        from ..config import get_settings
+
+        settings = get_settings()
+        conn_string = (
+            f"postgresql://{settings.postgres_user}:{settings.postgres_password}"
+            f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
+        )
+
+        conn = await AsyncConnection.connect(
+            conn_string, autocommit=True, prepare_threshold=0, row_factory=dict_row
+        )
+        checkpointer = AsyncPostgresSaver(conn)
+        await checkpointer.setup()
+        _default_checkpointer = checkpointer
+
+        logger.info("AsyncPostgresSaver initialized", host=settings.postgres_host, db=settings.postgres_db)
+        return checkpointer
+    except Exception as e:
+        logger.warning("AsyncPostgresSaver unavailable, using MemorySaver fallback", error=str(e))
+        from langgraph.checkpoint.memory import MemorySaver
+        _default_checkpointer = MemorySaver()
+        return _default_checkpointer
+
+
+async def close_checkpointer():
+    """关闭 checkpointer 连接"""
+    global _default_checkpointer
+    if _default_checkpointer is not None:
+        try:
+            conn = getattr(_default_checkpointer, 'conn', None)
+            if conn is not None and hasattr(conn, 'close'):
+                await conn.close()
+        except Exception:
+            pass
+        _default_checkpointer = None
+        logger.info("Checkpointer closed")
+
+
+# =============================================================================
 # 条件路由函数
 # =============================================================================
 
 def should_continue_to_writing(state: PipelineState) -> str:
-    """
-    差距分析后决定路径
-
-    如果社区存在明显证据差距，返回 targeted_refine 进行补充搜索
-    否则返回 outline_generation 开始写作
-    """
-    # 检查是否还有 refinement 尝试次数
+    """差距分析后决定路径：补充搜索 or 开始写作"""
     if state.needs_targeted_refinement and state.refinement_attempt < state.max_refinement_attempts:
         logger.info(
             "Gaps detected, starting targeted refinement",
@@ -60,12 +117,7 @@ def should_continue_to_writing(state: PipelineState) -> str:
 
 
 def should_revise_sections(state: PipelineState) -> str:
-    """
-    覆盖审计后决定路径
-
-    如果覆盖率不足或存在无效引用，返回 section_revision 进行修订
-    否则返回 artifact_registration 生成最终产出
-    """
+    """覆盖审计后决定路径：修订 or 生成产出"""
     if state.coverage_score < 0.8 or state.invalid_citation_count > 0:
         logger.info(
             "Coverage insufficient or invalid citations found",
@@ -79,12 +131,7 @@ def should_revise_sections(state: PipelineState) -> str:
 
 
 def should_retry_on_error(state: PipelineState) -> str:
-    """
-    错误处理路由
-
-    如果发生错误且未超过重试次数，返回重试节点
-    否则返回 END
-    """
+    """错误处理路由"""
     if state.errors and state.retry_count < 3:
         logger.warning(
             "Error occurred, retrying",
@@ -105,55 +152,42 @@ def should_retry_on_error(state: PipelineState) -> str:
 # =============================================================================
 
 def create_pipeline_graph() -> StateGraph:
-    """
-    创建主 Pipeline 图
-
-    返回未编译的 StateGraph，可以添加自定义节点和边后编译。
-    """
-    # 创建图
+    """创建主 Pipeline 图（未编译）"""
     workflow = StateGraph(PipelineState)
 
-    # =========================================================================
-    # 添加节点
-    # =========================================================================
-
     # 搜索阶段
-    workflow.add_node("search", search_node)
-    workflow.add_node("deduplicate", deduplicate_node)
-    workflow.add_node("filter", filter_node)
-    workflow.add_node("bm25", bm25_node)
+    workflow.add_node("search", with_audit("search")(search_node))
+    workflow.add_node("deduplicate", with_audit("deduplicate")(deduplicate_node))
+    workflow.add_node("filter", with_audit("filter")(filter_node))
+    workflow.add_node("bm25", with_audit("bm25")(bm25_node))
 
     # 嵌入和检索阶段
-    workflow.add_node("embedding", embedding_node)
-    workflow.add_node("pgvector_knn", pgvector_knn_node)
-    workflow.add_node("rerank", rerank_node)
+    workflow.add_node("embedding", with_audit("embedding")(embedding_node))
+    workflow.add_node("pgvector_knn", with_audit("pgvector_knn")(pgvector_knn_node))
+    workflow.add_node("rerank", with_audit("rerank")(rerank_node))
 
     # 知识图谱阶段
-    workflow.add_node("kg_extraction", kg_extraction_node)
+    workflow.add_node("kg_extraction", with_audit("kg_extraction")(kg_extraction_node))
 
     # 聚类阶段
-    workflow.add_node("community_detection", community_detection_node)
-    workflow.add_node("visualize_community", visualize_community_node)
+    workflow.add_node("community_detection", with_audit("community_detection")(community_detection_node))
+    workflow.add_node("visualize_community", with_audit("visualize_community")(visualize_community_node))
 
     # 证据阶段
-    workflow.add_node("evidence_cards", evidence_cards_node)
-    workflow.add_node("gap_analysis", gap_analysis_node)
-    workflow.add_node("targeted_refine", targeted_refine_node)
+    workflow.add_node("evidence_cards", with_audit("evidence_cards")(evidence_cards_node))
+    workflow.add_node("gap_analysis", with_audit("gap_analysis")(gap_analysis_node))
+    workflow.add_node("targeted_refine", with_audit("targeted_refine")(targeted_refine_node))
 
     # 写作阶段
-    workflow.add_node("outline_generation", outline_generation_node)
-    workflow.add_node("user_confirm", user_confirm_node)
-    workflow.add_node("write_review", write_review_node)
-    workflow.add_node("coverage_audit", coverage_audit_node)
-    workflow.add_node("section_revision", section_revision_node)
+    workflow.add_node("outline_generation", with_audit("outline_generation")(outline_generation_node))
+    workflow.add_node("user_confirm", with_audit("user_confirm")(user_confirm_node))
+    workflow.add_node("write_review", with_audit("write_review")(write_review_node))
+    workflow.add_node("coverage_audit", with_audit("coverage_audit")(coverage_audit_node))
+    workflow.add_node("section_revision", with_audit("section_revision")(section_revision_node))
 
     # 产出阶段
-    workflow.add_node("artifact_registration", artifact_registration_node)
-    workflow.add_node("finalize", finalize_node)
-
-    # =========================================================================
-    # 添加边
-    # =========================================================================
+    workflow.add_node("artifact_registration", with_audit("artifact_registration")(artifact_registration_node))
+    workflow.add_node("finalize", with_audit("finalize")(finalize_node))
 
     # 设置入口
     workflow.set_entry_point("search")
@@ -218,7 +252,7 @@ def create_pipeline_graph() -> StateGraph:
 
 
 def compile_graph(
-    checkpointer=None,
+    checkpointer,
     debug: bool = True,
     interrupt_before: list[str] | None = None,
     interrupt_after: list[str] | None = None,
@@ -227,7 +261,7 @@ def compile_graph(
     编译图
 
     Args:
-        checkpointer: 检查点存储，默认使用内存存储
+        checkpointer: 检查点存储（必须传入，通常是 AsyncPostgresSaver）
         debug: 是否启用调试模式
         interrupt_before: 在哪些节点前中断（用于人工确认）
         interrupt_after: 在哪些节点后中断
@@ -235,10 +269,6 @@ def compile_graph(
     Returns:
         编译后的图
     """
-    if checkpointer is None:
-        checkpointer = MemorySaver()
-
-    # 默认在 user_confirm 前中断
     if interrupt_before is None:
         interrupt_before = ["user_confirm"]
 
@@ -266,74 +296,162 @@ def compile_graph(
 # =============================================================================
 
 def get_default_graph():
-    """获取默认配置的编译图"""
-    return compile_graph(debug=True)
+    """获取默认配置的编译图（同步版本，仅用于测试）"""
+    from langgraph.checkpoint.memory import MemorySaver
+    return compile_graph(checkpointer=MemorySaver(), debug=True)
 
 
 async def run_pipeline(
     query: str,
     project_id: str,
     config: dict | None = None,
-    checkpointer=None,
+    sse_manager=None,
+    auto_confirm: bool = True,
+    resume: bool = False,
 ):
     """
     运行 Pipeline
 
     Args:
         query: 研究主题查询
-        project_id: 项目 ID
+        project_id: 项目 ID（同时用作 LangGraph thread_id）
         config: 配置覆盖
-        checkpointer: 检查点存储
+        sse_manager: SSE 管理器（可选，用于实时推送）
+        auto_confirm: 是否自动确认大纲（跳过人工审核）
+        resume: 是否从上次失败的检查点恢复（LangGraph 原生恢复）
 
     Returns:
         最终状态
     """
-    graph = compile_graph(checkpointer=checkpointer, debug=True)
+    from ..services.database import get_database
+    db = get_database()
 
-    initial_state = PipelineState(
-        project_id=project_id,
-        query=query,
-        config=config or {},
+    # 获取持久化 checkpointer
+    checkpointer = await get_checkpointer()
+
+    # 如果自动确认，则不中断
+    interrupt_before = [] if auto_confirm else ["user_confirm"]
+    graph = compile_graph(
+        checkpointer=checkpointer,
+        debug=True,
+        interrupt_before=interrupt_before,
     )
 
-    # 使用 ainvoke 异步执行
-    result = await graph.ainvoke(
-        initial_state,
-        config={"configurable": {"thread_id": project_id}},
-    )
+    # LangGraph thread_id = project_id
+    thread_config = {"configurable": {"thread_id": project_id}}
+
+    # 更新项目状态为 running
+    await db.update_project_status(project_id, "running")
+
+    if resume:
+        # LangGraph 原生恢复：传 None 作为 input，自动从最后 checkpoint 继续
+        logger.info("Resuming pipeline from checkpoint", project_id=project_id)
+        input_data = None
+    else:
+        # 新建运行
+        input_data = PipelineState(
+            project_id=project_id,
+            query=query,
+            config=config or {},
+        )
+
+    result = None
+    try:
+        async for event in graph.astream(
+            input_data,
+            config=thread_config,
+            stream_mode="updates",
+        ):
+            for node_name, node_output in event.items():
+                # 立即更新项目状态为当前节点
+                await db.update_project_status(project_id, f"running:{node_name}")
+
+                # 安全处理 node_output
+                if isinstance(node_output, dict):
+                    result = {**(result or {}), **node_output}
+                elif isinstance(node_output, tuple) and len(node_output) > 0 and isinstance(node_output[0], dict):
+                    result = {**(result or {}), **node_output[0]}
+                else:
+                    logger.warning("Unexpected node output type", node=node_name, type=type(node_output).__name__)
+                    continue
+
+                # 发送 SSE 进度事件
+                if sse_manager:
+                    status = node_output.get("status", "processing") if isinstance(node_output, dict) else "processing"
+                    detail_msg = _build_progress_message(node_name, result)
+                    await sse_manager.send_progress(
+                        project_id=project_id,
+                        node=node_name,
+                        status=status,
+                        message=detail_msg,
+                    )
+
+        # 更新项目状态为 completed
+        await db.update_project_status(project_id, "completed")
+
+        # 发送完成事件
+        if sse_manager and result:
+            await sse_manager.send_complete(project_id, {
+                "paper_count": len(result.get("paper_ids", [])),
+                "status": result.get("status", "completed"),
+            })
+
+    except Exception as e:
+        logger.error("Pipeline failed", error=str(e), project_id=project_id)
+        await db.update_project_status(project_id, "failed")
+        if sse_manager:
+            await sse_manager.send_error(project_id, str(e))
+        raise
 
     return result
 
 
-async def stream_pipeline(
-    query: str,
-    project_id: str,
-    config: dict | None = None,
-    checkpointer=None,
-):
-    """
-    流式运行 Pipeline
-
-    Args:
-        query: 研究主题查询
-        project_id: 项目 ID
-        config: 配置覆盖
-        checkpointer: 检查点存储
-
-    Yields:
-        节点执行事件
-    """
-    graph = compile_graph(checkpointer=checkpointer, debug=True)
-
-    initial_state = PipelineState(
-        project_id=project_id,
-        query=query,
-        config=config or {},
-    )
-
-    # 使用 astream 流式执行
-    async for event in graph.astream(
-        initial_state,
-        config={"configurable": {"thread_id": project_id}},
-    ):
-        yield event
+def _build_progress_message(node_name: str, state: dict) -> str:
+    """构建详细的进度消息"""
+    if node_name == "search":
+        count = len(state.get("paper_ids", []))
+        return f"搜索完成，找到 {count} 篇论文"
+    elif node_name == "deduplicate":
+        count = len(state.get("paper_ids", []))
+        return f"去重完成，保留 {count} 篇论文"
+    elif node_name == "filter":
+        count = len(state.get("paper_ids", []))
+        return f"筛选完成，保留 {count} 篇高质量论文"
+    elif node_name == "bm25":
+        return "BM25 关键词索引构建完成"
+    elif node_name == "embedding":
+        count = len(state.get("embedding_ids", []))
+        return f"向量化完成，生成 {count} 个嵌入向量"
+    elif node_name == "pgvector_knn":
+        return "pgvector KNN 图构建完成"
+    elif node_name == "rerank":
+        count = len(state.get("core_paper_ids", []))
+        return f"重排序完成，筛选出 {count} 篇核心论文"
+    elif node_name == "kg_extraction":
+        entities = len(state.get("kg_entity_ids", []))
+        relations = len(state.get("kg_relation_ids", []))
+        return f"知识图谱提取完成，{entities} 个实体，{relations} 个关系"
+    elif node_name == "community_detection":
+        count = len(state.get("cluster_ids", []))
+        return f"社区检测完成，发现 {count} 个主题聚类"
+    elif node_name == "visualize_community":
+        return "社区可视化生成完成"
+    elif node_name == "evidence_cards":
+        count = len(state.get("evidence_card_ids", []))
+        return f"证据卡片生成完成，共 {count} 张"
+    elif node_name == "gap_analysis":
+        return "研究空白分析完成"
+    elif node_name == "targeted_refine":
+        return "定向补充搜索完成"
+    elif node_name == "outline_generation":
+        return "大纲生成完成"
+    elif node_name == "write_review":
+        return "综述撰写完成"
+    elif node_name == "coverage_audit":
+        return "覆盖度审计完成"
+    elif node_name == "artifact_registration":
+        return "产出物注册完成"
+    elif node_name == "finalize":
+        return "流程完成"
+    else:
+        return f"{node_name} 完成"

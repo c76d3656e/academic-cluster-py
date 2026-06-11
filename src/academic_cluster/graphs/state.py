@@ -63,14 +63,21 @@ class PipelineState(BaseModel):
 
     # === 写作阶段 ===
     outline_id: Optional[str] = None
+    outline_data: Optional[dict] = None  # 大纲内容（用于 write_review 节点）
     section_plan_ids: list[str] = Field(default_factory=list)
     citation_plan_ids: list[str] = Field(default_factory=list)
     written_section_ids: list[str] = Field(default_factory=list)
 
     # === 产出物 ===
     final_review_id: Optional[str] = None
+    final_review: Optional[str] = None  # 最终综述内容
     bibtex: Optional[str] = None
     artifact_id: Optional[str] = None
+
+    # === 覆盖审计 ===
+    coverage_score: float = 0.0
+    invalid_citation_count: int = 0
+    needs_revision: bool = False
 
     # === 配置 ===
     config: dict = Field(default_factory=dict)

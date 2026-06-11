@@ -25,14 +25,11 @@ async def artifact_registration_node(state: PipelineState) -> dict:
     db = get_database()
 
     try:
-        # 获取已写章节
-        written_sections = []
-        for section_id in state.written_section_ids:
-            # TODO: 从数据库获取章节内容
-            pass
+        # 使用 state 中的最终综述内容
+        final_review = state.final_review
 
-        # 组装最终综述
-        final_review = "\n\n".join([s.get("content", "") for s in written_sections])
+        if not final_review:
+            raise ValueError("No final review content - write_review must complete first")
 
         # 计算统计信息
         word_count = len(final_review.split())
@@ -62,8 +59,4 @@ async def artifact_registration_node(state: PipelineState) -> dict:
 
     except Exception as e:
         logger.error("Artifact registration failed", error=str(e))
-        return {
-            "artifact_id": None,
-            "status": "artifacts_registered",
-            "errors": [f"Artifact registration failed: {str(e)}"],
-        }
+        raise  # 不再 fallback，直接抛出异常

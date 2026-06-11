@@ -1,9 +1,17 @@
 """
 针对性精炼节点 - 根据差距分析补充搜索
+
+使用 LLM 基于差距分析结果生成有针对性的搜索 query（对齐 Rust 版 cluster_targeted_refine）。
 """
 
-import structlog
+import asyncio
+import json
+import uuid
 
+import structlog
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from ...prompts import get_cluster_targeted_refine_prompt
 from ...tools.academic_search import search_all_sources
 from ...services.database import get_database
 from ..state import PipelineState
@@ -11,18 +19,69 @@ from ..state import PipelineState
 logger = structlog.get_logger()
 
 
+async def _generate_targeted_queries(
+    topic: str,
+    gaps: list[str],
+    weak_clusters: list[dict],
+    previous_queries: list[str],
+) -> list[str]:
+    """使用 LLM 生成针对性补充 query（对齐 Rust 版 cluster_targeted_refine）"""
+    from ...services.llm_client import create_llm
+    llm = create_llm(temperature=0.3)
+
+    prompt_template = get_cluster_targeted_refine_prompt()
+    if not prompt_template:
+        # fallback
+        return [f"{topic} methods", f"{topic} applications"]
+
+    prompt = prompt_template.format(
+        topic=topic,
+        gaps="\n".join(f"- {g}" for g in gaps) if gaps else "None identified",
+        weak_clusters=json.dumps(weak_clusters, ensure_ascii=False, indent=2) if weak_clusters else "None",
+        previous_queries="\n".join(f"- {q}" for q in previous_queries) if previous_queries else "None",
+    )
+
+    messages = [
+        SystemMessage(content="Return one compact JSON object only. No markdown. No reasoning. No explanation."),
+        HumanMessage(content=prompt),
+    ]
+
+    try:
+        response = await llm.ainvoke(messages)
+        # LLM 响应 content 可能是 list（多模态格式）或 string
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in content
+            )
+        content = content.strip()
+
+        start = content.find("{")
+        end = content.rfind("}")
+        if start != -1 and end > start:
+            content = content[start:end + 1]
+
+        data = json.loads(content)
+        queries = data.get("new_queries", [])
+
+        if not queries:
+            queries = [f"{topic} methods", f"{topic} applications"]
+
+        logger.info("Targeted queries generated", queries=queries)
+        return queries
+
+    except Exception as e:
+        logger.warning("Failed to generate targeted queries, using fallback", error=str(e))
+        return [f"{topic} methods", f"{topic} applications"]
+
+
 async def targeted_refine_node(state: PipelineState) -> dict:
     """
     针对性精炼
 
-    根据差距分析结果进行补充搜索：
-    - 使用生成的针对性查询搜索
-    - 过滤和重排序新论文
-    - 合并到现有论文列表
-
-    预算限制：
-    - 每个社区最多 2 次尝试
-    - 整个运行最多 5 次
+    根据差距分析结果，使用 LLM 生成有针对性的补充搜索 query，
+    然后搜索新论文并合并到现有论文列表。
     """
     logger.info(
         "Starting targeted refinement",
@@ -36,22 +95,44 @@ async def targeted_refine_node(state: PipelineState) -> dict:
     db = get_database()
 
     try:
-        # 生成针对性查询（简化版本）
-        targeted_queries = [
-            f"{state.query} methods",
-            f"{state.query} applications",
-            f"{state.query} challenges",
-        ]
+        # 从 gap_analysis 结果中提取信息
+        gaps = []
+        weak_clusters = []
+        previous_queries = []
 
-        # 搜索新论文
-        new_papers = []
-        for query in targeted_queries:
-            papers = await search_all_sources(
-                query=query,
+        if hasattr(state, 'gap_analysis_result') and state.gap_analysis_result:
+            gaps = state.gap_analysis_result.get("gaps", [])
+            weak_clusters = state.gap_analysis_result.get("weak_clusters", [])
+
+        # 收集已搜索过的 queries（从 config 或历史中获取）
+        if hasattr(state, 'searched_queries'):
+            previous_queries = state.searched_queries or []
+
+        # 使用 LLM 生成针对性 queries
+        targeted_queries = await _generate_targeted_queries(
+            topic=state.query,
+            gaps=gaps,
+            weak_clusters=weak_clusters,
+            previous_queries=previous_queries,
+        )
+
+        # 并行搜索新论文
+        search_tasks = [
+            search_all_sources(
+                query=q,
                 limit_per_source=limit_per_source,
                 sources=["semantic_scholar", "arxiv"],
             )
-            new_papers.extend(papers)
+            for q in targeted_queries
+        ]
+
+        results = await asyncio.gather(*search_tasks, return_exceptions=True)
+        new_papers = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning("Targeted search failed", error=str(result))
+                continue
+            new_papers.extend(result)
 
         # 去重（排除已有论文）
         existing_paper_ids = set(state.paper_ids)
@@ -65,15 +146,18 @@ async def targeted_refine_node(state: PipelineState) -> dict:
 
         # 保存新论文
         new_paper_ids = []
-        for paper in unique_new_papers[:50]:  # 限制数量
+        for paper in unique_new_papers[:50]:
             try:
+                pid = paper.get("id", str(uuid.uuid4()))
+                paper["id"] = pid
                 await db.save_paper(paper)
-                new_paper_ids.append(paper.get("id"))
+                new_paper_ids.append(pid)
             except Exception as e:
                 logger.warning("Failed to save targeted paper", error=str(e))
 
         logger.info(
             "Targeted refinement completed",
+            targeted_queries=len(targeted_queries),
             new_papers=len(new_paper_ids),
             attempt=state.refinement_attempt + 1,
         )

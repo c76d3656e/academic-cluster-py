@@ -30,7 +30,9 @@ async def pgvector_knn_node(state: PipelineState) -> dict:
 
     try:
         # 获取 KNN 图
-        knn_edges = await vector_store.get_knn_graph(k=k, threshold=threshold)
+        knn_edges = await vector_store.get_knn_graph(
+            paper_ids=state.paper_ids, k=k, threshold=threshold
+        )
 
         # 保存到数据库
         db = get_database()

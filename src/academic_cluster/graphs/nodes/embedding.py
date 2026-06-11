@@ -1,13 +1,11 @@
 """
 嵌入节点 - 生成论文嵌入向量
+
+使用 Provider Pool（LiteLLM Router）自动负载均衡多个 Embedding 端点。
 """
 
-import asyncio
-
-import httpx
 import structlog
 
-from ...config import get_settings
 from ...services.database import get_database
 from ...services.cache import get_cache
 from ...services.vector_store import get_vector_store
@@ -20,26 +18,16 @@ async def generate_embedding(text: str) -> list[float]:
     """
     生成文本嵌入向量
 
-    调用 Embedding API（如 SiliconFlow 的 BAAI/bge-m3）
+    通过 Provider Pool 自动选择可用的 Embedding 端点。
     """
-    settings = get_settings()
+    from ...services.provider_pool import get_embedding_pool
 
-    url = f"{settings.embedding.api_url}/embeddings"
-    headers = {
-        "Authorization": f"Bearer {settings.embedding.api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": settings.embedding.model,
-        "input": text,
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-
-        return data["data"][0]["embedding"]
+    pool = get_embedding_pool()
+    response = await pool.router.aembedding(
+        model=pool.get_model_name(),
+        input=[text],
+    )
+    return response.data[0]["embedding"]
 
 
 async def embedding_node(state: PipelineState) -> dict:
@@ -79,7 +67,7 @@ async def embedding_node(state: PipelineState) -> dict:
             embedding = cached_embedding
         else:
             try:
-                # 生成嵌入
+                # 生成嵌入（通过 Provider Pool 自动负载均衡）
                 embedding = await generate_embedding(text)
                 # 缓存嵌入
                 await cache.set_embedding(paper_id, "bge-m3", embedding)
@@ -100,10 +88,8 @@ async def embedding_node(state: PipelineState) -> dict:
     if embeddings_data:
         try:
             await vector_store.add_embeddings(
-                ids=[e["id"] for e in embeddings_data],
+                paper_ids=[e["paper_id"] for e in embeddings_data],
                 embeddings=[e["embedding"] for e in embeddings_data],
-                metadatas=[{"paper_id": e["paper_id"]} for e in embeddings_data],
-                documents=[e["text"] for e in embeddings_data],
             )
         except Exception as e:
             logger.error("Failed to store embeddings in vector DB", error=str(e))
