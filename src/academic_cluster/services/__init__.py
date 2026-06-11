@@ -5,6 +5,7 @@
 from .database import DatabaseService, get_database
 from .cache import CacheService, get_cache
 from .vector_store import VectorStoreService, get_vector_store
+from .auth import PasswordService, TokenService, get_password_service, get_token_service
 
 __all__ = [
     "DatabaseService",
@@ -13,4 +14,8 @@ __all__ = [
     "get_cache",
     "VectorStoreService",
     "get_vector_store",
+    "PasswordService",
+    "TokenService",
+    "get_password_service",
+    "get_token_service",
 ]
