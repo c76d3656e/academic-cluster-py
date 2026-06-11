@@ -36,20 +36,20 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-muted/30">
-    <header class="bg-background border-b">
-      <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+  <div class="min-h-screen bg-background">
+    <header class="bg-background border-b border-border">
+      <div class="container-standard px-6 py-4 flex items-center gap-3">
         <router-link to="/">
           <Button variant="ghost" size="sm">&larr; 返回</Button>
         </router-link>
-        <h1 class="text-lg font-semibold">新建项目</h1>
+        <h1 class="text-lg font-semibold tracking-tight">新建项目</h1>
       </div>
     </header>
 
-    <main class="max-w-2xl mx-auto px-4 py-8">
-      <Card>
+    <main class="container-narrow px-6 py-10">
+      <Card class="border border-border shadow-[var(--shadow-sm)]">
         <CardHeader>
-          <CardTitle>项目信息</CardTitle>
+          <CardTitle class="text-heading">项目信息</CardTitle>
         </CardHeader>
         <CardContent>
           <form @submit.prevent="handleSubmit" class="space-y-6">
@@ -65,7 +65,7 @@ async function handleSubmit() {
                 v-model="query"
                 required
                 rows="3"
-                class="flex w-full rounded-lg border border-input bg-transparent px-3 py-2 text-base shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                class="flex w-full rounded-[var(--radius-lg)] border border-input bg-transparent px-3.5 py-2.5 text-base shadow-[var(--shadow-sm)] transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
                 placeholder="例如：transformer attention mechanism in deep learning"
               />
             </div>
@@ -76,12 +76,12 @@ async function handleSubmit() {
                 id="description"
                 v-model="description"
                 rows="2"
-                class="flex w-full rounded-lg border border-input bg-transparent px-3 py-2 text-base shadow-xs transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+                class="flex w-full rounded-[var(--radius-lg)] border border-input bg-transparent px-3.5 py-2.5 text-base shadow-[var(--shadow-sm)] transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
                 placeholder="项目的简要描述"
               />
             </div>
 
-            <Button type="submit" class="w-full" :disabled="isSubmitting">
+            <Button type="submit" class="w-full h-10 rounded-[var(--radius-lg)]" :disabled="isSubmitting">
               {{ isSubmitting ? '创建中...' : '创建项目' }}
             </Button>
           </form>

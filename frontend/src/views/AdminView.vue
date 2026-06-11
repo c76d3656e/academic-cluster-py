@@ -69,59 +69,59 @@ async function changeRole(u: User, newRole: string) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-muted/30">
-    <header class="bg-background border-b">
-      <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+  <div class="min-h-screen bg-background">
+    <header class="bg-background border-b border-border">
+      <div class="container-standard px-6 py-4 flex items-center gap-3">
         <router-link to="/">
           <Button variant="ghost" size="sm">&larr; 返回</Button>
         </router-link>
-        <h1 class="text-lg font-semibold">管理后台</h1>
+        <h1 class="text-lg font-semibold tracking-tight">管理后台</h1>
       </div>
     </header>
 
-    <div v-if="isLoading" class="text-center py-12 text-muted-foreground">加载中...</div>
+    <div v-if="isLoading" class="text-center py-16 text-muted-foreground">加载中...</div>
 
-    <main v-else class="max-w-7xl mx-auto px-4 py-8">
+    <main v-else class="container-standard px-6 py-10">
       <!-- 系统统计 -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <Card>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-5 mb-10">
+        <Card class="border border-border shadow-[var(--shadow-sm)]">
           <CardHeader class="pb-2">
-            <CardTitle class="text-sm text-muted-foreground font-normal">总用户数</CardTitle>
+            <CardTitle class="text-caption text-muted-foreground font-normal">总用户数</CardTitle>
           </CardHeader>
           <CardContent>
-            <p class="text-2xl font-bold">{{ stats?.total_users || 0 }}</p>
+            <p class="text-2xl font-semibold tracking-tight">{{ stats?.total_users || 0 }}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card class="border border-border shadow-[var(--shadow-sm)]">
           <CardHeader class="pb-2">
-            <CardTitle class="text-sm text-muted-foreground font-normal">活跃用户</CardTitle>
+            <CardTitle class="text-caption text-muted-foreground font-normal">活跃用户</CardTitle>
           </CardHeader>
           <CardContent>
-            <p class="text-2xl font-bold text-green-600">{{ stats?.active_users || 0 }}</p>
+            <p class="text-2xl font-semibold tracking-tight">{{ stats?.active_users || 0 }}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card class="border border-border shadow-[var(--shadow-sm)]">
           <CardHeader class="pb-2">
-            <CardTitle class="text-sm text-muted-foreground font-normal">总项目数</CardTitle>
+            <CardTitle class="text-caption text-muted-foreground font-normal">总项目数</CardTitle>
           </CardHeader>
           <CardContent>
-            <p class="text-2xl font-bold">{{ stats?.total_projects || 0 }}</p>
+            <p class="text-2xl font-semibold tracking-tight">{{ stats?.total_projects || 0 }}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card class="border border-border shadow-[var(--shadow-sm)]">
           <CardHeader class="pb-2">
-            <CardTitle class="text-sm text-muted-foreground font-normal">总论文数</CardTitle>
+            <CardTitle class="text-caption text-muted-foreground font-normal">总论文数</CardTitle>
           </CardHeader>
           <CardContent>
-            <p class="text-2xl font-bold">{{ stats?.total_papers || 0 }}</p>
+            <p class="text-2xl font-semibold tracking-tight">{{ stats?.total_papers || 0 }}</p>
           </CardContent>
         </Card>
       </div>
 
       <!-- 用户管理 -->
-      <Card>
+      <Card class="border border-border shadow-[var(--shadow-sm)]">
         <CardHeader>
-          <CardTitle>用户管理</CardTitle>
+          <CardTitle class="text-heading">用户管理</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>

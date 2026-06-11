@@ -23,7 +23,7 @@ const props = defineProps<ToasterProps>()
       '--normal-bg': 'var(--popover)',
       '--normal-text': 'var(--popover-foreground)',
       '--normal-border': 'var(--border)',
-      '--border-radius': 'var(--radius)',
+      '--border-radius': 'var(--radius-lg)',
       '--gray2': 'hsl(var(--popover) / 0.9)',
       '--gray3': 'var(--border)',
       '--gray4': 'var(--border)',

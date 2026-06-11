@@ -227,33 +227,33 @@ function getStatusLabel(status: string): string {
 </script>
 
 <template>
-  <div class="min-h-screen bg-muted/30">
-    <header class="bg-background border-b sticky top-0 z-10">
-      <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3">
+  <div class="min-h-screen bg-background">
+    <header class="bg-background border-b border-border sticky top-0 z-10">
+      <div class="container-standard px-6 py-4 flex items-center gap-3">
         <router-link to="/">
           <Button variant="ghost" size="sm">&larr; 返回</Button>
         </router-link>
-        <h1 class="text-lg font-semibold truncate">{{ project?.name || '加载中...' }}</h1>
+        <h1 class="text-lg font-semibold tracking-tight truncate">{{ project?.name || '加载中...' }}</h1>
         <Badge v-if="project" :variant="getStatusVariant(project.status)" class="shrink-0">
           {{ getStatusLabel(project.status) }}
         </Badge>
       </div>
     </header>
 
-    <div v-if="isLoading" class="text-center py-12 text-muted-foreground">加载中...</div>
+    <div v-if="isLoading" class="text-center py-16 text-muted-foreground">加载中...</div>
 
-    <main v-else-if="project" class="max-w-7xl mx-auto px-4 py-8">
+    <main v-else-if="project" class="container-standard px-6 py-10">
       <!-- 操作栏 -->
-      <div v-if="project.status === 'created'" class="mb-6">
-        <Button @click="startPipeline" :disabled="isStarting" variant="default">
+      <div v-if="project.status === 'created'" class="mb-8">
+        <Button @click="startPipeline" :disabled="isStarting" variant="default" size="lg" class="rounded-[var(--radius-lg)]">
           {{ isStarting ? '启动中...' : '启动 Pipeline' }}
         </Button>
       </div>
 
       <!-- 实时进度面板 -->
-      <Card v-if="isRunning || progressLogs.length > 0" class="mb-6">
+      <Card v-if="isRunning || progressLogs.length > 0" class="mb-8 border border-border shadow-[var(--shadow-sm)]">
         <CardHeader>
-          <CardTitle class="flex items-center gap-2">
+          <CardTitle class="flex items-center gap-2 text-base">
             <span v-if="isRunning" class="relative flex h-2 w-2">
               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
               <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
@@ -263,8 +263,8 @@ function getStatusLabel(status: string): string {
         </CardHeader>
         <CardContent>
           <!-- 当前状态 -->
-          <div v-if="isRunning && progressMessage" class="mb-3 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
-            <p class="text-sm font-medium text-blue-700 dark:text-blue-300">
+          <div v-if="isRunning && progressMessage" class="mb-4 p-3.5 bg-secondary rounded-[var(--radius-lg)] border border-border">
+            <p class="text-sm font-medium text-foreground">
               {{ progressMessage }}
             </p>
           </div>
@@ -274,10 +274,10 @@ function getStatusLabel(status: string): string {
             <div
               v-for="(log, i) in progressLogs"
               :key="i"
-              class="flex gap-2 py-1 border-b border-muted last:border-0"
+              class="flex gap-2 py-1.5 border-b border-border last:border-0"
             >
               <span class="text-muted-foreground shrink-0">{{ log.time }}</span>
-              <span v-if="log.node" class="text-blue-600 dark:text-blue-400 shrink-0">[{{ log.node }}]</span>
+              <span v-if="log.node" class="text-foreground/60 shrink-0">[{{ log.node }}]</span>
               <span>{{ log.message }}</span>
             </div>
           </div>
@@ -293,43 +293,43 @@ function getStatusLabel(status: string): string {
         </TabsList>
 
         <TabsContent value="overview">
-          <Card>
+          <Card class="border border-border shadow-[var(--shadow-sm)]">
             <CardHeader>
-              <CardTitle>项目信息</CardTitle>
+              <CardTitle class="text-base">项目信息</CardTitle>
             </CardHeader>
-            <CardContent class="space-y-4">
+            <CardContent class="space-y-5">
               <div>
-                <p class="text-sm text-muted-foreground">研究主题</p>
-                <p class="mt-1">{{ project.query }}</p>
+                <p class="text-caption text-muted-foreground">研究主题</p>
+                <p class="mt-1.5 text-body">{{ project.query }}</p>
               </div>
               <Separator />
               <div v-if="project.description">
-                <p class="text-sm text-muted-foreground">描述</p>
-                <p class="mt-1">{{ project.description }}</p>
-                <Separator class="mt-4" />
+                <p class="text-caption text-muted-foreground">描述</p>
+                <p class="mt-1.5 text-body">{{ project.description }}</p>
+                <Separator class="mt-5" />
               </div>
               <div>
-                <p class="text-sm text-muted-foreground">状态</p>
-                <p class="mt-1">{{ getStatusLabel(project.status) }}</p>
+                <p class="text-caption text-muted-foreground">状态</p>
+                <p class="mt-1.5 text-body">{{ getStatusLabel(project.status) }}</p>
               </div>
               <Separator />
               <div v-if="project.created_at">
-                <p class="text-sm text-muted-foreground">创建时间</p>
-                <p class="mt-1">{{ new Date(project.created_at).toLocaleString() }}</p>
+                <p class="text-caption text-muted-foreground">创建时间</p>
+                <p class="mt-1.5 text-body">{{ new Date(project.created_at).toLocaleString() }}</p>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="review">
-          <Card>
+          <Card class="border border-border shadow-[var(--shadow-sm)]">
             <CardHeader>
-              <CardTitle>综述</CardTitle>
+              <CardTitle class="text-base">综述</CardTitle>
             </CardHeader>
             <CardContent>
               <div v-if="review" class="prose max-w-none" v-html="renderedReview"></div>
-              <div v-else class="text-center py-12 text-muted-foreground">
-                <p>综述内容尚未生成</p>
+              <div v-else class="text-center py-16 text-muted-foreground">
+                <p class="text-body">综述内容尚未生成</p>
                 <p class="text-sm mt-2">请先启动 Pipeline 并等待完成</p>
               </div>
             </CardContent>
@@ -337,16 +337,16 @@ function getStatusLabel(status: string): string {
         </TabsContent>
 
         <TabsContent value="bibtex">
-          <Card>
+          <Card class="border border-border shadow-[var(--shadow-sm)]">
             <CardHeader>
-              <CardTitle>参考文献</CardTitle>
+              <CardTitle class="text-base">参考文献</CardTitle>
             </CardHeader>
             <CardContent>
               <div v-if="bibtex">
-                <pre class="bg-muted p-4 rounded-lg text-sm overflow-x-auto whitespace-pre-wrap">{{ bibtex }}</pre>
+                <pre class="bg-secondary p-4 rounded-[var(--radius-lg)] text-sm overflow-x-auto whitespace-pre-wrap border border-border">{{ bibtex }}</pre>
               </div>
-              <div v-else class="text-center py-12 text-muted-foreground">
-                <p>参考文献尚未生成</p>
+              <div v-else class="text-center py-16 text-muted-foreground">
+                <p class="text-body">参考文献尚未生成</p>
               </div>
             </CardContent>
           </Card>

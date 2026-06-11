@@ -27,34 +27,42 @@ async function handleLogin() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-muted/30 p-4">
-    <Card class="w-full max-w-md">
-      <CardHeader class="text-center">
-        <CardTitle class="text-2xl">Academic Cluster</CardTitle>
-        <CardDescription>登录到您的账户</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form @submit.prevent="handleLogin" class="space-y-4">
-          <div class="space-y-2">
-            <Label for="email">邮箱</Label>
-            <Input id="email" v-model="email" type="email" required placeholder="your@email.com" />
-          </div>
+  <div class="min-h-screen flex items-center justify-center bg-background p-4">
+    <div class="w-full max-w-md">
+      <!-- Brand -->
+      <div class="text-center mb-8">
+        <h1 class="text-display font-medium tracking-tight">Academic Cluster</h1>
+        <p class="text-muted-foreground mt-2 text-body">学术论文聚类分析平台</p>
+      </div>
 
-          <div class="space-y-2">
-            <Label for="password">密码</Label>
-            <Input id="password" v-model="password" type="password" required minlength="8" placeholder="至少 8 位" />
-          </div>
+      <Card class="border border-border shadow-[var(--shadow-sm)]">
+        <CardHeader class="text-center pb-2">
+          <CardTitle class="text-heading">登录</CardTitle>
+          <CardDescription>登录到您的账户</CardDescription>
+        </CardHeader>
+        <CardContent class="pt-2">
+          <form @submit.prevent="handleLogin" class="space-y-5">
+            <div class="space-y-2">
+              <Label for="email">邮箱</Label>
+              <Input id="email" v-model="email" type="email" required placeholder="your@email.com" />
+            </div>
 
-          <Button type="submit" class="w-full" :disabled="isLoading">
-            {{ isLoading ? '登录中...' : '登录' }}
-          </Button>
-        </form>
+            <div class="space-y-2">
+              <Label for="password">密码</Label>
+              <Input id="password" v-model="password" type="password" required minlength="8" placeholder="至少 8 位" />
+            </div>
 
-        <p class="mt-4 text-center text-sm text-muted-foreground">
-          还没有账户？
-          <router-link to="/register" class="text-primary hover:underline">注册</router-link>
-        </p>
-      </CardContent>
-    </Card>
+            <Button type="submit" class="w-full h-10 rounded-[var(--radius-lg)]" :disabled="isLoading">
+              {{ isLoading ? '登录中...' : '登录' }}
+            </Button>
+          </form>
+
+          <p class="mt-6 text-center text-sm text-muted-foreground">
+            还没有账户？
+            <router-link to="/register" class="text-foreground font-medium hover:underline underline-offset-2">注册</router-link>
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   </div>
 </template>
