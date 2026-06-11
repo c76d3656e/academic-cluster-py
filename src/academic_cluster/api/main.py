@@ -24,10 +24,28 @@ async def lifespan(app: FastAPI):
     cache = get_cache()
     vector_store = get_vector_store()
 
+    # 初始化 LangGraph checkpointer（AsyncPostgresSaver）
+    try:
+        from ..graphs.graph import get_checkpointer
+        await get_checkpointer()
+    except Exception as e:
+        logger.warning("Failed to init AsyncPostgresSaver, will use MemorySaver fallback", error=str(e))
+
+    # 初始化 Provider Pool（LiteLLM Router）
+    try:
+        from ..services.provider_pool import init_pools
+        await init_pools()
+    except Exception as e:
+        logger.warning("Failed to init provider pools", error=str(e))
+
     yield
 
     # 清理资源
     logger.info("Shutting down application")
+    from ..services.provider_pool import close_pools
+    await close_pools()
+    from ..graphs.graph import close_checkpointer
+    await close_checkpointer()
     from ..services import close_database, close_cache, close_vector_store
     await close_database()
     await close_cache()
@@ -56,7 +74,11 @@ def create_app() -> FastAPI:
 
     # 注册路由
     from .routes import router
+    from .sse import router as sse_router
+    from .auth_routes import router as auth_router
+    app.include_router(auth_router, prefix="/api")
     app.include_router(router, prefix="/api")
+    app.include_router(sse_router, prefix="/api")
 
     @app.get("/health")
     async def health():
