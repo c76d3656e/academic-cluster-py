@@ -72,3 +72,12 @@ data/processed/
 *.json
 !package.json
 !package-lock.json
+
+# Generated output
+output/
+
+# Workflow tool
+.spec-workflow/
+
+# Frontend
+frontend/node_modules/
