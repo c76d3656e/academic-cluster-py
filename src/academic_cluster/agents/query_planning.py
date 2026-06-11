@@ -14,8 +14,6 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
-from ..config import get_settings
-
 logger = structlog.get_logger()
 
 
@@ -138,18 +136,10 @@ def create_query_planning_agent(
     Returns:
         绑定了工具的 LLM 实例
     """
-    settings = get_settings()
-
-    if model is None:
-        model = settings.llm.model
+    from ..services.llm_client import create_llm
 
     # 创建 LLM
-    llm = ChatOpenAI(
-        model=model,
-        temperature=temperature,
-        api_key=settings.llm.api_key,
-        base_url=settings.llm.base_url,
-    )
+    llm = create_llm(temperature=temperature)
 
     # 绑定工具
     agent = llm.bind_tools([
@@ -207,12 +197,20 @@ async def plan_queries(topic: str) -> dict:
 
     response = await agent.ainvoke(messages)
 
+    # LLM 响应 content 可能是 list（多模态格式）或 string
+    raw_content = response.content
+    if isinstance(raw_content, list):
+        raw_content = "".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in raw_content
+        )
+
     # 解析响应
     # TODO: 解析 LLM 响应，提取查询和源
     result = {
         "queries": [topic],  # 默认使用原始主题
         "sources": ["semantic_scholar", "pubmed", "arxiv", "openalex"],
-        "reasoning": response.content,
+        "reasoning": raw_content,
     }
 
     logger.info(

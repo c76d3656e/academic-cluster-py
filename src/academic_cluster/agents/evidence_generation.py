@@ -10,8 +10,6 @@ import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from ..config import get_settings
-
 logger = structlog.get_logger()
 
 
@@ -52,17 +50,8 @@ def create_evidence_agent(
     temperature: float = 0.2,
 ) -> ChatOpenAI:
     """创建证据生成 Agent"""
-    settings = get_settings()
-
-    if model is None:
-        model = settings.llm.model
-
-    return ChatOpenAI(
-        model=model,
-        temperature=temperature,
-        api_key=settings.llm.api_key,
-        base_url=settings.llm.base_url,
-    )
+    from ..services.llm_client import create_llm
+    return create_llm(temperature=temperature)
 
 
 async def generate_evidence_card(
@@ -94,25 +83,24 @@ async def generate_evidence_card(
 
     response = await agent.ainvoke(messages)
 
+    # LLM 响应 content 可能是 list（多模态格式）或 string
+    raw_content = response.content
+    if isinstance(raw_content, list):
+        raw_content = "".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in raw_content
+        )
+
     try:
-        result = json.loads(response.content)
+        result = json.loads(raw_content)
     except json.JSONDecodeError:
         # 尝试修复
-        content = response.content
-        # 移除 markdown 代码块
-        content = content.replace("```json", "").replace("```", "").strip()
+        content = raw_content.replace("```json", "").replace("```", "").strip()
         try:
             result = json.loads(content)
         except json.JSONDecodeError:
-            logger.warning("Failed to parse evidence response")
-            result = {
-                "claim": "解析失败",
-                "evidence_span": "",
-                "method": "",
-                "metric": "",
-                "limitation": "",
-                "confidence": 0.0,
-            }
+            logger.error("Failed to parse evidence response", response=raw_content[:500])
+            raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}")
 
     # 添加论文 ID
     result["paper_id"] = paper.get("id")
