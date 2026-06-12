@@ -21,6 +21,7 @@ from ...services.citation_utils import (
     validate_citations,
 )
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -37,7 +38,7 @@ async def write_review_node(state: PipelineState) -> dict:
     3. 引用校验 + 修订
     4. 重编号 + 确定性组装
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("write_review", "llm", index=5)
 

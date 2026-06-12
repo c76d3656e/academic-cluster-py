@@ -195,7 +195,8 @@ async def plan_queries(topic: str) -> dict:
         HumanMessage(content=f"请为以下研究主题规划搜索查询：\n\n{topic}"),
     ]
 
-    response = await agent.ainvoke(messages)
+    from ..services.llm_client import ainvoke_with_callbacks
+    response = await ainvoke_with_callbacks(agent, messages)
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
     raw_content = response.content

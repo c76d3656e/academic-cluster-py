@@ -11,6 +11,7 @@ import httpx
 import structlog
 
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -36,7 +37,11 @@ async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) 
         documents.append(f"{title} {abstract}".strip())
 
     async def _do_rerank(provider) -> list[dict]:
-        url = f"{provider.api_url}/rerank"
+        base = provider.api_url.rstrip("/")
+        if not base.endswith("/v1"):
+            url = f"{base}/v1/rerank"
+        else:
+            url = f"{base}/rerank"
         headers = {
             "Authorization": f"Bearer {provider.api_key}",
             "Content-Type": "application/json",
@@ -82,7 +87,7 @@ async def rerank_node(state: PipelineState) -> dict:
     - 按分数排序
     - 分为核心参考（top 80）和辅助参考（next 160）
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("rerank", "compute", index=2)
 

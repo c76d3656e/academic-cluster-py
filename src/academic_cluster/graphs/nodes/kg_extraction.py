@@ -12,6 +12,7 @@ import structlog
 
 from ...agents.kg_extraction import extract_kg_from_papers_batch, normalize_kg
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -25,7 +26,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
     将论文按 KG_BATCH_SIZE 分批，每批打包成一个 LLM prompt。
     支持幂等恢复：开始时查询 DB 跳过已提取的论文。
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("kg_extraction", "llm", index=3)
 
@@ -169,8 +170,8 @@ async def kg_extraction_node(state: PipelineState) -> dict:
 
         # 记录 token 用量
         from ...agents.kg_extraction import get_token_tracker
-        tracker = get_token_tracker()
-        token_usage = tracker.summary()
+        token_tracker = get_token_tracker()
+        token_usage = token_tracker.summary()
         if token_usage:
             logger.info(
                 "KG extraction token usage",

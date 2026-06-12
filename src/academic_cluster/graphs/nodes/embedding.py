@@ -12,6 +12,7 @@ import structlog
 from ...services.database import get_database
 from ...services.cache import get_cache
 from ...services.vector_store import get_vector_store
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -47,7 +48,7 @@ async def embedding_node(state: PipelineState) -> dict:
     - 存储到向量数据库
     - 返回嵌入 ID 列表
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("embedding", "compute", index=1)
 

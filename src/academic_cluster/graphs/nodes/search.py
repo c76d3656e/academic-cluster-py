@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ...prompts import get_parse_topic_prompt
 from ...tools.academic_search import search_all_sources
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -24,7 +25,7 @@ logger = structlog.get_logger()
 
 async def _generate_search_queries(topic: str) -> list[str]:
     """使用 LLM 生成优化的搜索 query（对齐 Rust 版 parse_topic）"""
-    from ...services.llm_client import create_llm
+    from ...services.llm_client import create_llm, ainvoke_with_callbacks
     llm = create_llm(temperature=0.3)
 
     prompt_template = get_parse_topic_prompt()
@@ -40,7 +41,9 @@ async def _generate_search_queries(topic: str) -> list[str]:
     ]
 
     try:
-        response = await llm.ainvoke(messages)
+        logger.info("Calling LLM to generate search queries", topic=topic, prompt_length=len(prompt))
+        response = await asyncio.wait_for(ainvoke_with_callbacks(llm, messages), timeout=60.0)
+        logger.info("LLM response received", content_length=len(str(response.content)))
         # LLM 响应 content 可能是 list（多模态格式）或 string
         content = response.content
         if isinstance(content, list):
@@ -79,7 +82,7 @@ async def search_node(state: PipelineState) -> dict:
     2. 并行搜索多个数据源
     3. 去重并保存
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("search", "search", index=0)
 
@@ -91,7 +94,9 @@ async def search_node(state: PipelineState) -> dict:
         sources = config.get("sources", ["semantic_scholar", "arxiv", "openalex"])
 
         # 使用 LLM 生成优化的搜索 queries
+        logger.info("Generating search queries...", query=state.query)
         queries = await _generate_search_queries(state.query)
+        logger.info("Search queries generated", queries=queries)
 
         await send_progress(
             state.project_id, "search",

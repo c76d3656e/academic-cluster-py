@@ -12,6 +12,7 @@ import structlog
 
 from ...services.citation_utils import validate_citations
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -28,7 +29,7 @@ async def coverage_audit_node(state: PipelineState) -> dict:
     - 计算论文覆盖率
     - 决定是否需要修订
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("coverage_audit", "compute", index=8)
 

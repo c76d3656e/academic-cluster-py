@@ -23,13 +23,15 @@ logger = structlog.get_logger()
 
 async def _ainvoke_with_retry(agent, messages, max_retries=3):
     """带重试的 LLM 调用"""
+    from ..services.llm_client import ainvoke_with_callbacks
+
     @retry(
         stop=stop_after_attempt(max_retries),
         wait=wait_exponential(multiplier=2, min=3, max=30),
         reraise=True,
     )
     async def _call():
-        return await agent.ainvoke(messages)
+        return await ainvoke_with_callbacks(agent, messages)
 
     return await _call()
 
@@ -197,12 +199,23 @@ async def generate_outline(
     try:
         outline = json.loads(raw_content)
     except json.JSONDecodeError:
+        # 去掉 markdown 代码块
         content = raw_content.replace("```json", "").replace("```", "").strip()
         try:
             outline = json.loads(content)
         except json.JSONDecodeError:
-            logger.error("Failed to parse outline response", response=raw_content[:500])
-            raise ValueError(f"LLM returned invalid JSON for outline: {raw_content[:200]}")
+            # 尝试提取 JSON 对象（从第一个 { 到最后一个 }）
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end > start:
+                try:
+                    outline = json.loads(content[start:end + 1])
+                except json.JSONDecodeError:
+                    logger.error("Failed to parse outline response", response=raw_content[:500])
+                    raise ValueError(f"LLM returned invalid JSON for outline: {raw_content[:200]}")
+            else:
+                logger.error("Failed to parse outline response", response=raw_content[:500])
+                raise ValueError(f"LLM returned invalid JSON for outline: {raw_content[:200]}")
 
     return outline
 

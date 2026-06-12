@@ -80,7 +80,8 @@ class PipelineState(BaseModel):
     needs_revision: bool = False
 
     # === 可观测性 ===
-    tracker: Any = None  # PipelineTracker 实例（可选）
+    # tracker 已移至 ContextVar，避免 AsyncPostgresSaver 序列化不可序列化对象
+    # 通过 get_current_tracker() 获取
 
     # === 配置 ===
     config: dict = Field(default_factory=dict)

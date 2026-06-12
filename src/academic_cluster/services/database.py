@@ -1142,6 +1142,10 @@ class DatabaseService:
         run_id: str,
         status: str,
         error_message: str | None = None,
+        elapsed_seconds: float | None = None,
+        total_tokens: int = 0,
+        total_cost: float = 0,
+        llm_calls_count: int = 0,
     ) -> None:
         """结束 Pipeline 运行"""
         async with self.session() as session:
@@ -1151,13 +1155,20 @@ class DatabaseService:
                     SET status = :status,
                         error_message = :error_message,
                         finished_at = NOW(),
-                        elapsed_seconds = EXTRACT(EPOCH FROM (NOW() - created_at))
+                        elapsed_seconds = COALESCE(:elapsed_seconds, EXTRACT(EPOCH FROM (NOW() - created_at))),
+                        total_tokens = :total_tokens,
+                        total_cost = :total_cost,
+                        total_llm_calls = :llm_calls_count
                     WHERE id = :id
                 """),
                 {
                     "id": run_id,
                     "status": status,
                     "error_message": error_message,
+                    "elapsed_seconds": elapsed_seconds,
+                    "total_tokens": total_tokens,
+                    "total_cost": total_cost,
+                    "llm_calls_count": llm_calls_count,
                 }
             )
 
@@ -1368,7 +1379,7 @@ class DatabaseService:
                     SET status = :status,
                         prompt_tokens = :prompt_tokens,
                         completion_tokens = :completion_tokens,
-                        total_tokens = :prompt_tokens + :completion_tokens,
+                        total_tokens = CAST(:prompt_tokens AS INTEGER) + CAST(:completion_tokens AS INTEGER),
                         cost = :cost,
                         error_message = :error_message,
                         http_status_code = :http_status_code,

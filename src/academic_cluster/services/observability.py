@@ -54,6 +54,8 @@ def _summarize_output(output: Any, max_len: int = 500) -> dict:
 # ---------------------------------------------------------------------------
 _current_run_id: ContextVar[str | None] = ContextVar("current_run_id", default=None)
 _current_node: ContextVar[str | None] = ContextVar("current_node", default=None)
+_current_tracker: ContextVar[Optional["PipelineTracker"]] = ContextVar("current_tracker", default=None)
+_current_llm_callback: ContextVar[Optional["LLMCallbackHandler"]] = ContextVar("current_llm_callback", default=None)
 
 
 def setup_structlog(log_level: str = "INFO"):
@@ -189,36 +191,48 @@ class LLMCallbackHandler(BaseCallbackHandler):
     ):
         super().__init__()
         self.tracker = tracker
-        self.db_caller = db_caller  # async callable to persist llm_call
+        self.db_caller = db_caller  # async callable(node_name, provider, model, call_type, prompt_tokens, completion_tokens, latency_ms)
         self._start_times: dict[str, float] = {}
 
     def on_llm_start(self, serialized, prompts, *, run_id, **kwargs):
         self._start_times[str(run_id)] = time.monotonic()
+        structlog.get_logger().info("LLM callback on_llm_start", run_id=str(run_id))
 
     def on_llm_end(self, response: LLMResult, *, run_id, **kwargs):
-        elapsed_ms = int(
-            (time.monotonic() - self._start_times.pop(str(run_id), 0)) * 1000
-        )
-
-        # 提取 token 用量
-        usage: dict = {}
-        if response.llm_output:
-            usage = response.llm_output.get("token_usage", {})
-
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-
-        # 从响应 metadata 提取模型信息
-        model_name = "unknown"
-        provider_name = "unknown"
-        if response.llm_output:
-            model_name = response.llm_output.get("model_name", "unknown")
-
-        # 从 ContextVar 获取当前 node
-        node_name = _current_node.get() or "unknown"
-
-        # 异步记录到 tracker（fire-and-forget for sync callback）
         try:
+            elapsed_ms = int(
+                (time.monotonic() - self._start_times.pop(str(run_id), 0)) * 1000
+            )
+
+            # 提取 token 用量
+            usage: dict = {}
+            if response.llm_output:
+                usage = response.llm_output.get("token_usage", {})
+
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+
+            # 从响应 metadata 提取模型信息
+            model_name = "unknown"
+            provider_name = "unknown"
+            if response.llm_output:
+                model_name = response.llm_output.get("model_name", "unknown")
+
+            # 从 ContextVar 获取当前 node
+            node_name = _current_node.get() or "unknown"
+
+            _cb_logger = structlog.get_logger()
+            _cb_logger.info(
+                "LLM callback on_llm_end",
+                node=node_name,
+                model=model_name,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                elapsed_ms=elapsed_ms,
+                has_db_caller=self.db_caller is not None,
+            )
+
+            # 异步记录到 tracker（fire-and-forget for sync callback）
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 asyncio.ensure_future(
@@ -233,8 +247,21 @@ class LLMCallbackHandler(BaseCallbackHandler):
                         latency_ms=elapsed_ms,
                     )
                 )
-        except RuntimeError:
-            pass
+                # 持久化 llm_call 到数据库
+                if self.db_caller:
+                    asyncio.ensure_future(
+                        self.db_caller(
+                            node_name=node_name,
+                            provider_name=provider_name,
+                            model_name=model_name,
+                            call_type="llm",
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            latency_ms=elapsed_ms,
+                        )
+                    )
+        except Exception as e:
+            structlog.get_logger().warning("LLM callback on_llm_end error", error=str(e))
 
     def on_llm_error(self, error, *, run_id, **kwargs):
         elapsed_ms = int(
@@ -364,7 +391,6 @@ class PipelineTracker:
                 error_traceback=error_traceback,
                 input_summary=input_summary,
                 output_summary=output_summary,
-                elapsed_ms=elapsed_ms,
                 prompt_tokens=node_stats.get("prompt_tokens", 0),
                 completion_tokens=node_stats.get("completion_tokens", 0),
                 total_tokens=node_stats.get("total_tokens", 0),
@@ -527,3 +553,23 @@ def get_current_run_id() -> Optional[str]:
 def get_current_node() -> Optional[str]:
     """获取当前正在执行的 node 名称（从 ContextVar）"""
     return _current_node.get()
+
+
+def get_current_tracker() -> Optional["PipelineTracker"]:
+    """获取当前 PipelineTracker 实例（从 ContextVar）"""
+    return _current_tracker.get()
+
+
+def set_current_tracker(tracker: Optional["PipelineTracker"]) -> None:
+    """设置当前 PipelineTracker 实例（在 pipeline 启动时调用）"""
+    _current_tracker.set(tracker)
+
+
+def get_current_llm_callback() -> Optional["LLMCallbackHandler"]:
+    """获取当前 LLMCallbackHandler 实例（从 ContextVar）"""
+    return _current_llm_callback.get()
+
+
+def set_current_llm_callback(callback: Optional["LLMCallbackHandler"]) -> None:
+    """设置当前 LLMCallbackHandler 实例（在 pipeline 启动时调用）"""
+    _current_llm_callback.set(callback)

@@ -9,6 +9,7 @@ import structlog
 from ...agents.writing import generate_outline
 from ...config import get_settings
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -27,7 +28,7 @@ async def outline_generation_node(state: PipelineState) -> dict:
 
     生成大纲后，图会中断等待用户确认。
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("outline_generation", "llm", index=4)
 

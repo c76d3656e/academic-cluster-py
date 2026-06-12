@@ -7,6 +7,7 @@ import traceback
 import structlog
 
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -22,7 +23,7 @@ async def gap_analysis_node(state: PipelineState) -> dict:
     - 生成针对性搜索查询
     - 决定是否需要补充搜索
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("gap_analysis", "compute", index=7)
 

@@ -19,6 +19,7 @@ from ...services.citation_utils import (
     validate_citations,
 )
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -35,7 +36,7 @@ async def section_revision_node(state: PipelineState) -> dict:
     3. 按首次出现顺序重编号
     4. 重新组装综述 + 参考文献列表
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("section_revision", "compute", index=9)
 

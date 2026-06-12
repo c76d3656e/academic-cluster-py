@@ -10,6 +10,7 @@ import structlog
 
 from ...agents.evidence_generation import generate_evidence_cards_batch
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -23,7 +24,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
     使用 LLM 为每篇核心论文生成结构化证据卡片。
     支持幂等恢复：查询 DB 跳过已有卡片的论文。
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("evidence_cards", "llm", index=6)
 

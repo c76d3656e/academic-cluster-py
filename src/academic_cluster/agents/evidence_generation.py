@@ -81,7 +81,8 @@ async def generate_evidence_card(
         HumanMessage(content=prompt),
     ]
 
-    response = await agent.ainvoke(messages)
+    from ..services.llm_client import ainvoke_with_callbacks
+    response = await ainvoke_with_callbacks(agent, messages)
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
     raw_content = response.content
@@ -94,13 +95,23 @@ async def generate_evidence_card(
     try:
         result = json.loads(raw_content)
     except json.JSONDecodeError:
-        # 尝试修复
+        # 去掉 markdown 代码块
         content = raw_content.replace("```json", "").replace("```", "").strip()
         try:
             result = json.loads(content)
         except json.JSONDecodeError:
-            logger.error("Failed to parse evidence response", response=raw_content[:500])
-            raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}")
+            # 尝试提取 JSON 对象
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end > start:
+                try:
+                    result = json.loads(content[start:end + 1])
+                except json.JSONDecodeError:
+                    logger.error("Failed to parse evidence response", response=raw_content[:500])
+                    raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}")
+            else:
+                logger.error("Failed to parse evidence response", response=raw_content[:500])
+                raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}")
 
     # 添加论文 ID
     result["paper_id"] = paper.get("id")

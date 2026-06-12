@@ -63,6 +63,93 @@ def create_llm(
     return llm
 
 
+async def ainvoke_with_callbacks(llm, input, config=None, **kwargs):
+    """
+    包装 LLM ainvoke 调用，手动追踪 token 用量和持久化到 DB。
+
+    LangChain 的 callback 系统对 ChatOpenAI 的 on_llm_end 不可靠，
+    因此在此处直接追踪。
+
+    使用方式:
+        llm = create_llm()
+        response = await ainvoke_with_callbacks(llm, messages)
+    """
+    import time as _time
+
+    from .observability import get_current_node, get_current_tracker
+
+    start_time = _time.monotonic()
+    node_name = get_current_node() or "unknown"
+    tracker = get_current_tracker()
+
+    response = await llm.ainvoke(input, config=config, **kwargs)
+
+    elapsed_ms = int((_time.monotonic() - start_time) * 1000)
+
+    # 提取 token 用量
+    prompt_tokens = 0
+    completion_tokens = 0
+    model_name = "unknown"
+
+    usage_meta = getattr(response, "usage_metadata", None)
+    if usage_meta:
+        prompt_tokens = usage_meta.get("input_tokens", 0) or usage_meta.get("prompt_tokens", 0)
+        completion_tokens = usage_meta.get("output_tokens", 0) or usage_meta.get("completion_tokens", 0)
+
+    resp_meta = getattr(response, "response_metadata", None)
+    if resp_meta:
+        model_name = resp_meta.get("model_name", "unknown")
+        # OpenAI 格式 token_usage
+        token_usage = resp_meta.get("token_usage", {})
+        if token_usage and not prompt_tokens:
+            prompt_tokens = token_usage.get("prompt_tokens", 0)
+            completion_tokens = token_usage.get("completion_tokens", 0)
+
+    # 记录到 tracker
+    if tracker:
+        try:
+            await tracker.token_tracker.record(
+                node_name=node_name,
+                provider_name="llm",
+                model_name=model_name,
+                call_type="llm",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost=0.0,
+                latency_ms=elapsed_ms,
+            )
+        except Exception:
+            pass
+
+    # 持久化到 DB
+    if tracker and tracker.run_id:
+        try:
+            from .database import get_database
+            from .observability import _current_node as _node_cv
+            db = get_database()
+            exec_id = tracker._node_ids.get(node_name)
+            if exec_id:
+                call_id = await db.create_llm_call(
+                    pipeline_run_id=tracker.run_id,
+                    node_execution_id=exec_id,
+                    call_type="llm",
+                    provider_name="llm",
+                    model_name=model_name,
+                    latency_ms=elapsed_ms,
+                )
+                await db.finish_llm_call(
+                    call_id=call_id,
+                    status="success",
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    latency_ms=elapsed_ms,
+                )
+        except Exception as e:
+            logger.warning("Failed to persist llm_call", error=str(e))
+
+    return response
+
+
 def create_llm_with_retry(
     temperature: float = 0.7,
     max_tokens: Optional[int] = None,
@@ -86,8 +173,23 @@ def create_llm_with_retry(
         )
         async def _call():
             llm = create_llm(temperature=temperature, max_tokens=max_tokens)
-            return await llm.ainvoke(messages)
+            return await ainvoke_with_callbacks(llm, messages)
 
         return await _call()
 
     return _invoke
+
+
+async def invoke_llm(
+    messages: list,
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+):
+    """
+    便捷函数：创建 LLM 并调用，自动注入 callback。
+
+    Returns:
+        LLM response
+    """
+    llm = create_llm(temperature=temperature, max_tokens=max_tokens)
+    return await ainvoke_with_callbacks(llm, messages)

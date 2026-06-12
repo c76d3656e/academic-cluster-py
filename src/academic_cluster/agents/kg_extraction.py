@@ -466,7 +466,8 @@ async def extract_kg_from_papers_batch(
         HumanMessage(content=prompt),
     ]
 
-    response = await agent.ainvoke(messages)
+    from ..services.llm_client import ainvoke_with_callbacks
+    response = await ainvoke_with_callbacks(agent, messages)
 
     # 追踪 token 用量
     usage = getattr(response, "usage_metadata", None) or getattr(response, "response_metadata", {})

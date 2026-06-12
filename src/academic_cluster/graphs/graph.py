@@ -11,7 +11,7 @@ from langgraph.graph import END, StateGraph
 
 from .state import PipelineState
 from .checkpoint import with_audit
-from ..services.observability import PipelineTracker, LLMCallbackHandler
+from ..services.observability import PipelineTracker, LLMCallbackHandler, set_current_tracker, set_current_llm_callback
 from .nodes import (
     search_node,
     deduplicate_node,
@@ -337,7 +337,37 @@ async def run_pipeline(
 
     # 创建 PipelineTracker 实例，注入 db 持久化 callable
     tracker = PipelineTracker(project_id, topic=query)
-    llm_callback = LLMCallbackHandler(tracker.token_tracker)
+
+    # 创建 llm_call DB 持久化 wrapper
+    async def _persist_llm_call(
+        node_name: str, provider_name: str, model_name: str,
+        call_type: str, prompt_tokens: int, completion_tokens: int,
+        latency_ms: int,
+    ):
+        """创建 + 完成 llm_call 记录"""
+        try:
+            exec_id = tracker._node_ids.get(node_name)
+            if not exec_id or not tracker.run_id:
+                return
+            call_id = await db.create_llm_call(
+                pipeline_run_id=tracker.run_id,
+                node_execution_id=exec_id,
+                call_type=call_type,
+                provider_name=provider_name,
+                model_name=model_name,
+                latency_ms=latency_ms,
+            )
+            await db.finish_llm_call(
+                call_id=call_id,
+                status="success",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                latency_ms=latency_ms,
+            )
+        except Exception as e:
+            logger.warning("Failed to persist llm_call", error=str(e))
+
+    llm_callback = LLMCallbackHandler(tracker.token_tracker, db_caller=_persist_llm_call)
 
     # 如果自动确认，则不中断
     interrupt_before = [] if auto_confirm else ["user_confirm"]
@@ -359,17 +389,20 @@ async def run_pipeline(
     # 启动 tracker 并持久化 pipeline_run
     await tracker.start(db_create_run=db.create_pipeline_run)
 
+    # 通过 ContextVar 注入 tracker（避免不可序列化对象进入 checkpoint）
+    set_current_tracker(tracker)
+    set_current_llm_callback(llm_callback)
+
     if resume:
         # LangGraph 原生恢复：传 None 作为 input，自动从最后 checkpoint 继续
         logger.info("Resuming pipeline from checkpoint", project_id=project_id)
         input_data = None
     else:
-        # 新建运行（注入 tracker）
+        # 新建运行
         input_data = PipelineState(
             project_id=project_id,
             query=query,
             config=config or {},
-            tracker=tracker,
         )
 
     result = None

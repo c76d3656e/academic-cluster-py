@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ...prompts import get_cluster_targeted_refine_prompt
 from ...tools.academic_search import search_all_sources
 from ...services.database import get_database
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -27,7 +28,7 @@ async def _generate_targeted_queries(
     previous_queries: list[str],
 ) -> list[str]:
     """使用 LLM 生成针对性补充 query（对齐 Rust 版 cluster_targeted_refine）"""
-    from ...services.llm_client import create_llm
+    from ...services.llm_client import create_llm, ainvoke_with_callbacks
     llm = create_llm(temperature=0.3)
 
     prompt_template = get_cluster_targeted_refine_prompt()
@@ -48,7 +49,7 @@ async def _generate_targeted_queries(
     ]
 
     try:
-        response = await llm.ainvoke(messages)
+        response = await ainvoke_with_callbacks(llm, messages)
         # LLM 响应 content 可能是 list（多模态格式）或 string
         content = response.content
         if isinstance(content, list):
@@ -84,7 +85,7 @@ async def targeted_refine_node(state: PipelineState) -> dict:
     根据差距分析结果，使用 LLM 生成有针对性的补充搜索 query，
     然后搜索新论文并合并到现有论文列表。
     """
-    tracker = state.tracker if hasattr(state, 'tracker') else None
+    tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("targeted_refine", "llm", index=10)
 

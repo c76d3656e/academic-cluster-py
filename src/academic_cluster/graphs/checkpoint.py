@@ -14,7 +14,7 @@ from typing import Callable
 import structlog
 
 from ..services.database import get_database
-from ..services.observability import _summarize_output
+from ..services.observability import _summarize_output, get_current_tracker
 
 logger = structlog.get_logger()
 
@@ -40,8 +40,8 @@ def with_audit(node_name: str):
             project_id = state.project_id if hasattr(state, 'project_id') else None
             start_time = time.time()
 
-            # 获取 tracker（可选，向后兼容）
-            tracker = state.tracker if hasattr(state, 'tracker') else None
+            # 获取 tracker（从 ContextVar）
+            tracker = get_current_tracker()
             if tracker and hasattr(tracker, 'begin_node'):
                 try:
                     await tracker.begin_node(
