@@ -13,6 +13,52 @@ from ..config import get_settings
 logger = structlog.get_logger()
 
 
+async def _seed_admin(db, settings):
+    """启动时确保存在管理员账户（幂等）"""
+    from ..services.auth import get_password_service
+    from sqlalchemy import text
+
+    password_service = get_password_service()
+    admin_email = settings.admin_email
+    admin_password = settings.admin_password
+
+    async with db.session() as session:
+        result = await session.execute(
+            text("SELECT id, hashed_password FROM users WHERE email = :email"),
+            {"email": admin_email},
+        )
+        row = result.fetchone()
+
+    if row is None:
+        # 不存在，创建
+        hashed = password_service.hash_password(admin_password)
+        user_id = await db.save_user({
+            "email": admin_email,
+            "hashed_password": hashed,
+            "full_name": settings.admin_full_name,
+            "role": "admin",
+            "is_active": True,
+        })
+        logger.info("Admin user created", email=admin_email, user_id=user_id)
+    else:
+        # 存在但密码可能被 .env 更新，验证并同步
+        if not password_service.verify_password(admin_password, row[1]):
+            hashed = password_service.hash_password(admin_password)
+            async with db.session() as session:
+                await session.execute(
+                    text("UPDATE users SET hashed_password = :pwd, role = 'admin' WHERE id = :id"),
+                    {"pwd": hashed, "id": row[0]},
+                )
+            logger.info("Admin password updated from .env", email=admin_email)
+        else:
+            # 确保角色是 admin
+            async with db.session() as session:
+                await session.execute(
+                    text("UPDATE users SET role = 'admin' WHERE id = :id AND role != 'admin'"),
+                    {"id": row[0]},
+                )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -41,6 +87,12 @@ async def lifespan(app: FastAPI):
         await init_pools()
     except Exception as e:
         logger.warning("Failed to init provider pools", error=str(e))
+
+    # 初始化默认管理员账户
+    try:
+        await _seed_admin(db, settings)
+    except Exception as e:
+        logger.warning("Failed to seed admin user", error=str(e))
 
     yield
 

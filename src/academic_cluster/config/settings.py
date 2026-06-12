@@ -166,6 +166,11 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
 
+    # 默认管理员账户（首次启动时自动创建）
+    admin_email: str = "admin@cluster.local"
+    admin_password: str = "Admin123!"
+    admin_full_name: str = "Administrator"
+
     # LangGraph 配置
     langgraph_debug: bool = True
     langsmith_api_key: Optional[str] = None
