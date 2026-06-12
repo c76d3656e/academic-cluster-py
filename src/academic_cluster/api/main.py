@@ -18,9 +18,13 @@ async def _seed_admin(db, settings):
     from ..services.auth import get_password_service
     from sqlalchemy import text
 
+    admin_password = settings.admin_password
+    if not admin_password:
+        logger.info("Admin password not configured (ADMIN_PASSWORD is empty), skipping admin seed")
+        return
+
     password_service = get_password_service()
     admin_email = settings.admin_email
-    admin_password = settings.admin_password
 
     async with db.session() as session:
         result = await session.execute(

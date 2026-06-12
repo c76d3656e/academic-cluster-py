@@ -22,6 +22,67 @@ export interface ProjectListResponse {
   total: number
 }
 
+/** 大纲中的单个章节定义 */
+export interface OutlineSection {
+  id?: string
+  name?: string
+  title?: string
+  heading?: string
+  description?: string
+  target_words?: number
+  key_clusters?: number[]
+  key_entities?: string[]
+  subsections?: OutlineSection[]
+  [key: string]: unknown
+}
+
+/** 大纲数据 */
+export interface Outline {
+  id: string
+  project_id: string
+  title?: string
+  sections?: OutlineSection[]
+  status?: string
+  version?: number
+  [key: string]: unknown
+}
+
+/** 已撰写章节 */
+export interface WrittenSection {
+  id: string
+  outline_id: string
+  section_id: string
+  content: string
+  word_count?: number
+  quality_score?: number
+  version?: number
+  created_at?: string
+  [key: string]: unknown
+}
+
+/** 证据卡片 */
+export interface EvidenceCard {
+  id: string
+  paper_id: string
+  claim?: string
+  evidence_span?: string
+  method?: string
+  metric?: string
+  limitation?: string
+  confidence?: number
+  cluster_id?: string
+  [key: string]: unknown
+}
+
+/** 综述 API 响应 */
+export interface ReviewResponse {
+  project_id: string
+  outline: Outline | null
+  sections: WrittenSection[]
+  evidence_cards: EvidenceCard[]
+  status: string
+}
+
 export const projectsApi = {
   async createProject(data: CreateProjectRequest): Promise<Project> {
     const response = await apiClient.post('/projects', data)
@@ -60,7 +121,7 @@ export const projectsApi = {
     })
   },
 
-  async getReview(projectId: string): Promise<{ review: string | null; bibtex: string | null }> {
+  async getReview(projectId: string): Promise<ReviewResponse> {
     const response = await apiClient.get(`/projects/${projectId}/review`)
     return response.data
   },

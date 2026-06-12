@@ -167,8 +167,10 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # 默认管理员账户（首次启动时自动创建）
+    # admin_password 无默认值，必须通过环境变量或 .env 显式设置
+    # 留空则跳过管理员自动创建（开发环境允许，生产环境由 validate_security 强制校验）
     admin_email: str = "admin@cluster.local"
-    admin_password: str = "Admin123!"
+    admin_password: str = ""
     admin_full_name: str = "Administrator"
 
     # LangGraph 配置
@@ -191,6 +193,8 @@ class Settings(BaseSettings):
             insecure_defaults.append("app_secret_key")
         if self.postgres_password in ("postgres", ""):
             insecure_defaults.append("postgres_password")
+        if not self.admin_password:
+            insecure_defaults.append("admin_password (不能为空，必须设置)")
         if insecure_defaults:
             raise RuntimeError(
                 f"生产环境检测到不安全的默认配置，请通过环境变量设置: {', '.join(insecure_defaults)}"

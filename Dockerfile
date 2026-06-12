@@ -1,9 +1,7 @@
 # ---- Build stage ----
 FROM ghcr.io/astral-sh/uv:0.7-python3.12-bookworm-slim AS builder
 
-# 使用国内 apt 镜像加速
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -12,9 +10,6 @@ WORKDIR /app
 
 # 先复制依赖定义，利用 Docker layer cache
 COPY pyproject.toml uv.lock ./
-
-# 使用国内 PyPI 镜像 + 安装生产依赖
-ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-workspace
 
@@ -27,8 +22,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---- Production stage ----
 FROM python:3.12-slim AS production
 
-RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
