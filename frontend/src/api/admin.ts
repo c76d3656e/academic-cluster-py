@@ -128,15 +128,27 @@ export interface UsageByProvider {
 export interface LlmCallRecord {
   id: string
   pipeline_run_id?: string
+  project_id?: string | null
+  project_name?: string | null
+  node_execution_id?: string | null
+  node_name?: string | null
   provider_name: string
   model_name: string
+  requested_model?: string | null
+  upstream_model?: string | null
   call_type?: string
   status: string
+  run_status?: string | null
+  error_message?: string | null
+  http_status_code?: number | null
   prompt_tokens?: number
   completion_tokens?: number
   total_tokens: number
   cost: number
   latency_ms: number
+  input_preview?: string | null
+  output_preview?: string | null
+  request_metadata?: Record<string, unknown> | null
   created_at: string
 }
 

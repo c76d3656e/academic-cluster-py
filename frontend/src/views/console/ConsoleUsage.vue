@@ -238,9 +238,12 @@ const callTypeLabel: Record<string, string> = {
           <thead>
             <tr class="border-b border-border">
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">时间</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">项目</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">节点</th>
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">类型</th>
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Provider</th>
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">模型</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">请求模型</th>
               <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">输入</th>
               <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">输出</th>
               <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">费用</th>
@@ -257,6 +260,18 @@ const callTypeLabel: Record<string, string> = {
               <td class="py-3 px-4 text-xs text-muted-foreground">
                 {{ c.created_at ? new Date(c.created_at).toLocaleString() : '-' }}
               </td>
+              <td class="py-3 px-4 text-muted-foreground text-xs">
+                <div class="flex flex-col">
+                  <span class="font-medium text-foreground">{{ c.project_name || '-' }}</span>
+                  <span class="text-[0.65rem]">{{ c.project_id || '' }}</span>
+                </div>
+              </td>
+              <td class="py-3 px-4 text-muted-foreground text-xs">
+                <div class="flex flex-col">
+                  <span class="font-medium text-foreground">{{ c.node_name || '-' }}</span>
+                  <span class="text-[0.65rem]">{{ c.node_execution_id || '' }}</span>
+                </div>
+              </td>
               <td class="py-3 px-4">
                 <Badge
                   :variant="c.call_type === 'llm' ? 'default' : 'secondary'"
@@ -267,14 +282,20 @@ const callTypeLabel: Record<string, string> = {
               </td>
               <td class="py-3 px-4 text-muted-foreground text-xs">{{ c.provider_name }}</td>
               <td class="py-3 px-4 text-muted-foreground font-mono text-xs">{{ c.model_name }}</td>
+              <td class="py-3 px-4 text-muted-foreground font-mono text-xs">{{ c.requested_model || '-' }}</td>
               <td class="py-3 px-4 text-right font-mono text-xs">{{ formatTokens(c.prompt_tokens) }}</td>
               <td class="py-3 px-4 text-right font-mono text-xs">{{ formatTokens(c.completion_tokens) }}</td>
               <td class="py-3 px-4 text-right font-mono text-xs">{{ formatCost(c.cost) }}</td>
               <td class="py-3 px-4 text-right text-xs text-muted-foreground">{{ c.latency_ms }}ms</td>
               <td class="py-3 px-4">
-                <Badge :variant="c.status === 'success' ? 'default' : 'destructive'" class="text-[0.65rem]">
-                  {{ c.status }}
-                </Badge>
+                <div class="flex flex-col gap-1">
+                  <Badge :variant="c.status === 'success' ? 'default' : 'destructive'" class="text-[0.65rem] w-fit">
+                    {{ c.status }}
+                  </Badge>
+                  <span v-if="c.error_message" class="text-[0.65rem] text-muted-foreground line-clamp-2">
+                    {{ c.error_message }}
+                  </span>
+                </div>
               </td>
             </tr>
           </tbody>

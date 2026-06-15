@@ -18,6 +18,16 @@ logger = structlog.get_logger()
 router = APIRouter(tags=["admin-providers"])
 
 
+async def _reload_runtime_pools() -> int:
+    """Best-effort runtime provider pool reload from enabled DB rows."""
+    try:
+        from ...services.provider_pool import reload_pools_from_db
+        return await reload_pools_from_db()
+    except Exception as e:
+        logger.warning("Failed to reload provider pools", error=str(e))
+        return 0
+
+
 # =============================================================================
 # 请求/响应模型
 # =============================================================================
@@ -267,6 +277,7 @@ async def create_provider(
         provider_id = str(row[0])
 
     logger.info("Provider created", provider_id=provider_id, kind=body.kind, name=body.display_name)
+    await _reload_runtime_pools()
 
     return ProviderResponse(
         id=provider_id,
@@ -372,6 +383,7 @@ async def update_provider(
         raise HTTPException(status_code=404, detail="Provider 不存在")
 
     logger.info("Provider updated", provider_id=provider_id)
+    await _reload_runtime_pools()
     return _row_to_provider(row)
 
 
@@ -391,6 +403,7 @@ async def delete_provider(
             raise HTTPException(status_code=404, detail="Provider 不存在")
 
     logger.info("Provider deleted", provider_id=provider_id)
+    await _reload_runtime_pools()
     return {"message": "删除成功"}
 
 
@@ -447,6 +460,7 @@ async def test_provider(
 
         latency_ms = (time.time() - start) * 1000
         await _update_health(db, provider_id_str, "healthy", None)
+        await _reload_runtime_pools()
         logger.info("Provider health test passed", provider_id=provider_id_str, latency_ms=round(latency_ms))
         return HealthTestResponse(
             provider_id=provider_id_str, healthy=True,
@@ -457,6 +471,7 @@ async def test_provider(
         latency_ms = (time.time() - start) * 1000
         error_msg = str(e)[:500]
         await _update_health(db, provider_id_str, "error", error_msg)
+        await _reload_runtime_pools()
         logger.warning("Provider health test failed", provider_id=provider_id_str, error=error_msg)
         return HealthTestResponse(
             provider_id=provider_id_str, healthy=False,
@@ -621,86 +636,8 @@ async def reload_providers(
     admin: dict = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
 ):
-    """热重载 Provider 配置
-
-    从 DB 读取所有 enabled 的 provider → 按 kind 分组 → 重建 Pool → 替换全局单例。
-    """
-    import json
-
-    async with db.session() as session:
-        result = await session.execute(
-            text("""
-                SELECT id, kind, display_name, base_url, model, api_key_enc,
-                       rpm_limit, priority, weight, extra_keys, key_strategy
-                FROM provider_registry
-                WHERE is_enabled = true
-                ORDER BY kind, priority DESC
-            """),
-        )
-        rows = result.fetchall()
-
-    if not rows:
-        return ReloadResult(reloaded=0, message="数据库中没有启用的 Provider")
-
-    # 按 kind 分组
-    llm_configs = []
-    embedding_configs = []
-    rerank_configs = []
-
-    for row in rows:
-        kind = row[1]
-        api_key = None
-        if row[5]:
-            try:
-                api_key = decrypt_key(row[5])
-            except Exception as e:
-                logger.warning("Failed to decrypt key for provider", provider_id=str(row[0]), error=str(e))
-                continue
-
-        config = {
-            "name": row[2],
-            "model": row[4] or "",
-            "api_url": row[3],
-            "api_key": api_key or "",
-            "rpm_limit": row[6] or 10,
-            "priority": row[7] or 100,
-        }
-
-        if kind == "llm":
-            llm_configs.append(config)
-        elif kind == "embedding":
-            embedding_configs.append(config)
-        elif kind == "rerank":
-            rerank_configs.append(config)
-
-    # 重建 Pools
-    reloaded = 0
-
-    from ...services.provider_pool import (
-        LiteLLMPool, RerankPool, RerankProvider,
-        _parse_litellm_model_list, _parse_rerank_providers,
-    )
-    from ...services import provider_pool as pool_module
-
-    if llm_configs:
-        model_list = _parse_litellm_model_list(json.dumps(llm_configs), "llm")
-        if model_list:
-            pool_module._llm_pool = LiteLLMPool("llm", model_list)
-            reloaded += len(llm_configs)
-
-    if embedding_configs:
-        model_list = _parse_litellm_model_list(json.dumps(embedding_configs), "embedding")
-        if model_list:
-            pool_module._embedding_pool = LiteLLMPool("embedding", model_list)
-            reloaded += len(embedding_configs)
-
-    if rerank_configs:
-        providers = _parse_rerank_providers(json.dumps(rerank_configs))
-        if providers:
-            pool_module._rerank_pool = RerankPool(providers)
-            reloaded += len(rerank_configs)
-
-    logger.info("Providers reloaded from DB", reloaded=reloaded, llm=len(llm_configs), embedding=len(embedding_configs), rerank=len(rerank_configs))
+    """热重载 Provider 配置。DB 中 enabled provider 是运行时唯一来源。"""
+    reloaded = await _reload_runtime_pools()
     return ReloadResult(reloaded=reloaded, message=f"成功重载 {reloaded} 个 Provider")
 
 
@@ -728,4 +665,5 @@ async def toggle_provider(
 
     state = "启用" if row[1] else "禁用"
     logger.info("Provider toggled", provider_id=provider_id, enabled=row[1])
+    await _reload_runtime_pools()
     return {"id": str(row[0]), "is_enabled": row[1], "message": f"已{state}"}

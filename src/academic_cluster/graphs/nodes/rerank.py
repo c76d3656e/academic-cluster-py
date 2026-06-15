@@ -239,23 +239,37 @@ async def rerank_node(state: PipelineState) -> dict:
                 )
 
                 exec_id = tracker._node_ids.get("rerank")
-                if exec_id:
-                    call_id = await db.create_llm_call(
-                        pipeline_run_id=tracker.run_id,
-                        node_execution_id=exec_id,
-                        call_type="rerank",
-                        provider_name=provider_name,
-                        model_name=rerank_model,
-                        latency_ms=_rerank_elapsed,
+                if not exec_id:
+                    exec_id = await db.create_node_execution(
+                        tracker.run_id,
+                        "rerank",
+                        "rerank",
                     )
-                    await db.finish_llm_call(
-                        call_id=call_id,
-                        status="success",
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=0,
-                        cost=cost,
-                        latency_ms=_rerank_elapsed,
-                    )
+                    tracker._node_ids["rerank"] = exec_id
+                call_id = await db.create_llm_call(
+                    pipeline_run_id=tracker.run_id,
+                    node_execution_id=exec_id,
+                    project_id=tracker.project_id,
+                    node_name="rerank",
+                    call_type="rerank",
+                    provider_name=provider_name,
+                    model_name=rerank_model,
+                    requested_model=rerank_model,
+                    upstream_model=rerank_model,
+                    latency_ms=_rerank_elapsed,
+                    request_metadata={
+                        "node_name": "rerank",
+                        "provider_name": provider_name,
+                    },
+                )
+                await db.finish_llm_call(
+                    call_id=call_id,
+                    status="success",
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=0,
+                    cost=cost,
+                    latency_ms=_rerank_elapsed,
+                )
             except Exception:
                 pass  # 追踪失败不影响主流程
 

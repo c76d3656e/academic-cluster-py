@@ -259,12 +259,115 @@ def _parse_rerank_providers(json_str: str) -> list[RerankProvider]:
     ]
 
 
+async def _load_enabled_provider_configs_from_db() -> tuple[dict[str, list[dict]], bool]:
+    """Load enabled provider configs from provider_registry.
+
+    Returns (configs_by_kind, registry_has_rows). If the registry has rows, it is
+    the runtime source of truth, including the case where every provider is disabled.
+    """
+    from sqlalchemy import text
+
+    from .crypto import decrypt_key
+    from .database import get_database
+
+    db = get_database()
+    async with db.session() as session:
+        total_result = await session.execute(text("SELECT COUNT(*) FROM provider_registry"))
+        registry_has_rows = bool(total_result.scalar() or 0)
+        result = await session.execute(
+            text("""
+                SELECT kind, display_name, base_url, model, api_key_enc, rpm_limit, priority
+                FROM provider_registry
+                WHERE is_enabled = true
+                ORDER BY kind, priority DESC, created_at ASC
+            """)
+        )
+        rows = result.fetchall()
+
+    configs: dict[str, list[dict]] = {"llm": [], "embedding": [], "rerank": []}
+    for row in rows:
+        kind = row[0]
+        if kind not in configs:
+            continue
+        api_key = ""
+        if row[4]:
+            try:
+                api_key = decrypt_key(row[4])
+            except Exception as e:
+                logger.warning("Skipping provider with undecryptable key", provider=row[1], error=str(e))
+                continue
+        configs[kind].append({
+            "name": row[1],
+            "model": row[3] or "",
+            "api_url": row[2] or "",
+            "api_key": api_key,
+            "rpm_limit": row[5] or 10,
+            "priority": row[6] or 100,
+        })
+
+    return configs, registry_has_rows
+
+
+def _set_pools_from_configs(configs: dict[str, list[dict]]) -> int:
+    """Replace runtime pools from normalized provider configs."""
+    global _llm_pool, _embedding_pool, _rerank_pool
+
+    reloaded = 0
+
+    llm_model_list = _parse_litellm_model_list(json.dumps(configs.get("llm", [])), "llm")
+    _llm_pool = LiteLLMPool("llm", llm_model_list) if llm_model_list else None
+    reloaded += len(llm_model_list)
+
+    emb_model_list = _parse_litellm_model_list(json.dumps(configs.get("embedding", [])), "embedding")
+    _embedding_pool = LiteLLMPool("embedding", emb_model_list) if emb_model_list else None
+    reloaded += len(emb_model_list)
+
+    rerank_providers = _parse_rerank_providers(json.dumps(configs.get("rerank", [])))
+    _rerank_pool = RerankPool(rerank_providers) if rerank_providers else None
+    reloaded += len(rerank_providers)
+
+    return reloaded
+
+
+async def reload_pools_from_db() -> int:
+    """Hot reload runtime pools from enabled provider_registry rows."""
+    configs, _ = await _load_enabled_provider_configs_from_db()
+    reloaded = _set_pools_from_configs(configs)
+    logger.info(
+        "Provider pools reloaded from DB",
+        reloaded=reloaded,
+        llm=len(configs.get("llm", [])),
+        embedding=len(configs.get("embedding", [])),
+        rerank=len(configs.get("rerank", [])),
+    )
+    return reloaded
+
+
 async def init_pools():
-    """从环境变量初始化所有 Provider Pool"""
+    """Initialize provider pools.
+
+    provider_registry is the runtime source of truth once it has rows. Environment
+    variables are only a bootstrap fallback for an empty registry.
+    """
     global _llm_pool, _embedding_pool, _rerank_pool
 
     from ..config import get_settings
     settings = get_settings()
+
+    try:
+        db_configs, registry_has_rows = await _load_enabled_provider_configs_from_db()
+        if registry_has_rows:
+            reloaded = _set_pools_from_configs(db_configs)
+            logger.info(
+                "Provider pools initialized from DB",
+                reloaded=reloaded,
+                llm=len(db_configs.get("llm", [])),
+                embedding=len(db_configs.get("embedding", [])),
+                rerank=len(db_configs.get("rerank", [])),
+            )
+            return
+    except Exception as e:
+        logger.warning("Failed to initialize provider pools from DB, falling back to env", error=str(e))
 
     # --- LLM Pool ---
     llm_model_list = _parse_litellm_model_list(

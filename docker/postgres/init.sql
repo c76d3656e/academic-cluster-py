@@ -334,11 +334,15 @@ CREATE INDEX IF NOT EXISTS idx_node_exec_status ON node_executions(status);
 
 CREATE TABLE IF NOT EXISTS llm_calls (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID,
     pipeline_run_id UUID REFERENCES pipeline_runs(id) ON DELETE CASCADE,
     node_execution_id UUID REFERENCES node_executions(id) ON DELETE CASCADE,
+    node_name VARCHAR(100),
     call_type VARCHAR(20) NOT NULL,
     provider_name VARCHAR(100) NOT NULL,
     model_name VARCHAR(200) NOT NULL,
+    requested_model VARCHAR(200),
+    upstream_model VARCHAR(200),
     api_base_url VARCHAR(500),
     api_key_hint VARCHAR(20),
     status VARCHAR(20) NOT NULL DEFAULT 'success',
@@ -357,9 +361,12 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     retry_of UUID,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_llm_calls_project ON llm_calls(project_id);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_run ON llm_calls(pipeline_run_id);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_node ON llm_calls(node_execution_id);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_node_name ON llm_calls(node_name);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_provider ON llm_calls(provider_name, model_name);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_requested_model ON llm_calls(requested_model);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status);
 

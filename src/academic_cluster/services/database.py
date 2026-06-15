@@ -1480,10 +1480,14 @@ class DatabaseService:
     async def create_llm_call(
         self,
         pipeline_run_id: str,
-        node_execution_id: str,
+        node_execution_id: str | None,
         call_type: str,
         provider_name: str,
         model_name: str,
+        project_id: str | None = None,
+        node_name: str | None = None,
+        requested_model: str | None = None,
+        upstream_model: str | None = None,
         api_base_url: str | None = None,
         api_key_hint: str | None = None,
         is_stream: bool = False,
@@ -1501,24 +1505,30 @@ class DatabaseService:
             await session.execute(
                 text("""
                     INSERT INTO llm_calls (
-                        id, pipeline_run_id, node_execution_id, call_type,
-                        provider_name, model_name, api_base_url, api_key_hint,
+                        id, project_id, pipeline_run_id, node_execution_id, node_name,
+                        call_type, provider_name, model_name, requested_model, upstream_model,
+                        api_base_url, api_key_hint,
                         is_stream, latency_ms, first_token_ms,
                         input_preview, output_preview, request_metadata, retry_of
                     ) VALUES (
-                        :id, :pipeline_run_id, :node_execution_id, :call_type,
-                        :provider_name, :model_name, :api_base_url, :api_key_hint,
+                        :id, :project_id, :pipeline_run_id, :node_execution_id, :node_name,
+                        :call_type, :provider_name, :model_name, :requested_model, :upstream_model,
+                        :api_base_url, :api_key_hint,
                         :is_stream, :latency_ms, :first_token_ms,
                         :input_preview, :output_preview, :request_metadata, :retry_of
                     )
                 """),
                 {
                     "id": call_id,
+                    "project_id": project_id,
                     "pipeline_run_id": pipeline_run_id,
                     "node_execution_id": node_execution_id,
+                    "node_name": node_name,
                     "call_type": call_type,
                     "provider_name": provider_name,
                     "model_name": model_name,
+                    "requested_model": requested_model or model_name,
+                    "upstream_model": upstream_model or model_name,
                     "api_base_url": api_base_url,
                     "api_key_hint": api_key_hint,
                     "is_stream": is_stream,
@@ -1544,6 +1554,8 @@ class DatabaseService:
         http_status_code: int | None = None,
         latency_ms: int | None = None,
         output_preview: str | None = None,
+        model_name: str | None = None,
+        upstream_model: str | None = None,
     ) -> None:
         """完成 LLM 调用，更新 token 统计和状态"""
         async with self.session() as session:
@@ -1558,7 +1570,9 @@ class DatabaseService:
                         error_message = :error_message,
                         http_status_code = :http_status_code,
                         latency_ms = COALESCE(:latency_ms, latency_ms),
-                        output_preview = COALESCE(:output_preview, output_preview)
+                        output_preview = COALESCE(:output_preview, output_preview),
+                        model_name = COALESCE(:model_name, model_name),
+                        upstream_model = COALESCE(:upstream_model, upstream_model)
                     WHERE id = :id
                 """),
                 {
@@ -1571,6 +1585,8 @@ class DatabaseService:
                     "http_status_code": http_status_code,
                     "latency_ms": latency_ms,
                     "output_preview": output_preview,
+                    "model_name": model_name,
+                    "upstream_model": upstream_model,
                 }
             )
 
@@ -1614,8 +1630,9 @@ class DatabaseService:
                 result = await session.execute(
                     text("""
                         SELECT lc.* FROM llm_calls lc
-                        JOIN node_executions ne ON lc.node_execution_id = ne.id
-                        WHERE lc.pipeline_run_id = :run_id AND ne.node_name = :node_name
+                        LEFT JOIN node_executions ne ON lc.node_execution_id = ne.id
+                        WHERE lc.pipeline_run_id = :run_id
+                          AND COALESCE(lc.node_name, ne.node_name) = :node_name
                         ORDER BY lc.created_at
                     """),
                     {"run_id": run_id, "node_name": node_name},
@@ -1655,7 +1672,7 @@ class DatabaseService:
 
         # 构建 JOIN 子句 - 来源固定，不来自用户输入
         join_clause = ""
-        if project_id and not run_id:
+        if project_id:
             join_clause = "JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id"
 
         query = f"""

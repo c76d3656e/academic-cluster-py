@@ -230,6 +230,58 @@ async def _ensure_evidence_card_schema(db):
         """))
 
 
+async def _ensure_observability_schema(db):
+    """Add request-level usage/audit fields for existing databases."""
+    from sqlalchemy import text
+
+    async with db.session() as session:
+        for column_sql in [
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS project_id UUID",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS node_name VARCHAR(100)",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS requested_model VARCHAR(200)",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS upstream_model VARCHAR(200)",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS api_base_url VARCHAR(500)",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS api_key_hint VARCHAR(20)",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS error_message TEXT",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS http_status_code INTEGER",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS is_stream BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS first_token_ms BIGINT",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS input_preview TEXT",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS output_preview TEXT",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS request_metadata JSONB",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS retry_of UUID",
+        ]:
+            await session.execute(text(column_sql))
+
+        await session.execute(text("""
+            UPDATE llm_calls lc
+            SET project_id = pr.project_id
+            FROM pipeline_runs pr
+            WHERE lc.pipeline_run_id = pr.id
+              AND lc.project_id IS NULL
+        """))
+        await session.execute(text("""
+            UPDATE llm_calls lc
+            SET node_name = ne.node_name
+            FROM node_executions ne
+            WHERE lc.node_execution_id = ne.id
+              AND lc.node_name IS NULL
+        """))
+        await session.execute(text("""
+            UPDATE llm_calls
+            SET requested_model = COALESCE(requested_model, model_name),
+                upstream_model = COALESCE(upstream_model, model_name)
+            WHERE requested_model IS NULL OR upstream_model IS NULL
+        """))
+
+        for index_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_llm_calls_project ON llm_calls(project_id)",
+            "CREATE INDEX IF NOT EXISTS idx_llm_calls_node_name ON llm_calls(node_name)",
+            "CREATE INDEX IF NOT EXISTS idx_llm_calls_requested_model ON llm_calls(requested_model)",
+        ]:
+            await session.execute(text(index_sql))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -252,13 +304,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Failed to init AsyncPostgresSaver, will use MemorySaver fallback", error=str(e))
 
-    # 初始化 Provider Pool（LiteLLM Router）
-    try:
-        from ..services.provider_pool import init_pools
-        await init_pools()
-    except Exception as e:
-        logger.warning("Failed to init provider pools", error=str(e))
-
     # 初始化默认管理员账户
     try:
         await _seed_admin(db, settings)
@@ -266,11 +311,19 @@ async def lifespan(app: FastAPI):
         logger.warning("Failed to seed admin user", error=str(e))
 
     try:
+        await _ensure_observability_schema(db)
         await _ensure_evidence_card_schema(db)
         await _ensure_community_memory_schema(db)
         await _seed_providers(db, settings)
     except Exception as e:
         logger.warning("Failed to initialize runtime schemas or seed providers", error=str(e))
+
+    # 初始化 Provider Pool（DB 优先，环境变量仅作空库回退）
+    try:
+        from ..services.provider_pool import init_pools
+        await init_pools()
+    except Exception as e:
+        logger.warning("Failed to init provider pools", error=str(e))
 
     # 初始化 Pipeline 配置表
     try:

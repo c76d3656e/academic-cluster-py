@@ -80,23 +80,37 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
 
             # 持久化到 DB
             exec_id = tracker._node_ids.get(node_name)
-            if exec_id:
-                call_id = await db.create_llm_call(
-                    pipeline_run_id=tracker.run_id,
-                    node_execution_id=exec_id,
-                    call_type="embedding",
-                    provider_name=provider_alias,
-                    model_name="bge-m3",
-                    latency_ms=elapsed_ms,
+            if not exec_id:
+                exec_id = await db.create_node_execution(
+                    tracker.run_id,
+                    node_name,
+                    "embedding",
                 )
-                await db.finish_llm_call(
-                    call_id=call_id,
-                    status="success",
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=0,
-                    cost=cost,
-                    latency_ms=elapsed_ms,
-                )
+                tracker._node_ids[node_name] = exec_id
+            call_id = await db.create_llm_call(
+                pipeline_run_id=tracker.run_id,
+                node_execution_id=exec_id,
+                project_id=tracker.project_id,
+                node_name=node_name,
+                call_type="embedding",
+                provider_name=provider_alias,
+                model_name="bge-m3",
+                requested_model="bge-m3",
+                upstream_model="bge-m3",
+                latency_ms=elapsed_ms,
+                request_metadata={
+                    "node_name": node_name,
+                    "provider_alias": provider_alias,
+                },
+            )
+            await db.finish_llm_call(
+                call_id=call_id,
+                status="success",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=0,
+                cost=cost,
+                latency_ms=elapsed_ms,
+            )
         except Exception:
             pass  # 追踪失败不影响主流程
 

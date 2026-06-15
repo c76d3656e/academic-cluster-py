@@ -51,17 +51,28 @@ class LLMCallRecord(BaseModel):
     """LLM 调用记录"""
     id: str
     pipeline_run_id: str | None = None
+    project_id: str | None = None
+    project_name: str | None = None
+    node_execution_id: str | None = None
+    node_name: str | None = None
     provider_name: str
     model_name: str
+    requested_model: str | None = None
+    upstream_model: str | None = None
     call_type: str
     status: str
+    run_status: str | None = None
+    error_message: str | None = None
+    http_status_code: int | None = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
     cost: float = 0.0
     latency_ms: int = 0
+    input_preview: str | None = None
+    output_preview: str | None = None
+    request_metadata: dict | None = None
     created_at: datetime | None = None
-    project_id: str | None = None
 
 
 class LLMCallListResponse(BaseModel):
@@ -86,26 +97,73 @@ async def get_usage_trend(
     async with db.session() as session:
         result = await session.execute(
             text("""
-                SELECT
-                    DATE(lc.created_at) AS date,
-                    COUNT(*) AS call_count,
-                    COALESCE(SUM(lc.total_tokens), 0) AS total_tokens,
-                    COALESCE(SUM(lc.cost), 0) AS total_cost,
-                    COALESCE(SUM(CASE WHEN lc.call_type = 'llm' THEN lc.total_tokens ELSE 0 END), 0) AS llm_tokens,
-                    COALESCE(SUM(CASE WHEN lc.call_type = 'embedding' THEN lc.total_tokens ELSE 0 END), 0) AS embedding_tokens,
-                    COALESCE(SUM(CASE WHEN lc.call_type = 'rerank' THEN lc.total_tokens ELSE 0 END), 0) AS rerank_tokens,
-                    COALESCE(SUM(CASE WHEN lc.call_type = 'llm' THEN lc.cost ELSE 0 END), 0) AS llm_cost,
-                    COALESCE(SUM(CASE WHEN lc.call_type = 'embedding' THEN lc.cost ELSE 0 END), 0) AS embedding_cost,
-                    COALESCE(SUM(CASE WHEN lc.call_type = 'rerank' THEN lc.cost ELSE 0 END), 0) AS rerank_cost,
-                    COALESCE(SUM(lc.prompt_tokens), 0) AS prompt_tokens,
-                    COALESCE(SUM(lc.completion_tokens), 0) AS completion_tokens
-                FROM llm_calls lc
-                JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
-                WHERE pr.project_id IN (
-                    SELECT id FROM projects WHERE user_id = :user_id
+                WITH call_daily AS (
+                    SELECT
+                        DATE(lc.created_at) AS date,
+                        COUNT(*) AS call_count,
+                        COALESCE(SUM(lc.total_tokens), 0) AS total_tokens,
+                        COALESCE(SUM(lc.cost), 0) AS total_cost,
+                        COALESCE(SUM(CASE WHEN lc.call_type = 'llm' THEN lc.total_tokens ELSE 0 END), 0) AS llm_tokens,
+                        COALESCE(SUM(CASE WHEN lc.call_type = 'embedding' THEN lc.total_tokens ELSE 0 END), 0) AS embedding_tokens,
+                        COALESCE(SUM(CASE WHEN lc.call_type = 'rerank' THEN lc.total_tokens ELSE 0 END), 0) AS rerank_tokens,
+                        COALESCE(SUM(CASE WHEN lc.call_type = 'llm' THEN lc.cost ELSE 0 END), 0) AS llm_cost,
+                        COALESCE(SUM(CASE WHEN lc.call_type = 'embedding' THEN lc.cost ELSE 0 END), 0) AS embedding_cost,
+                        COALESCE(SUM(CASE WHEN lc.call_type = 'rerank' THEN lc.cost ELSE 0 END), 0) AS rerank_cost,
+                        COALESCE(SUM(lc.prompt_tokens), 0) AS prompt_tokens,
+                        COALESCE(SUM(lc.completion_tokens), 0) AS completion_tokens
+                    FROM llm_calls lc
+                    JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
+                    WHERE pr.project_id IN (
+                        SELECT id FROM projects WHERE user_id = :user_id
+                    )
+                    AND lc.created_at >= NOW() - (:days * INTERVAL '1 day')
+                    GROUP BY DATE(lc.created_at)
+                ),
+                run_daily AS (
+                    SELECT
+                        DATE(pr.created_at) AS date,
+                        COALESCE(SUM(pr.total_llm_calls), 0) AS call_count,
+                        COALESCE(SUM(pr.total_tokens), 0) AS total_tokens,
+                        COALESCE(SUM(pr.total_cost), 0) AS total_cost,
+                        COALESCE(SUM(pr.total_tokens), 0) AS llm_tokens,
+                        0 AS embedding_tokens,
+                        0 AS rerank_tokens,
+                        COALESCE(SUM(pr.total_cost), 0) AS llm_cost,
+                        0 AS embedding_cost,
+                        0 AS rerank_cost,
+                        COALESCE(SUM(pr.total_prompt_tokens), 0) AS prompt_tokens,
+                        COALESCE(SUM(pr.total_completion_tokens), 0) AS completion_tokens
+                    FROM pipeline_runs pr
+                    WHERE pr.project_id IN (
+                        SELECT id FROM projects WHERE user_id = :user_id
+                    )
+                    AND pr.created_at >= NOW() - (:days * INTERVAL '1 day')
+                    AND pr.total_llm_calls > 0
+                    AND NOT EXISTS (
+                        SELECT 1 FROM llm_calls lc WHERE lc.pipeline_run_id = pr.id
+                    )
+                    GROUP BY DATE(pr.created_at)
+                ),
+                usage_daily AS (
+                    SELECT * FROM call_daily
+                    UNION ALL
+                    SELECT * FROM run_daily
                 )
-                AND lc.created_at >= NOW() - (:days * INTERVAL '1 day')
-                GROUP BY DATE(lc.created_at)
+                SELECT
+                    date,
+                    COALESCE(SUM(call_count), 0) AS call_count,
+                    COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                    COALESCE(SUM(total_cost), 0) AS total_cost,
+                    COALESCE(SUM(llm_tokens), 0) AS llm_tokens,
+                    COALESCE(SUM(embedding_tokens), 0) AS embedding_tokens,
+                    COALESCE(SUM(rerank_tokens), 0) AS rerank_tokens,
+                    COALESCE(SUM(llm_cost), 0) AS llm_cost,
+                    COALESCE(SUM(embedding_cost), 0) AS embedding_cost,
+                    COALESCE(SUM(rerank_cost), 0) AS rerank_cost,
+                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+                FROM usage_daily
+                GROUP BY date
                 ORDER BY date
             """),
             {"user_id": user_id, "days": days},
@@ -137,6 +195,9 @@ async def get_usage_trend(
 async def get_usage_calls(
     limit: int = Query(50, ge=1, le=200),
     project_id: str | None = Query(None),
+    node_name: str | None = Query(None),
+    status: str | None = Query(None),
+    call_type: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
 ):
@@ -149,6 +210,18 @@ async def get_usage_calls(
     if project_id:
         project_filter = "AND pr.project_id = :project_id"
         params["project_id"] = project_id
+    node_filter = ""
+    if node_name:
+        node_filter = "AND COALESCE(lc.node_name, ne.node_name) = :node_name"
+        params["node_name"] = node_name
+    status_filter = ""
+    if status:
+        status_filter = "AND lc.status = :status"
+        params["status"] = status
+    call_type_filter = ""
+    if call_type:
+        call_type_filter = "AND lc.call_type = :call_type"
+        params["call_type"] = call_type
 
     async with db.session() as session:
         # 总数
@@ -157,10 +230,14 @@ async def get_usage_calls(
                 SELECT COUNT(*)
                 FROM llm_calls lc
                 JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
+                LEFT JOIN node_executions ne ON lc.node_execution_id = ne.id
                 WHERE pr.project_id IN (
                     SELECT id FROM projects WHERE user_id = :user_id
                 )
                 {project_filter}
+                {node_filter}
+                {status_filter}
+                {call_type_filter}
             """),
             params,
         )
@@ -172,23 +249,39 @@ async def get_usage_calls(
                 SELECT
                     lc.id,
                     lc.pipeline_run_id,
+                    COALESCE(lc.project_id, pr.project_id) AS project_id,
+                    p.name AS project_name,
+                    lc.node_execution_id,
+                    COALESCE(lc.node_name, ne.node_name) AS node_name,
                     lc.provider_name,
                     lc.model_name,
+                    COALESCE(lc.requested_model, lc.model_name) AS requested_model,
+                    COALESCE(lc.upstream_model, lc.model_name) AS upstream_model,
                     lc.call_type,
                     lc.status,
+                    pr.status AS run_status,
+                    lc.error_message,
+                    lc.http_status_code,
                     lc.prompt_tokens,
                     lc.completion_tokens,
                     lc.total_tokens,
                     lc.cost,
                     lc.latency_ms,
-                    lc.created_at,
-                    pr.project_id
+                    lc.input_preview,
+                    lc.output_preview,
+                    lc.request_metadata,
+                    lc.created_at
                 FROM llm_calls lc
                 JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
+                JOIN projects p ON pr.project_id = p.id
+                LEFT JOIN node_executions ne ON lc.node_execution_id = ne.id
                 WHERE pr.project_id IN (
                     SELECT id FROM projects WHERE user_id = :user_id
                 )
                 {project_filter}
+                {node_filter}
+                {status_filter}
+                {call_type_filter}
                 ORDER BY lc.created_at DESC
                 LIMIT :limit
             """),
@@ -200,17 +293,28 @@ async def get_usage_calls(
         LLMCallRecord(
             id=str(row[0]),
             pipeline_run_id=str(row[1]) if row[1] else None,
-            provider_name=row[2] or "",
-            model_name=row[3] or "",
-            call_type=row[4] or "",
-            status=row[5] or "success",
-            prompt_tokens=int(row[6]) if row[6] else 0,
-            completion_tokens=int(row[7]) if row[7] else 0,
-            total_tokens=int(row[8]) if row[8] else 0,
-            cost=float(row[9]) if row[9] else 0.0,
-            latency_ms=int(row[10]) if row[10] else 0,
-            created_at=row[11],
-            project_id=str(row[12]) if row[12] else None,
+            project_id=str(row[2]) if row[2] else None,
+            project_name=row[3],
+            node_execution_id=str(row[4]) if row[4] else None,
+            node_name=row[5],
+            provider_name=row[6] or "",
+            model_name=row[7] or "",
+            requested_model=row[8],
+            upstream_model=row[9],
+            call_type=row[10] or "",
+            status=row[11] or "success",
+            run_status=row[12],
+            error_message=row[13],
+            http_status_code=int(row[14]) if row[14] else None,
+            prompt_tokens=int(row[15]) if row[15] else 0,
+            completion_tokens=int(row[16]) if row[16] else 0,
+            total_tokens=int(row[17]) if row[17] else 0,
+            cost=float(row[18]) if row[18] else 0.0,
+            latency_ms=int(row[19]) if row[19] else 0,
+            input_preview=row[20],
+            output_preview=row[21],
+            request_metadata=row[22],
+            created_at=row[23],
         )
         for row in rows
     ]

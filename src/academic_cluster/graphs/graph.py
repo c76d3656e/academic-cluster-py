@@ -28,6 +28,7 @@ from .nodes import (
     write_review_node,
     coverage_audit_node,
     section_revision_node,
+    generate_abstract_node,
     artifact_registration_node,
     finalize_node,
 )
@@ -49,11 +50,16 @@ async def get_checkpointer():
         return _default_checkpointer
 
     try:
-        # 璁?msgpack 鏀寔 numpy 绫诲瀷搴忓垪鍖?        import ormsgpack
-        from langgraph.checkpoint.serde import jsonplus as _serde_mod
-        if hasattr(_serde_mod, '_option'):
-            _serde_mod._option = _serde_mod._option | ormsgpack.OPT_SERIALIZE_NUMPY
-            logger.info("Patched msgpack options: OPT_SERIALIZE_NUMPY enabled")
+        # Enable numpy serialization when ormsgpack is available. This is optional;
+        # checkpoint persistence must not fall back to memory only because this patch fails.
+        try:
+            import ormsgpack
+            from langgraph.checkpoint.serde import jsonplus as _serde_mod
+            if hasattr(_serde_mod, '_option'):
+                _serde_mod._option = _serde_mod._option | ormsgpack.OPT_SERIALIZE_NUMPY
+                logger.info("Patched msgpack options: OPT_SERIALIZE_NUMPY enabled")
+        except Exception as patch_error:
+            logger.warning("Skipping msgpack numpy patch", error=str(patch_error))
 
         from psycopg import AsyncConnection
         from psycopg.rows import dict_row
@@ -197,6 +203,7 @@ def create_pipeline_graph() -> StateGraph:
     workflow.add_node("write_review", with_audit("write_review")(write_review_node))
     workflow.add_node("coverage_audit", with_audit("coverage_audit")(coverage_audit_node))
     workflow.add_node("section_revision", with_audit("section_revision")(section_revision_node))
+    workflow.add_node("abstract_generation", with_audit("abstract_generation")(generate_abstract_node))
     workflow.add_node("artifact_registration", with_audit("artifact_registration")(artifact_registration_node))
     workflow.add_node("finalize", with_audit("finalize")(finalize_node))
 
@@ -232,10 +239,11 @@ def create_pipeline_graph() -> StateGraph:
         should_revise_sections,
         {
             "section_revision": "section_revision",
-            "artifact_registration": "artifact_registration",
+            "artifact_registration": "abstract_generation",
         },
     )
     workflow.add_edge("section_revision", "coverage_audit")
+    workflow.add_edge("abstract_generation", "artifact_registration")
     workflow.add_edge("artifact_registration", "finalize")
     workflow.add_edge("finalize", END)
 
@@ -313,14 +321,25 @@ async def run_pipeline(
         """Persist one LLM call record."""
         try:
             exec_id = tracker._node_ids.get(node_name)
-            if not exec_id or not tracker.run_id:
+            if not tracker.run_id:
                 return
+            if not exec_id:
+                exec_id = await db.create_node_execution(
+                    tracker.run_id,
+                    node_name,
+                    call_type,
+                )
+                tracker._node_ids[node_name] = exec_id
             call_id = await db.create_llm_call(
                 pipeline_run_id=tracker.run_id,
                 node_execution_id=exec_id,
+                project_id=tracker.project_id,
+                node_name=node_name,
                 call_type=call_type,
                 provider_name=provider_name,
                 model_name=model_name,
+                requested_model=model_name,
+                upstream_model=model_name,
                 latency_ms=latency_ms,
             )
             await db.finish_llm_call(

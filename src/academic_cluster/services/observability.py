@@ -252,20 +252,10 @@ class LLMCallbackHandler(BaseCallbackHandler):
                     ),
                     self._loop,
                 )
-                # 持久化 llm_call 到数据库
-                if self.db_caller:
-                    asyncio.run_coroutine_threadsafe(
-                        self.db_caller(
-                            node_name=node_name,
-                            provider_name=provider_name,
-                            model_name=model_name,
-                            call_type="llm",
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            latency_ms=elapsed_ms,
-                        ),
-                        self._loop,
-                    )
+                # DB call records are written by ainvoke_with_callbacks, where
+                # provider/model/request metadata are available. The LangChain
+                # callback often lacks provider context and would create duplicate
+                # "unknown" rows.
         except Exception as e:
             structlog.get_logger().warning("LLM callback on_llm_end error", error=str(e))
 

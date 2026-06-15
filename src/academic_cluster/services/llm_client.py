@@ -7,6 +7,7 @@
 
 import asyncio
 import re
+from hashlib import sha256
 from typing import Optional
 
 import structlog
@@ -56,6 +57,32 @@ def sanitize_llm_response(response):
     except Exception:
         logger.debug("Failed to sanitize LLM response content")
     return response
+
+
+def _preview_value(value, limit: int = 2000) -> str:
+    text = str(value)
+    if len(text) > limit:
+        return text[:limit] + "...[truncated]"
+    return text
+
+
+def _safe_attr(obj, *names, default=None):
+    for name in names:
+        try:
+            value = getattr(obj, name, None)
+        except Exception:
+            value = None
+        if value:
+            return value
+    return default
+
+
+def _api_key_hint(llm) -> str | None:
+    key = _safe_attr(llm, "openai_api_key", "api_key", default=None)
+    if not key:
+        return None
+    value = getattr(key, "get_secret_value", lambda: str(key))()
+    return sha256(str(value).encode("utf-8")).hexdigest()[:12]
 
 
 def _get_llm_queue_semaphore() -> asyncio.Semaphore:
@@ -122,6 +149,11 @@ def create_llm(
     # 在 llm 对象上附加 provider 别名，供 ainvoke_with_callbacks 读取
     llm._provider_alias = deployment.get("model_name", "")
     llm._provider_rpm_limit = int(params.get("rpm") or 10)
+    llm._requested_model = actual_model
+    llm._upstream_model = actual_model
+    llm._api_base_url = params.get("api_base")
+    llm._temperature = temperature
+    llm._max_tokens = max_tokens
 
     return llm
 
@@ -145,6 +177,56 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     start_time = _time.monotonic()
     node_name = get_current_node() or "unknown"
     tracker = get_current_tracker()
+    provider_alias = getattr(llm, "_provider_alias", "") or "llm"
+    requested_model = (
+        getattr(llm, "_requested_model", None)
+        or _safe_attr(llm, "model_name", "model", default=None)
+        or "unknown"
+    )
+    upstream_model = getattr(llm, "_upstream_model", None) or requested_model
+    api_base_url = (
+        getattr(llm, "_api_base_url", None)
+        or str(_safe_attr(llm, "openai_api_base", "base_url", default="") or "")
+    )
+    call_id = None
+    db = None
+
+    if tracker and tracker.run_id:
+        try:
+            from .database import get_database
+            db = get_database()
+            exec_id = tracker._node_ids.get(node_name)
+            if not exec_id:
+                exec_id = await db.create_node_execution(
+                    tracker.run_id,
+                    node_name,
+                    "llm",
+                )
+                tracker._node_ids[node_name] = exec_id
+            call_id = await db.create_llm_call(
+                pipeline_run_id=tracker.run_id,
+                node_execution_id=exec_id,
+                project_id=tracker.project_id,
+                node_name=node_name,
+                call_type="llm",
+                provider_name=provider_alias,
+                model_name=requested_model,
+                requested_model=requested_model,
+                upstream_model=upstream_model,
+                api_base_url=api_base_url,
+                api_key_hint=_api_key_hint(llm),
+                input_preview=_preview_value(input),
+                request_metadata={
+                    "node_name": node_name,
+                    "timeout_s": timeout,
+                    "temperature": getattr(llm, "_temperature", None),
+                    "max_tokens": getattr(llm, "_max_tokens", None),
+                    "provider_alias": provider_alias,
+                    "config_keys": sorted((config or {}).keys()) if isinstance(config, dict) else [],
+                },
+            )
+        except Exception as e:
+            logger.warning("Failed to create llm_call audit row", error=str(e), node=node_name)
 
     try:
         semaphore = _get_llm_queue_semaphore()
@@ -152,8 +234,32 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
             response = await asyncio.wait_for(llm.ainvoke(input, config=config, **kwargs), timeout=timeout)
             response = sanitize_llm_response(response)
     except asyncio.TimeoutError:
+        elapsed_ms = int((_time.monotonic() - start_time) * 1000)
+        if db and call_id:
+            try:
+                await db.finish_llm_call(
+                    call_id=call_id,
+                    status="error",
+                    error_message=f"LLM call timed out after {timeout}s",
+                    latency_ms=elapsed_ms,
+                )
+            except Exception as e:
+                logger.warning("Failed to persist llm_call timeout", error=str(e), node=node_name)
         logger.error("LLM call timed out", node=node_name, timeout_s=timeout)
         raise TimeoutError(f"LLM call timed out after {timeout}s")
+    except Exception as e:
+        elapsed_ms = int((_time.monotonic() - start_time) * 1000)
+        if db and call_id:
+            try:
+                await db.finish_llm_call(
+                    call_id=call_id,
+                    status="error",
+                    error_message=str(e),
+                    latency_ms=elapsed_ms,
+                )
+            except Exception as persist_error:
+                logger.warning("Failed to persist llm_call error", error=str(persist_error), node=node_name)
+        raise
 
     elapsed_ms = int((_time.monotonic() - start_time) * 1000)
 
@@ -176,8 +282,9 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
             prompt_tokens = token_usage.get("prompt_tokens", 0)
             completion_tokens = token_usage.get("completion_tokens", 0)
 
-    # 从 llm 对象获取真实的 provider 别名（如 "gitee"、"siliconflow"）
-    provider_alias = getattr(llm, "_provider_alias", "") or "llm"
+    if model_name == "unknown":
+        model_name = requested_model
+    upstream_model = model_name
 
     # 按当前定价计算 cost（使用真实的 provider 别名匹配数据库定价）
     cost = 0.0
@@ -207,31 +314,22 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
         except Exception:
             pass
 
-    # 持久化到 DB
-    if tracker and tracker.run_id:
+    # 完成 DB 调用记录
+    if db and call_id:
         try:
-            from .database import get_database
-            db = get_database()
-            exec_id = tracker._node_ids.get(node_name)
-            if exec_id:
-                call_id = await db.create_llm_call(
-                    pipeline_run_id=tracker.run_id,
-                    node_execution_id=exec_id,
-                    call_type="llm",
-                    provider_name=provider_alias,
-                    model_name=model_name,
-                    latency_ms=elapsed_ms,
-                )
-                await db.finish_llm_call(
-                    call_id=call_id,
-                    status="success",
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    cost=cost,
-                    latency_ms=elapsed_ms,
-                )
+            await db.finish_llm_call(
+                call_id=call_id,
+                status="success",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost=cost,
+                latency_ms=elapsed_ms,
+                output_preview=_preview_value(getattr(response, "content", "")),
+                model_name=model_name,
+                upstream_model=upstream_model,
+            )
         except Exception as e:
-            logger.warning("Failed to persist llm_call", error=str(e))
+            logger.warning("Failed to finish llm_call audit row", error=str(e))
 
     return response
 
