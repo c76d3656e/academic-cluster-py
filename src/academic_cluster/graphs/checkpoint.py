@@ -98,6 +98,19 @@ def with_audit(node_name: str):
                     except Exception:
                         pass
 
+                # SSE: 推送节点完成事件
+                if project_id:
+                    try:
+                        from ..api.sse import get_sse_manager
+                        sse = get_sse_manager()
+                        await sse.send_event(project_id, "node_finished", {
+                            "node": node_name,
+                            "status": "succeeded",
+                            "duration_ms": duration_ms,
+                        })
+                    except Exception:
+                        pass
+
                 logger.info(
                     "Node execution completed",
                     node=node_name,
@@ -140,6 +153,19 @@ def with_audit(node_name: str):
                             error_traceback=tb,
                             db_finish_node=db.finish_node_execution,
                         )
+                    except Exception:
+                        pass
+
+                # SSE: 推送节点失败事件
+                if project_id:
+                    try:
+                        from ..api.sse import get_sse_manager
+                        sse = get_sse_manager()
+                        await sse.send_event(project_id, "node_finished", {
+                            "node": node_name,
+                            "status": "failed",
+                            "error": str(e),
+                        })
                     except Exception:
                         pass
 

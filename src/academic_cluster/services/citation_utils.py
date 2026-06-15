@@ -9,6 +9,156 @@ from __future__ import annotations
 import re
 from typing import Any
 
+
+_REVISION_COMMENTARY_MARKERS = (
+    "本修改",
+    "本次修改",
+    "以上修改",
+    "修改严格",
+    "严格遵循",
+    "用户规则",
+    "仅修改当前段落",
+    "保留所有原始引用",
+    "不新增",
+    "消除",
+    "改用数据支撑",
+    "保持段落独立",
+    "与前后段落形成递进",
+    "revision",
+    "revise",
+)
+
+_FULLWIDTH_META_BLOCK_RE = re.compile(
+    r"[（(]\s*(?:注|说明|备注|Note|Revision note|修改说明)\s*[:：][^（）()]{0,1200}[）)]",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_INLINE_REVISION_SENTENCE_RE = re.compile(
+    r"(?:(?:^|[\n。！？.!?])\s*)"
+    r"(?:本次?修改|本修改|以上修改|该修改|修改后文本|修订说明|说明)"
+    r"[^。！？\n]{0,500}"
+    r"(?:严格遵循|用户规则|仅修改|保留所有|不新增|消除|改用|整合|补充)"
+    r"[^。！？\n]*(?:[。！？.!?]|$)",
+    re.IGNORECASE,
+)
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL)
+_CHANNEL_BLOCK_RE = re.compile(
+    r"^\s*(?:analysis|reasoning|thought|思考|推理)\s*[:：].*?(?=\n\n|$)",
+    re.IGNORECASE | re.DOTALL | re.MULTILINE,
+)
+
+
+def _looks_like_revision_commentary(block: str) -> bool:
+    lowered = block.lower()
+    hits = sum(1 for marker in _REVISION_COMMENTARY_MARKERS if marker.lower() in lowered)
+    return hits >= 2
+
+
+def strip_revision_commentary(content: str) -> str:
+    """Remove visible revision notes accidentally emitted into section bodies."""
+    if not content:
+        return ""
+
+    content = _THINK_BLOCK_RE.sub("", content)
+    content = _CHANNEL_BLOCK_RE.sub("", content)
+
+    def _drop_meta_block(match: re.Match) -> str:
+        block = match.group(0)
+        return "" if _looks_like_revision_commentary(block) else block
+
+    content = _FULLWIDTH_META_BLOCK_RE.sub(_drop_meta_block, content)
+    content = _INLINE_REVISION_SENTENCE_RE.sub("", content)
+
+    cleaned_lines: list[str] = []
+    skip_continuation = False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            cleaned_lines.append(line)
+            skip_continuation = False
+            continue
+        if _looks_like_revision_commentary(stripped):
+            skip_continuation = (
+                stripped.count("（") > stripped.count("）")
+                or stripped.count("(") > stripped.count(")")
+            )
+            continue
+        if skip_continuation:
+            if "）" in stripped or ")" in stripped:
+                skip_continuation = False
+            continue
+        cleaned_lines.append(line)
+
+    content = "\n".join(cleaned_lines)
+    content = re.sub(r"[ \t]{2,}", " ", content)
+    content = re.sub(r"\n{3,}", "\n\n", content)
+    return content.strip()
+
+
+_PRECISE_METRIC_RE = re.compile(
+    r"(?:[A-Za-zα-ωΑ-Ω]\s*=\s*)?-?\d+(?:\.\d+)?\s*(?:%|％|倍|秒|ms|毫秒|分钟|次/分钟|次/小时)"
+    r"|(?:D|F|γ|Gamma|gamma)\s*=\s*-?\d+(?:\.\d+)?",
+    re.IGNORECASE,
+)
+
+
+def _evidence_metric_text(evidence_cards: list[dict] | None) -> str:
+    if not evidence_cards:
+        return ""
+    fields = ("claim", "evidence_span", "metric", "method", "limitation", "paper_title", "title")
+    parts: list[str] = []
+    for card in evidence_cards:
+        if not isinstance(card, dict):
+            continue
+        for field in fields:
+            value = card.get(field)
+            if value is None:
+                continue
+            parts.append(str(value))
+    return "\n".join(parts)
+
+
+def strip_unsupported_precise_metrics(
+    content: str,
+    evidence_cards: list[dict] | None,
+) -> str:
+    """Drop sentences containing precise metrics absent from section evidence cards.
+
+    This intentionally targets strong quantitative claims only. General years,
+    citation numbers, and non-metric integers are left untouched.
+    """
+    if not content:
+        return ""
+    evidence_text = _evidence_metric_text(evidence_cards)
+    if not evidence_text:
+        return content
+
+    parts = re.split(r"([。！？!?]\s*)", content)
+    kept: list[str] = []
+    dropped = False
+    for idx in range(0, len(parts), 2):
+        sentence = parts[idx]
+        punctuation = parts[idx + 1] if idx + 1 < len(parts) else ""
+        if not sentence:
+            if punctuation:
+                kept.append(punctuation)
+            continue
+        metrics = [match.group(0).strip() for match in _PRECISE_METRIC_RE.finditer(sentence)]
+        unsupported = [
+            metric for metric in metrics
+            if metric and metric not in evidence_text and metric.replace("％", "%") not in evidence_text
+        ]
+        if unsupported:
+            dropped = True
+            continue
+        kept.append(sentence + punctuation)
+
+    cleaned = "".join(kept)
+    if dropped:
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned.strip()
+
 # Matches [N] or [N,M,K] or [N-M] style citation tokens inside markdown.
 # We exclude year-like brackets [1800-2200] via a negative lookahead in
 # the caller rather than here, because the regex itself is intentionally
@@ -17,6 +167,9 @@ _CITATION_RE = re.compile(r"\[([0-9,\s;–—、，·\-]+)\]")
 
 # Matches a bare year-like bracket such as [2024] or [2020-2023].
 _YEAR_BRACKET_RE = re.compile(r"\[(\d{4})(?:\s*[-–—]\s*(\d{4}))?\]")
+
+# Matches UUID-style paper_id in brackets, e.g. [433802d1-ebf8-49f7-8efc-0183ef0170b8]
+_UUID_CITATION_RE = re.compile(r"\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]")
 
 # Pattern for the References heading (## or #) and everything after it.
 _REF_HEADING_RE = re.compile(
@@ -256,6 +409,40 @@ def strip_invalid_citations(
 
 
 # ---------------------------------------------------------------------------
+# 4b. replace_uuid_citations
+# ---------------------------------------------------------------------------
+
+
+def replace_uuid_citations(
+    markdown: str,
+    paper_id_to_number: dict[str, int],
+) -> str:
+    """Replace UUID-style citations like [433802d1-...] with proper [N] numbers.
+
+    Parameters
+    ----------
+    markdown : str
+        The review markdown text that may contain UUID citations.
+    paper_id_to_number : dict[str, int]
+        Mapping from paper_id (UUID string) to citation number (int).
+
+    Returns
+    -------
+    str
+        Markdown with UUID citations replaced by [N] numbers.
+    """
+    def _replace_uuid(match: re.Match) -> str:
+        uuid = match.group(1)
+        num = paper_id_to_number.get(uuid)
+        if num is not None:
+            return f"[{num}]"
+        # Unknown UUID – remove the citation entirely
+        return ""
+
+    return _UUID_CITATION_RE.sub(_replace_uuid, markdown)
+
+
+# ---------------------------------------------------------------------------
 # 5. render_reference_list
 # ---------------------------------------------------------------------------
 
@@ -367,3 +554,241 @@ def strip_reference_block(markdown: str) -> str:
         end = len(markdown)
 
     return markdown[:start].rstrip() + "\n"
+
+
+# ---------------------------------------------------------------------------
+# 6b. strip_section_reference_block
+# ---------------------------------------------------------------------------
+
+# Matches reference-like blocks inside a single section: lines starting with
+# [N] followed by author/title text, or a "参考文献"/"References" sub-heading.
+_SECTION_REF_LINE_RE = re.compile(
+    r"^\s*\[\d+\]\s+.+,.+\".+\"," r"",
+    re.MULTILINE,
+)
+_SECTION_REF_HEADING_RE = re.compile(
+    r"^#{1,4}\s*(?:references?|bibliography|参考文献|引用文献)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def strip_section_reference_block(content: str) -> str:
+    """Remove any inline reference list from a single section's content.
+
+    Handles cases where the LLM appends a ``[N] author, "title", venue, year``
+    list at the end of a section despite being told not to.
+
+    Also strips a trailing ``## References`` / ``## 参考文献`` sub-heading
+    and everything after it.
+    """
+    # 1. Strip trailing reference sub-heading and everything after it.
+    match = _SECTION_REF_HEADING_RE.search(content)
+    if match is not None:
+        content = content[: match.start()].rstrip()
+
+    # 2. Strip trailing block of consecutive [N] reference lines.
+    lines = content.split("\n")
+    # Walk backwards to find where the reference block starts.
+    ref_start = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        stripped = lines[i].strip()
+        if not stripped:
+            # Allow blank lines inside the reference block.
+            if ref_start == i + 1:
+                continue  # trailing blank line
+            break
+        if _SECTION_REF_LINE_RE.match(stripped):
+            ref_start = i
+        else:
+            break
+
+    if ref_start < len(lines):
+        # Remove trailing blank lines before the reference block too.
+        while ref_start > 0 and not lines[ref_start - 1].strip():
+            ref_start -= 1
+        content = "\n".join(lines[:ref_start]).rstrip()
+
+    return content
+
+
+# ---------------------------------------------------------------------------
+# 6c. clean_filler_phrases
+# ---------------------------------------------------------------------------
+
+# Filler phrases that add no analytical value.  Each entry is (pattern, replacement).
+_FILLER_PATTERNS: list[tuple[str, str]] = [
+    ("从方法论角度来看，", ""),
+    ("从方法论角度", ""),
+    ("从技术演进角度来看，", ""),
+    ("从技术演进角度", ""),
+    ("从理论角度来看，", ""),
+    ("从理论角度", ""),
+    ("从应用角度来看，", ""),
+    ("从应用角度", ""),
+    ("从宏观层面来看，", ""),
+    ("从宏观层面来看", ""),
+    ("从宏观层面", ""),
+    ("从微观层面来看，", ""),
+    ("从微观层面来看", ""),
+    ("从微观层面", ""),
+    ("在理论层面上，", ""),
+    ("在理论层面上", ""),
+    ("在理论层面", ""),
+    ("在实践层面上，", ""),
+    ("在实践层面上", ""),
+    ("在实践层面", ""),
+    ("在技术层面上，", ""),
+    ("在技术层面上", ""),
+    ("在技术层面", ""),
+    ("在方法层面上，", ""),
+    ("在方法层面上", ""),
+    ("在方法层面", ""),
+    ("在应用层面上，", ""),
+    ("在应用层面上", ""),
+    ("在应用层面", ""),
+    ("在模型层面上，", ""),
+    ("在模型层面上", ""),
+    ("在模型层面", ""),
+    ("在数据层面上，", ""),
+    ("在数据层面上", ""),
+    ("在数据层面", ""),
+    ("在性能层面上，", ""),
+    ("在性能层面上", ""),
+    ("在性能层面", ""),
+    ("在效率层面上，", ""),
+    ("在效率层面上", ""),
+    ("在效率层面", ""),
+    ("在架构层面上，", ""),
+    ("在架构层面上", ""),
+    ("在架构层面", ""),
+    ("在算法层面上，", ""),
+    ("在算法层面上", ""),
+    ("在算法层面", ""),
+    ("在系统层面上，", ""),
+    ("在系统层面上", ""),
+    ("在系统层面", ""),
+]
+
+
+def clean_filler_phrases(content: str) -> str:
+    """Remove academic filler phrases that add no analytical value."""
+    for pattern, replacement in _FILLER_PATTERNS:
+        content = content.replace(pattern, replacement)
+    # Clean up orphaned punctuation after filler removal (e.g. "，该模型" → "该模型").
+    content = re.sub(r"^[，,、；;：:]+", "", content, flags=re.MULTILINE)
+    # Clean up orphaned punctuation after sentence-ending marks (e.g. "。，" → "。").
+    content = re.sub(r"([。！？])[，,、；;]+", r"\1", content)
+    # Clean up double spaces or leading/trailing whitespace artifacts.
+    content = re.sub(r"[ \t]{2,}", " ", content)
+    content = re.sub(r"\n{3,}", "\n\n", content)
+    return content.strip()
+
+
+# ---------------------------------------------------------------------------
+# strip_author_year_citations
+# ---------------------------------------------------------------------------
+
+# Matches author-year style citations like (Friedman, 2024), (Smith et al., 2023),
+# (Zhang & Li, 2022), (Wang et al., 2021; Li et al., 2022)
+_AUTHOR_YEAR_CITATION_RE = re.compile(
+    r"[（(]"
+    r"[A-Z][a-z]+(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-z]+))?"
+    r"(?:\s*[,;]\s*[A-Z][a-z]+(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-z]+))?)*"
+    r"\s*,\s*\d{4}(?:\s*[;,]\s*\d{4})*"
+    r"[）)]"
+)
+
+
+def strip_author_year_citations(content: str) -> str:
+    """Remove author-year style citations like (Friedman, 2024) that violate [N] format."""
+    return _AUTHOR_YEAR_CITATION_RE.sub("", content)
+
+
+# ---------------------------------------------------------------------------
+# strip_meta_commentary
+# ---------------------------------------------------------------------------
+
+# Matches meta-commentary blocks like "（以下为符合要求的学术综述章节正文，约1500字...）"
+# or "（总字数：1523字，引用文献...）" at the beginning or end of content.
+_META_COMMENTARY_RE = re.compile(
+    r"^[（(][^）)]*(?:以下|总字数|字数统计|符合要求|引用文献|参考文献|引用密度|所有引用|未出现|字数达标|字数约|约\d+字|共\d+字)[^）)]*[）)]\s*",
+    re.MULTILINE,
+)
+_META_COMMENTARY_TAIL_RE = re.compile(
+    r"\n[（(][^）)]*(?:总字数|字数统计|引用文献|参考文献|引用密度|所有引用|未出现|符合要求|字数达标|字数约|约\d+字|共\d+字)[^）)]*[）)]\s*$",
+    re.MULTILINE,
+)
+
+
+def strip_meta_commentary(content: str) -> str:
+    """Strip LLM meta-commentary like '（以下为符合要求的学术综述章节正文...）'."""
+    content = _META_COMMENTARY_RE.sub("", content)
+    content = _META_COMMENTARY_TAIL_RE.sub("", content)
+    return content.strip()
+
+
+def is_primarily_chinese(content: str, threshold: float = 0.3) -> bool:
+    """Check if content is primarily Chinese. Returns True if CJK chars > threshold of total non-space chars."""
+    if not content:
+        return True
+    non_space = [c for c in content if not c.isspace()]
+    if not non_space:
+        return True
+    cjk_count = sum(1 for c in non_space if "一" <= c <= "鿿")
+    return cjk_count / len(non_space) >= threshold
+
+
+# ---------------------------------------------------------------------------
+# strip_prompt_leakage
+# ---------------------------------------------------------------------------
+
+# Matches prompt leakage blocks like "（注：本节严格遵循以下规范：...）"
+_PROMPT_LEAKAGE_RE = re.compile(
+    r"（注：[^）]*(?:遵循|规范|引用|禁止|全文|每处|技术比较|争议性|实验数据)[^）]*）",
+    re.DOTALL,
+)
+# Matches trailing numbered list that looks like prompt instructions
+_PROMPT_LEAKAGE_LIST_RE = re.compile(
+    r"\n\s*\d+\.\s*(?:全文采用|每处引用|技术比较|争议性问题|实验数据|禁止出现).*$",
+    re.DOTALL,
+)
+# Matches "（文献[N][M]...）" format (should be inline [N] not parenthesized)
+_PAREN_CITATION_RE = re.compile(r"（文献(\[\d+(?:\]\[?\d+)*\])）")
+
+
+def strip_prompt_leakage(content: str) -> str:
+    """Strip LLM prompt leakage like '（注：本节严格遵循以下规范...）'."""
+    content = _PROMPT_LEAKAGE_RE.sub("", content)
+    content = _PROMPT_LEAKAGE_LIST_RE.sub("", content)
+    content = _PAREN_CITATION_RE.sub(r"\1", content)
+    return content.strip()
+
+
+_BODY_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
+_BODY_LABEL_PREFIX_RE = re.compile(
+    r"^\s*(?:"
+    r"核心问题|研究问题|局限性|局限|限制|不足|结论|总结|未来方向|未来发展|开放问题|"
+    r"Limitation|Limitations|Conclusion|Conclusions|Future directions?|Open problems?|Key question"
+    r")\s*[:：]\s*",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def strip_body_structure_leakage(content: str) -> str:
+    """Remove body-only headings and template labels from generated sections."""
+    if not content:
+        return ""
+
+    def _heading_to_sentence(match: re.Match) -> str:
+        heading = match.group(1).strip()
+        if not heading:
+            return ""
+        if heading[-1] not in ".!?。！？；;":
+            has_cjk = any("\u4e00" <= char <= "\u9fff" for char in heading)
+            heading += "。" if has_cjk else "."
+        return heading
+
+    content = _BODY_HEADING_RE.sub(_heading_to_sentence, content)
+    content = _BODY_LABEL_PREFIX_RE.sub("", content)
+    content = re.sub(r"\n{3,}", "\n\n", content)
+    return content.strip()

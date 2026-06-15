@@ -28,6 +28,13 @@ def _convert_uuid_fields(row: dict) -> dict:
             result[key] = str(value)
         elif hasattr(value, '__class__') and 'UUID' in value.__class__.__name__:
             result[key] = str(value)
+        elif key.endswith("_ids") and value is None:
+            result[key] = []
+        elif key.endswith("_ids") and isinstance(value, (list, tuple, set)):
+            result[key] = [
+                str(v) if isinstance(v, uuid.UUID) or hasattr(v, '__class__') and 'UUID' in v.__class__.__name__ else v
+                for v in value
+            ]
         else:
             result[key] = value
     return result
@@ -35,6 +42,26 @@ def _convert_uuid_fields(row: dict) -> dict:
 from ..config import get_settings
 
 logger = structlog.get_logger()
+
+
+def _json_dumps(value: Any, default: Any = None) -> str:
+    """Serialize values for explicit JSONB casts used by asyncpg."""
+    if value is None:
+        value = default
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _stringify_scalar(value: Any) -> str:
+    """Normalize structured evidence-card fields to a DB-safe string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return _json_dumps(list(value), [])
+    if isinstance(value, dict):
+        return _json_dumps(value, {})
+    return str(value)
 
 
 class DatabaseService:
@@ -186,7 +213,10 @@ class DatabaseService:
             )
             rows = result.fetchall()
 
-        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
+        papers = [_convert_uuid_fields(dict(row._mapping)) for row in rows]
+        order = {str(pid): idx for idx, pid in enumerate(paper_ids)}
+        papers.sort(key=lambda paper: order.get(str(paper.get("id")), len(order)))
+        return papers
 
     async def save_embedding(
         self,
@@ -198,7 +228,7 @@ class DatabaseService:
         embedding_id = str(uuid.uuid4())
 
         async with self.session() as session:
-            await session.execute(
+            result = await session.execute(
                 text("""
                     INSERT INTO embeddings (id, paper_id, model_name, vector, dimensions)
                     VALUES (:id, :paper_id, :model_name, :vector, :dimensions)
@@ -221,12 +251,12 @@ class DatabaseService:
         cluster_id = cluster_data.get("id", str(uuid.uuid4()))
 
         async with self.session() as session:
-            await session.execute(
+            result = await session.execute(
                 text("""
                     INSERT INTO clusters (id, project_id, name, description, algorithm,
                                         parameters, quality_score, size)
                     VALUES (:id, :project_id, :name, :description, :algorithm,
-                            :parameters, :quality_score, :size)
+                            CAST(:parameters AS jsonb), :quality_score, :size)
                 """),
                 {
                     "id": cluster_id,
@@ -234,7 +264,7 @@ class DatabaseService:
                     "name": cluster_data.get("name"),
                     "description": cluster_data.get("description"),
                     "algorithm": cluster_data.get("algorithm", "leiden"),
-                    "parameters": cluster_data.get("parameters"),
+                    "parameters": _json_dumps(cluster_data.get("parameters"), {}),
                     "quality_score": cluster_data.get("quality_score", 0.0),
                     "size": cluster_data.get("size", 0),
                 }
@@ -244,17 +274,22 @@ class DatabaseService:
         return cluster_id
 
     async def save_kg_entities(self, entities: list[dict]) -> list[str]:
-        """保存知识图谱实体"""
+        """保存知识图谱实体（ON CONFLICT 合并 paper_ids，支持并发写入）"""
         entity_ids = []
 
         async with self.session() as session:
             for entity in entities:
                 entity_id = entity.get("id", str(uuid.uuid4()))
 
-                await session.execute(
+                result = await session.execute(
                     text("""
                         INSERT INTO kg_entities (id, name, entity_type, normalized_name, paper_ids, metadata)
-                        VALUES (:id, :name, :entity_type, :normalized_name, :paper_ids, :metadata)
+                        VALUES (:id, :name, :entity_type, :normalized_name, :paper_ids, CAST(:metadata AS jsonb))
+                        ON CONFLICT (normalized_name) DO UPDATE
+                        SET paper_ids = (
+                            SELECT array_agg(DISTINCT x) FROM unnest(kg_entities.paper_ids || EXCLUDED.paper_ids) AS x
+                        )
+                        RETURNING id
                     """),
                     {
                         "id": entity_id,
@@ -262,11 +297,13 @@ class DatabaseService:
                         "entity_type": entity.get("entity_type"),
                         "normalized_name": entity.get("normalized_name"),
                         "paper_ids": entity.get("paper_ids"),
-                        "metadata": entity.get("metadata"),
+                        "metadata": _json_dumps(entity.get("metadata"), {}),
                     }
                 )
+                row = result.fetchone()
+                entity_ids.append(str(row[0]) if row else entity_id)
 
-                entity_ids.append(entity_id)
+            await session.commit()
 
         logger.info("Saved KG entities", count=len(entity_ids))
         return entity_ids
@@ -284,7 +321,7 @@ class DatabaseService:
                         INSERT INTO kg_relations (id, source_entity_id, target_entity_id,
                                                 relation_type, paper_ids, confidence, metadata)
                         VALUES (:id, :source_entity_id, :target_entity_id,
-                                :relation_type, :paper_ids, :confidence, :metadata)
+                                :relation_type, :paper_ids, :confidence, CAST(:metadata AS jsonb))
                     """),
                     {
                         "id": relation_id,
@@ -293,11 +330,13 @@ class DatabaseService:
                         "relation_type": relation.get("relation_type"),
                         "paper_ids": relation.get("paper_ids"),
                         "confidence": relation.get("confidence", 1.0),
-                        "metadata": relation.get("metadata"),
+                        "metadata": _json_dumps(relation.get("metadata"), {}),
                     }
                 )
 
                 relation_ids.append(relation_id)
+
+            await session.commit()
 
         logger.info("Saved KG relations", count=len(relation_ids))
         return relation_ids
@@ -307,28 +346,129 @@ class DatabaseService:
         card_id = card_data.get("id", str(uuid.uuid4()))
 
         async with self.session() as session:
-            await session.execute(
+            result = await session.execute(
                 text("""
-                    INSERT INTO evidence_cards (id, paper_id, claim, evidence_span,
+                    INSERT INTO evidence_cards (id, project_id, paper_id, claim, evidence_span,
                                               method, metric, limitation, confidence, cluster_id)
-                    VALUES (:id, :paper_id, :claim, :evidence_span,
+                    VALUES (:id, :project_id, :paper_id, :claim, :evidence_span,
                             :method, :metric, :limitation, :confidence, :cluster_id)
+                    ON CONFLICT (project_id, paper_id) WHERE project_id IS NOT NULL DO UPDATE SET
+                        claim = EXCLUDED.claim,
+                        evidence_span = EXCLUDED.evidence_span,
+                        method = EXCLUDED.method,
+                        metric = EXCLUDED.metric,
+                        limitation = EXCLUDED.limitation,
+                        confidence = EXCLUDED.confidence,
+                        cluster_id = EXCLUDED.cluster_id
+                    RETURNING id
                 """),
                 {
                     "id": card_id,
+                    "project_id": card_data.get("project_id"),
                     "paper_id": card_data.get("paper_id"),
-                    "claim": card_data.get("claim"),
-                    "evidence_span": card_data.get("evidence_span"),
-                    "method": card_data.get("method"),
-                    "metric": card_data.get("metric"),
-                    "limitation": card_data.get("limitation"),
+                    "claim": card_data.get("claim") or "Claim not specified",
+                    "evidence_span": card_data.get("evidence_span") or card_data.get("source_span") or "",
+                    "method": card_data.get("method") or "Method not specified",
+                    "metric": _stringify_scalar(card_data.get("metric") or card_data.get("result") or ""),
+                    "limitation": card_data.get("limitation") or "Limitation not specified",
                     "confidence": card_data.get("confidence", 0.0),
                     "cluster_id": card_data.get("cluster_id"),
                 }
             )
+            row = result.fetchone()
 
-        logger.info("Saved evidence card", card_id=card_id)
-        return card_id
+        actual_id = str(row[0]) if row else card_id
+        logger.info("Saved evidence card", card_id=actual_id)
+        return actual_id
+
+    async def save_community_memory(self, memory_data: dict) -> str:
+        """Persist a synthesized community memory, upserting by project and cluster."""
+        memory_id = memory_data.get("id", str(uuid.uuid4()))
+
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    INSERT INTO community_memories (
+                        id, project_id, cluster_id, summary, method_families, key_claims,
+                        limitations, future_directions, foundation_papers, development_papers,
+                        frontier_papers, representative_papers, cross_community_links,
+                        proof_ids, metadata
+                    )
+                    VALUES (
+                        :id, :project_id, :cluster_id, :summary,
+                        CAST(:method_families AS jsonb), CAST(:key_claims AS jsonb),
+                        CAST(:limitations AS jsonb), CAST(:future_directions AS jsonb),
+                        CAST(:foundation_papers AS jsonb), CAST(:development_papers AS jsonb),
+                        CAST(:frontier_papers AS jsonb), CAST(:representative_papers AS jsonb),
+                        CAST(:cross_community_links AS jsonb), CAST(:proof_ids AS jsonb),
+                        CAST(:metadata AS jsonb)
+                    )
+                    ON CONFLICT (project_id, cluster_id) DO UPDATE SET
+                        summary = EXCLUDED.summary,
+                        method_families = EXCLUDED.method_families,
+                        key_claims = EXCLUDED.key_claims,
+                        limitations = EXCLUDED.limitations,
+                        future_directions = EXCLUDED.future_directions,
+                        foundation_papers = EXCLUDED.foundation_papers,
+                        development_papers = EXCLUDED.development_papers,
+                        frontier_papers = EXCLUDED.frontier_papers,
+                        representative_papers = EXCLUDED.representative_papers,
+                        cross_community_links = EXCLUDED.cross_community_links,
+                        proof_ids = EXCLUDED.proof_ids,
+                        metadata = EXCLUDED.metadata,
+                        updated_at = NOW()
+                    RETURNING id
+                """),
+                {
+                    "id": memory_id,
+                    "project_id": memory_data.get("project_id"),
+                    "cluster_id": memory_data.get("cluster_id"),
+                    "summary": memory_data.get("summary", ""),
+                    "method_families": _json_dumps(memory_data.get("method_families"), []),
+                    "key_claims": _json_dumps(memory_data.get("key_claims"), []),
+                    "limitations": _json_dumps(memory_data.get("limitations"), []),
+                    "future_directions": _json_dumps(memory_data.get("future_directions"), []),
+                    "foundation_papers": _json_dumps(memory_data.get("foundation_papers"), []),
+                    "development_papers": _json_dumps(memory_data.get("development_papers"), []),
+                    "frontier_papers": _json_dumps(memory_data.get("frontier_papers"), []),
+                    "representative_papers": _json_dumps(memory_data.get("representative_papers"), []),
+                    "cross_community_links": _json_dumps(memory_data.get("cross_community_links"), []),
+                    "proof_ids": _json_dumps(memory_data.get("proof_ids"), []),
+                    "metadata": _json_dumps(memory_data.get("metadata"), {}),
+                },
+            )
+            row = result.fetchone()
+
+        actual_id = str(row[0]) if row else memory_id
+        logger.info("Saved community memory", memory_id=actual_id)
+        return actual_id
+
+    async def get_community_memories_by_ids(self, memory_ids: list[str]) -> list[dict]:
+        """Fetch community memories by ids."""
+        if not memory_ids:
+            return []
+
+        async with self.session() as session:
+            result = await session.execute(
+                text("SELECT * FROM community_memories WHERE id = ANY(:ids)"),
+                {"ids": memory_ids},
+            )
+            rows = result.fetchall()
+
+        memories = [_convert_uuid_fields(dict(row._mapping)) for row in rows]
+        order = {str(mid): idx for idx, mid in enumerate(memory_ids)}
+        memories.sort(key=lambda memory: order.get(str(memory.get("id")), len(order)))
+        return memories
+
+    async def get_community_memories_by_project(self, project_id: str) -> list[dict]:
+        """Fetch all community memories for a project."""
+        async with self.session() as session:
+            result = await session.execute(
+                text("SELECT * FROM community_memories WHERE project_id = :project_id ORDER BY created_at"),
+                {"project_id": project_id},
+            )
+            rows = result.fetchall()
+        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
     async def save_outline(self, outline_data: dict) -> str:
         """保存大纲"""
@@ -360,7 +500,13 @@ class DatabaseService:
 
     async def save_written_section(self, section_data: dict) -> str:
         """保存或更新已写章节"""
-        section_id = section_data.get("id", str(uuid.uuid4()))
+        # Use deterministic ID based on outline_id + section name to prevent duplicates
+        if not section_data.get("id"):
+            oid = section_data.get("outline_id", "")
+            sname = str(section_data.get("section_id", ""))
+            section_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{oid}:{sname}"))
+        else:
+            section_id = section_data["id"]
 
         async with self.session() as session:
             await session.execute(
@@ -683,7 +829,7 @@ class DatabaseService:
         project_id = project_data.get("id", str(uuid.uuid4()))
         user_id = project_data.get("user_id")
         config = project_data.get("config")
-        if config and isinstance(config, dict):
+        if isinstance(config, dict):
             config = json.dumps(config)
 
         async with self.session() as session:
@@ -1012,11 +1158,39 @@ class DatabaseService:
             papers_result = await session.execute(text("SELECT COUNT(*) FROM papers"))
             total_papers = papers_result.scalar()
 
+            # Pipeline runs 统计
+            runs_result = await session.execute(text("SELECT COUNT(*) FROM pipeline_runs"))
+            total_runs = runs_result.scalar() or 0
+
+            running_result = await session.execute(
+                text("SELECT COUNT(*) FROM projects WHERE status = 'running'")
+            )
+            running_projects = running_result.scalar() or 0
+
+            # LLM 调用统计
+            llm_result = await session.execute(text("SELECT COUNT(*) FROM llm_calls"))
+            total_llm_calls = llm_result.scalar() or 0
+
+            cost_result = await session.execute(
+                text("SELECT COALESCE(SUM(cost), 0) FROM llm_calls")
+            )
+            total_cost = float(cost_result.scalar() or 0)
+
+            tokens_result = await session.execute(
+                text("SELECT COALESCE(SUM(total_tokens), 0) FROM llm_calls")
+            )
+            total_tokens = int(tokens_result.scalar() or 0)
+
         return {
             "total_users": total_users,
             "active_users": active_users,
             "total_projects": total_projects,
+            "running_projects": running_projects,
             "total_papers": total_papers,
+            "total_runs": total_runs,
+            "total_llm_calls": total_llm_calls,
+            "total_cost": total_cost,
+            "total_tokens": total_tokens,
         }
 
     async def update_project_status(self, project_id: str, status: str):
@@ -1467,7 +1641,7 @@ class DatabaseService:
     ) -> list[dict]:
         """按 provider/model 汇总用量（用于成本分析）"""
         # 安全修复: 分离 SQL 模板和参数化条件，避免 f-string SQL 构建
-        conditions = ["lc.created_at >= NOW() - INTERVAL ':days days'"]
+        conditions = ["lc.created_at >= NOW() - INTERVAL '1 day' * :days"]
         params: dict[str, Any] = {"days": days}
 
         if run_id:

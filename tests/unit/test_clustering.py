@@ -7,9 +7,10 @@ import networkx as nx
 
 from academic_cluster.tools.clustering import (
     build_hybrid_graph,
-    leiden_clustering,
+    community_detection,
     generate_community_visualization,
 )
+from academic_cluster.graphs.nodes.community_detection import select_community_balanced_papers
 
 
 class TestHybridGraph:
@@ -77,12 +78,11 @@ class TestHybridGraph:
         assert graph["p1"]["p2"]["weight"] > 0
 
 
-class TestLeidenClustering:
-    """Leiden 聚类测试"""
+class TestCommunityDetection:
+    """社区检测测试"""
 
     def test_fallback_clustering(self):
-        """测试备用聚类方法"""
-        # 创建一个简单的图
+        """测试备用聚类方法（连通分量）"""
         G = nx.Graph()
         G.add_edges_from([
             ("p1", "p2"),
@@ -91,13 +91,55 @@ class TestLeidenClustering:
             ("p5", "p6"),
         ])
 
-        # 使用备用方法（不依赖 leidenalg）
         from academic_cluster.tools.clustering import _fallback_clustering
         clusters = _fallback_clustering(G)
 
         assert len(clusters) == 2  # 应该有两个连通分量
         assert all("id" in c for c in clusters)
         assert all("paper_ids" in c for c in clusters)
+
+    def test_community_detection_leiden(self):
+        """测试 Leiden 社区检测"""
+        G = nx.Graph()
+        # 两个紧密社区
+        G.add_edges_from([
+            ("p1", "p2", {"weight": 0.9}),
+            ("p2", "p3", {"weight": 0.8}),
+            ("p3", "p1", {"weight": 0.7}),
+            ("p4", "p5", {"weight": 0.9}),
+            ("p5", "p6", {"weight": 0.8}),
+            ("p6", "p4", {"weight": 0.7}),
+            # 弱连接
+            ("p3", "p4", {"weight": 0.1}),
+        ])
+
+        clusters = community_detection(G, algorithm="leiden")
+        assert len(clusters) >= 1
+        assert all("id" in c for c in clusters)
+        total_papers = sum(c["size"] for c in clusters)
+        assert total_papers == 6
+
+    def test_community_detection_walktrap(self):
+        """测试 Walktrap 社区检测"""
+        G = nx.Graph()
+        G.add_edges_from([
+            ("p1", "p2", {"weight": 0.9}),
+            ("p2", "p3", {"weight": 0.8}),
+            ("p4", "p5", {"weight": 0.9}),
+            ("p5", "p6", {"weight": 0.8}),
+            ("p3", "p4", {"weight": 0.1}),
+        ])
+
+        clusters = community_detection(G, algorithm="walktrap")
+        assert len(clusters) >= 1
+        total_papers = sum(c["size"] for c in clusters)
+        assert total_papers == 6
+
+    def test_community_detection_empty_graph(self):
+        """测试空图"""
+        G = nx.Graph()
+        clusters = community_detection(G, algorithm="leiden")
+        assert clusters == []
 
 
 class TestVisualization:
@@ -129,3 +171,61 @@ class TestVisualization:
         assert "clusters" in viz
         assert len(viz["nodes"]) == 3
         assert len(viz["clusters"]) == 2
+
+
+def test_select_community_balanced_papers_exact_160_and_covers_clusters():
+    papers = [
+        {
+            "id": f"p{i}",
+            "title": f"Paper {i}",
+            "abstract": "abstract",
+            "citation_count": 240 - i,
+            "publication_date": "2024-01-01",
+        }
+        for i in range(240)
+    ]
+    clusters = [
+        {"id": "c1", "paper_ids": [f"p{i}" for i in range(120)]},
+        {"id": "c2", "paper_ids": [f"p{i}" for i in range(120, 180)]},
+        {"id": "c3", "paper_ids": [f"p{i}" for i in range(180, 240)]},
+    ]
+
+    core, auxiliary = select_community_balanced_papers(
+        clusters=clusters,
+        reranked_papers=papers,
+        core_count=160,
+        auxiliary_count=40,
+    )
+
+    assert len(core) == 160
+    assert len(set(core)) == 160
+    assert len(auxiliary) == 40
+    for cluster in clusters:
+        assert set(core) & set(cluster["paper_ids"])
+
+
+def test_generate_visualization_uses_checkpoint_safe_scalar_types():
+    import numpy as np
+
+    G = nx.Graph()
+    G.add_edge("p1", "p2", weight=np.float64(0.8))
+    clusters = [{"id": "cluster_1", "paper_ids": ["p1", "p2"], "size": np.int64(2)}]
+    papers = [
+        {"id": "p1", "title": "Paper 1", "citation_count": np.int64(4)},
+        {"id": "p2", "title": "Paper 2", "citation_count": np.int64(1)},
+    ]
+
+    visualization = generate_community_visualization(G, clusters, papers)
+
+    def assert_plain_scalars(value):
+        if isinstance(value, dict):
+            for nested in value.values():
+                assert_plain_scalars(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                assert_plain_scalars(nested)
+        else:
+            assert not isinstance(value, np.generic)
+            assert not isinstance(value, np.ndarray)
+
+    assert_plain_scalars(visualization)

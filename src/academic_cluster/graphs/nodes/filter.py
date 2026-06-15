@@ -66,6 +66,5 @@ async def filter_node(state: PipelineState) -> dict:
 
     return {
         "filtered_paper_ids": filtered_ids,
-        "paper_ids": filtered_ids,
         "status": "filtered",
     }

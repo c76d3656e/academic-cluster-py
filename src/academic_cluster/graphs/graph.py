@@ -1,10 +1,6 @@
-"""
-LangGraph 图定义
-
-定义主 Pipeline 图、子图，以及节点间的边和条件路由。
-使用 AsyncPostgresSaver 实现持久化 checkpoint，支持断点恢复。
-集成 PipelineTracker 实现可观测性。
-"""
+﻿"""
+LangGraph 鍥惧畾涔?
+瀹氫箟涓?Pipeline 鍥俱€佸瓙鍥撅紝浠ュ強鑺傜偣闂寸殑杈瑰拰鏉′欢璺敱銆?浣跨敤 AsyncPostgresSaver 瀹炵幇鎸佷箙鍖?checkpoint锛屾敮鎸佹柇鐐规仮澶嶃€?闆嗘垚 PipelineTracker 瀹炵幇鍙娴嬫€с€?"""
 
 import structlog
 from langgraph.graph import END, StateGraph
@@ -23,6 +19,7 @@ from .nodes import (
     kg_extraction_node,
     community_detection_node,
     visualize_community_node,
+    community_memory_node,
     evidence_cards_node,
     gap_analysis_node,
     targeted_refine_node,
@@ -39,21 +36,20 @@ logger = structlog.get_logger()
 
 
 # =============================================================================
-# Checkpointer 管理
+# Checkpointer 绠＄悊
 # =============================================================================
 
 _default_checkpointer = None
 
 
 async def get_checkpointer():
-    """获取或创建 AsyncPostgresSaver 单例（fallback 到 MemorySaver）"""
+    """Get or create the graph checkpointer."""
     global _default_checkpointer
     if _default_checkpointer is not None:
         return _default_checkpointer
 
     try:
-        # 让 msgpack 支持 numpy 类型序列化
-        import ormsgpack
+        # 璁?msgpack 鏀寔 numpy 绫诲瀷搴忓垪鍖?        import ormsgpack
         from langgraph.checkpoint.serde import jsonplus as _serde_mod
         if hasattr(_serde_mod, '_option'):
             _serde_mod._option = _serde_mod._option | ormsgpack.OPT_SERIALIZE_NUMPY
@@ -87,7 +83,7 @@ async def get_checkpointer():
 
 
 async def close_checkpointer():
-    """关闭 checkpointer 连接"""
+    """Close the graph checkpointer."""
     global _default_checkpointer
     if _default_checkpointer is not None:
         try:
@@ -101,11 +97,11 @@ async def close_checkpointer():
 
 
 # =============================================================================
-# 条件路由函数
+# 鏉′欢璺敱鍑芥暟
 # =============================================================================
 
 def should_continue_to_writing(state: PipelineState) -> str:
-    """差距分析后决定路径：补充搜索 or 开始写作"""
+    """Route from gap analysis."""
     if state.needs_targeted_refinement and state.refinement_attempt < state.max_refinement_attempts:
         logger.info(
             "Gaps detected, starting targeted refinement",
@@ -119,21 +115,47 @@ def should_continue_to_writing(state: PipelineState) -> str:
 
 
 def should_revise_sections(state: PipelineState) -> str:
-    """覆盖审计后决定路径：修订 or 生成产出"""
-    if state.coverage_score < 0.8 or state.invalid_citation_count > 0:
+    """Route after coverage audit."""
+    weighted_bp = getattr(state, "weighted_coverage_bp", 10000) or 10000
+    weak_count = getattr(state, "weak_citation_support_count", 0) or 0
+    invalid_count = getattr(state, "invalid_citation_count", 0) or 0
+    repair_attempt = getattr(state, "retry_count", 0) or 0
+    if repair_attempt >= 2:
+        logger.warning(
+            "Coverage repair attempts exhausted; proceeding with diagnostic output",
+            repair_attempt=repair_attempt,
+            invalid_citations=invalid_count,
+            weighted_coverage_bp=weighted_bp,
+            weak_support=weak_count,
+        )
+        return "artifact_registration"
+    if invalid_count > 0:
         logger.info(
-            "Coverage insufficient or invalid citations found",
-            coverage=state.coverage_score,
-            invalid_citations=state.invalid_citation_count,
+            "Invalid citations found, revising sections",
+            invalid_citations=invalid_count,
+            repair_attempt=repair_attempt + 1,
+        )
+        return "section_revision"
+    if weighted_bp < 8000 or weak_count > 5:
+        logger.info(
+            "Coverage audit below threshold, revising sections",
+            weighted_coverage_bp=weighted_bp,
+            weak_support=weak_count,
+            repair_attempt=repair_attempt + 1,
         )
         return "section_revision"
 
-    logger.info("Coverage sufficient, proceeding to artifact registration")
+    logger.info(
+        "Coverage audit passed",
+        coverage=state.coverage_score,
+        weighted_coverage_bp=weighted_bp,
+        weak_support=weak_count,
+    )
     return "artifact_registration"
 
 
 def should_retry_on_error(state: PipelineState) -> str:
-    """错误处理路由"""
+    """Route retry behavior after errors."""
     if state.errors and state.retry_count < 3:
         logger.warning(
             "Error occurred, retrying",
@@ -150,72 +172,49 @@ def should_retry_on_error(state: PipelineState) -> str:
 
 
 # =============================================================================
-# 图构建
-# =============================================================================
+# 鍥炬瀯寤?# =============================================================================
 
 def create_pipeline_graph() -> StateGraph:
-    """创建主 Pipeline 图（未编译）"""
+    """Create the review-generation pipeline graph."""
     workflow = StateGraph(PipelineState)
 
-    # 搜索阶段
     workflow.add_node("search", with_audit("search")(search_node))
     workflow.add_node("deduplicate", with_audit("deduplicate")(deduplicate_node))
     workflow.add_node("filter", with_audit("filter")(filter_node))
     workflow.add_node("bm25", with_audit("bm25")(bm25_node))
-
-    # 嵌入和检索阶段
     workflow.add_node("embedding", with_audit("embedding")(embedding_node))
     workflow.add_node("pgvector_knn", with_audit("pgvector_knn")(pgvector_knn_node))
     workflow.add_node("rerank", with_audit("rerank")(rerank_node))
-
-    # 知识图谱阶段
-    workflow.add_node("kg_extraction", with_audit("kg_extraction")(kg_extraction_node))
-
-    # 聚类阶段
     workflow.add_node("community_detection", with_audit("community_detection")(community_detection_node))
     workflow.add_node("visualize_community", with_audit("visualize_community")(visualize_community_node))
-
-    # 证据阶段
     workflow.add_node("evidence_cards", with_audit("evidence_cards")(evidence_cards_node))
+    workflow.add_node("kg_extraction", with_audit("kg_extraction")(kg_extraction_node))
+    workflow.add_node("community_memory", with_audit("community_memory")(community_memory_node))
     workflow.add_node("gap_analysis", with_audit("gap_analysis")(gap_analysis_node))
     workflow.add_node("targeted_refine", with_audit("targeted_refine")(targeted_refine_node))
-
-    # 写作阶段
     workflow.add_node("outline_generation", with_audit("outline_generation")(outline_generation_node))
     workflow.add_node("user_confirm", with_audit("user_confirm")(user_confirm_node))
     workflow.add_node("write_review", with_audit("write_review")(write_review_node))
     workflow.add_node("coverage_audit", with_audit("coverage_audit")(coverage_audit_node))
     workflow.add_node("section_revision", with_audit("section_revision")(section_revision_node))
-
-    # 产出阶段
     workflow.add_node("artifact_registration", with_audit("artifact_registration")(artifact_registration_node))
     workflow.add_node("finalize", with_audit("finalize")(finalize_node))
 
-    # 设置入口
     workflow.set_entry_point("search")
 
-    # 搜索阶段边
     workflow.add_edge("search", "deduplicate")
     workflow.add_edge("deduplicate", "filter")
     workflow.add_edge("filter", "bm25")
-
-    # 嵌入和检索阶段边
     workflow.add_edge("bm25", "embedding")
     workflow.add_edge("embedding", "pgvector_knn")
     workflow.add_edge("pgvector_knn", "rerank")
-
-    # 知识图谱阶段边
-    workflow.add_edge("rerank", "kg_extraction")
-
-    # 聚类阶段边
-    workflow.add_edge("kg_extraction", "community_detection")
+    workflow.add_edge("rerank", "community_detection")
     workflow.add_edge("community_detection", "visualize_community")
     workflow.add_edge("visualize_community", "evidence_cards")
+    workflow.add_edge("evidence_cards", "kg_extraction")
+    workflow.add_edge("kg_extraction", "community_memory")
+    workflow.add_edge("community_memory", "gap_analysis")
 
-    # 证据阶段边
-    workflow.add_edge("evidence_cards", "gap_analysis")
-
-    # 条件边：差距分析后决定路径
     workflow.add_conditional_edges(
         "gap_analysis",
         should_continue_to_writing,
@@ -224,16 +223,10 @@ def create_pipeline_graph() -> StateGraph:
             "outline_generation": "outline_generation",
         },
     )
-
-    # targeted_refine 循环回 evidence_cards
     workflow.add_edge("targeted_refine", "evidence_cards")
-
-    # 写作阶段边
-    workflow.add_edge("outline_generation", "user_confirm")
-    workflow.add_edge("user_confirm", "write_review")
+    workflow.add_edge("outline_generation", "write_review")
     workflow.add_edge("write_review", "coverage_audit")
 
-    # 条件边：覆盖审计后决定路径
     workflow.add_conditional_edges(
         "coverage_audit",
         should_revise_sections,
@@ -242,11 +235,7 @@ def create_pipeline_graph() -> StateGraph:
             "artifact_registration": "artifact_registration",
         },
     )
-
-    # section_revision 循环回 coverage_audit
     workflow.add_edge("section_revision", "coverage_audit")
-
-    # 产出阶段边
     workflow.add_edge("artifact_registration", "finalize")
     workflow.add_edge("finalize", END)
 
@@ -260,19 +249,8 @@ def compile_graph(
     interrupt_after: list[str] | None = None,
     callbacks: list | None = None,
 ):
-    """
-    编译图
 
-    Args:
-        checkpointer: 检查点存储（必须传入，通常是 AsyncPostgresSaver）
-        debug: 是否启用调试模式
-        interrupt_before: 在哪些节点前中断（用于人工确认）
-        interrupt_after: 在哪些节点后中断
-        callbacks: LangChain 回调列表（可选，用于 LLM 追踪）
-
-    Returns:
-        编译后的图
-    """
+    """Compile the pipeline graph."""
     if interrupt_before is None:
         interrupt_before = ["user_confirm"]
 
@@ -298,11 +276,11 @@ def compile_graph(
 
 
 # =============================================================================
-# 便捷函数
+# 渚挎嵎鍑芥暟
 # =============================================================================
 
 def get_default_graph():
-    """获取默认配置的编译图（同步版本，仅用于测试）"""
+    """Get the default graph for tests."""
     from langgraph.checkpoint.memory import MemorySaver
     return compile_graph(checkpointer=MemorySaver(), debug=True)
 
@@ -315,36 +293,24 @@ async def run_pipeline(
     auto_confirm: bool = True,
     resume: bool = False,
 ):
-    """
-    运行 Pipeline
 
-    Args:
-        query: 研究主题查询
-        project_id: 项目 ID（同时用作 LangGraph thread_id）
-        config: 配置覆盖
-        sse_manager: SSE 管理器（可选，用于实时推送）
-        auto_confirm: 是否自动确认大纲（跳过人工审核）
-        resume: 是否从上次失败的检查点恢复（LangGraph 原生恢复）
-
-    Returns:
-        最终状态
-    """
+    """Run or resume a pipeline."""
     from ..services.database import get_database
     db = get_database()
 
-    # 获取持久化 checkpointer
+    # 鑾峰彇鎸佷箙鍖?checkpointer
     checkpointer = await get_checkpointer()
 
-    # 创建 PipelineTracker 实例，注入 db 持久化 callable
+    # 鍒涘缓 PipelineTracker 瀹炰緥锛屾敞鍏?db 鎸佷箙鍖?callable
     tracker = PipelineTracker(project_id, topic=query)
 
-    # 创建 llm_call DB 持久化 wrapper
+    # 鍒涘缓 llm_call DB 鎸佷箙鍖?wrapper
     async def _persist_llm_call(
         node_name: str, provider_name: str, model_name: str,
         call_type: str, prompt_tokens: int, completion_tokens: int,
         latency_ms: int,
     ):
-        """创建 + 完成 llm_call 记录"""
+        """Persist one LLM call record."""
         try:
             exec_id = tracker._node_ids.get(node_name)
             if not exec_id or not tracker.run_id:
@@ -369,7 +335,9 @@ async def run_pipeline(
 
     llm_callback = LLMCallbackHandler(tracker.token_tracker, db_caller=_persist_llm_call)
 
-    # 如果自动确认，则不中断
+    from ..services.observability import PipelineStatusCallback
+    status_callback = PipelineStatusCallback(project_id, db.update_project_status)
+
     interrupt_before = [] if auto_confirm else ["user_confirm"]
     graph = compile_graph(
         checkpointer=checkpointer,
@@ -377,28 +345,27 @@ async def run_pipeline(
         interrupt_before=interrupt_before,
     )
 
-    # LangGraph thread_id = project_id，callbacks 通过 config 注入
+    # LangGraph thread_id = project_id锛宑allbacks 閫氳繃 config 娉ㄥ叆
     thread_config = {
         "configurable": {"thread_id": project_id},
-        "callbacks": [llm_callback],
+        "callbacks": [llm_callback, status_callback],
     }
 
-    # 更新项目状态为 running
+    # 鏇存柊椤圭洰鐘舵€佷负 running
     await db.update_project_status(project_id, "running")
 
-    # 启动 tracker 并持久化 pipeline_run
+    # 鍚姩 tracker 骞舵寔涔呭寲 pipeline_run
     await tracker.start(db_create_run=db.create_pipeline_run)
 
-    # 通过 ContextVar 注入 tracker（避免不可序列化对象进入 checkpoint）
-    set_current_tracker(tracker)
+    # 閫氳繃 ContextVar 娉ㄥ叆 tracker锛堥伩鍏嶄笉鍙簭鍒楀寲瀵硅薄杩涘叆 checkpoint锛?    set_current_tracker(tracker)
     set_current_llm_callback(llm_callback)
 
     if resume:
-        # LangGraph 原生恢复：传 None 作为 input，自动从最后 checkpoint 继续
+        # LangGraph 鍘熺敓鎭㈠锛氫紶 None 浣滀负 input锛岃嚜鍔ㄤ粠鏈€鍚?checkpoint 缁х画
         logger.info("Resuming pipeline from checkpoint", project_id=project_id)
         input_data = None
     else:
-        # 新建运行
+        # 鏂板缓杩愯
         input_data = PipelineState(
             project_id=project_id,
             query=query,
@@ -413,10 +380,10 @@ async def run_pipeline(
             stream_mode="updates",
         ):
             for node_name, node_output in event.items():
-                # 立即更新项目状态为当前节点
+                # 绔嬪嵆鏇存柊椤圭洰鐘舵€佷负褰撳墠鑺傜偣
                 await db.update_project_status(project_id, f"running:{node_name}")
 
-                # 安全处理 node_output
+                # 瀹夊叏澶勭悊 node_output
                 if isinstance(node_output, dict):
                     result = {**(result or {}), **node_output}
                 elif isinstance(node_output, tuple) and len(node_output) > 0 and isinstance(node_output[0], dict):
@@ -425,7 +392,7 @@ async def run_pipeline(
                     logger.warning("Unexpected node output type", node=node_name, type=type(node_output).__name__)
                     continue
 
-                # 发送 SSE 进度事件
+                # 鍙戦€?SSE 杩涘害浜嬩欢
                 if sse_manager:
                     status = node_output.get("status", "processing") if isinstance(node_output, dict) else "processing"
                     detail_msg = _build_progress_message(node_name, result)
@@ -436,16 +403,14 @@ async def run_pipeline(
                         message=detail_msg,
                     )
 
-        # 追踪器结束并记录汇总
         tracker_summary = await tracker.finish(
             status="succeeded",
             db_finish_run=db.finish_pipeline_run,
         )
 
-        # 更新项目状态为 completed
+        # 鏇存柊椤圭洰鐘舵€佷负 completed
         await db.update_project_status(project_id, "completed")
 
-        # 发送完成事件
         if sse_manager and result:
             await sse_manager.send_complete(project_id, {
                 "paper_count": len(result.get("paper_ids", [])),
@@ -453,7 +418,6 @@ async def run_pipeline(
             })
 
     except Exception as e:
-        # 追踪器记录失败状态
         try:
             await tracker.finish(
                 status="failed",
@@ -471,52 +435,45 @@ async def run_pipeline(
     return result
 
 
+
 def _build_progress_message(node_name: str, state: dict) -> str:
-    """构建详细的进度消息"""
+    """Build a concise progress message for SSE clients."""
     if node_name == "search":
-        count = len(state.get("paper_ids", []))
-        return f"搜索完成，找到 {count} 篇论文"
-    elif node_name == "deduplicate":
-        count = len(state.get("paper_ids", []))
-        return f"去重完成，保留 {count} 篇论文"
-    elif node_name == "filter":
-        count = len(state.get("paper_ids", []))
-        return f"筛选完成，保留 {count} 篇高质量论文"
-    elif node_name == "bm25":
-        return "BM25 关键词索引构建完成"
-    elif node_name == "embedding":
-        count = len(state.get("embedding_ids", []))
-        return f"向量化完成，生成 {count} 个嵌入向量"
-    elif node_name == "pgvector_knn":
-        return "pgvector KNN 图构建完成"
-    elif node_name == "rerank":
-        count = len(state.get("core_paper_ids", []))
-        return f"重排序完成，筛选出 {count} 篇核心论文"
-    elif node_name == "kg_extraction":
-        entities = len(state.get("kg_entity_ids", []))
-        relations = len(state.get("kg_relation_ids", []))
-        return f"知识图谱提取完成，{entities} 个实体，{relations} 个关系"
-    elif node_name == "community_detection":
-        count = len(state.get("cluster_ids", []))
-        return f"社区检测完成，发现 {count} 个主题聚类"
-    elif node_name == "visualize_community":
-        return "社区可视化生成完成"
-    elif node_name == "evidence_cards":
-        count = len(state.get("evidence_card_ids", []))
-        return f"证据卡片生成完成，共 {count} 张"
-    elif node_name == "gap_analysis":
-        return "研究空白分析完成"
-    elif node_name == "targeted_refine":
-        return "定向补充搜索完成"
-    elif node_name == "outline_generation":
-        return "大纲生成完成"
-    elif node_name == "write_review":
-        return "综述撰写完成"
-    elif node_name == "coverage_audit":
-        return "覆盖度审计完成"
-    elif node_name == "artifact_registration":
-        return "产出物注册完成"
-    elif node_name == "finalize":
-        return "流程完成"
-    else:
-        return f"{node_name} 完成"
+        return f"??????? {len(state.get('paper_ids', []))} ???"
+    if node_name == "deduplicate":
+        return f"??????? {len(state.get('paper_ids', []))} ???"
+    if node_name == "filter":
+        return f"??????? {len(state.get('paper_ids', []))} ??????"
+    if node_name == "bm25":
+        return "BM25 ?????????"
+    if node_name == "embedding":
+        return f"???????? {len(state.get('embedding_ids', []))} ???"
+    if node_name == "pgvector_knn":
+        return "pgvector KNN ?????"
+    if node_name == "rerank":
+        return f"??????{len(state.get('reranked_paper_ids', []))} ?????"
+    if node_name == "community_detection":
+        return f"????????? {len(state.get('cluster_ids', []))} ?????"
+    if node_name == "visualize_community":
+        return "?????????"
+    if node_name == "evidence_cards":
+        return f"?????????? {len(state.get('evidence_card_ids', []))} ?"
+    if node_name == "kg_extraction":
+        return f"?????????{len(state.get('kg_entity_ids', []))} ????{len(state.get('kg_relation_ids', []))} ???"
+    if node_name == "community_memory":
+        return f"?????????? {len(state.get('community_memory_ids', []))} ?"
+    if node_name == "gap_analysis":
+        return "????????"
+    if node_name == "targeted_refine":
+        return "????????"
+    if node_name == "outline_generation":
+        return "??????"
+    if node_name == "write_review":
+        return "??????"
+    if node_name == "coverage_audit":
+        return "???????"
+    if node_name == "artifact_registration":
+        return "???????"
+    if node_name == "finalize":
+        return "????"
+    return f"{node_name} ??"

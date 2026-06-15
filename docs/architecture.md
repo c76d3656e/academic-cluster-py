@@ -232,9 +232,10 @@ async def detect_communities(state: PipelineState) -> dict:
         weights={"knn": 0.45, "kg": 0.25, "entity": 0.15, "evidence": 0.10, "quality": 0.05}
     )
 
-    # Leiden 社区检测
-    clusters = leiden_clustering(
+    # 社区检测（支持 leiden / walktrap，通过 clustering.algorithm 配置切换）
+    clusters = community_detection(
         graph=hybrid_graph,
+        algorithm="leiden",
         resolution=1.0,
         seed=42
     )

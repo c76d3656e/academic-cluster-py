@@ -63,6 +63,173 @@ async def _seed_admin(db, settings):
                 )
 
 
+async def _seed_providers(db, settings):
+    """启动时将 .env 中的 Provider 配置同步到 provider_registry 表（幂等）"""
+    from sqlalchemy import text
+    from ..services.crypto import encrypt_key
+
+    providers_to_seed = []
+
+    # LLM Provider
+    if settings.llm_api_key:
+        base_url = settings.llm_base_url or "https://api.openai.com/v1"
+        providers_to_seed.append({
+            "kind": "llm",
+            "display_name": settings.llm_provider,
+            "base_url": base_url,
+            "model": settings.llm_model,
+            "api_key": settings.llm_api_key,
+        })
+
+    # Embedding Provider
+    if settings.embedding_api_key:
+        providers_to_seed.append({
+            "kind": "embedding",
+            "display_name": settings.embedding_provider,
+            "base_url": settings.embedding_api_url,
+            "model": settings.embedding_model,
+            "api_key": settings.embedding_api_key,
+        })
+
+    # Rerank Provider
+    if settings.rerank_api_key:
+        providers_to_seed.append({
+            "kind": "rerank",
+            "display_name": settings.rerank_provider,
+            "base_url": settings.rerank_api_url,
+            "model": settings.rerank_model,
+            "api_key": settings.rerank_api_key,
+        })
+
+    # Multi-provider JSON
+    import json
+    for json_str, kind in [
+        (getattr(settings, 'llm_providers_json', None), 'llm'),
+        (getattr(settings, 'embedding_providers_json', None), 'embedding'),
+        (getattr(settings, 'rerank_providers_json', None), 'rerank'),
+    ]:
+        if not json_str:
+            continue
+        try:
+            items = json.loads(json_str)
+            for item in items:
+                providers_to_seed.append({
+                    "kind": kind,
+                    "display_name": item.get("name", "unnamed"),
+                    "base_url": item.get("api_url", ""),
+                    "model": item.get("model", ""),
+                    "api_key": item.get("api_key", ""),
+                })
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not providers_to_seed:
+        return
+
+    async with db.session() as session:
+        for p in providers_to_seed:
+            # 检查是否已存在同名同 kind 的 provider
+            result = await session.execute(
+                text("SELECT id FROM provider_registry WHERE kind = :kind AND display_name = :name"),
+                {"kind": p["kind"], "name": p["display_name"]},
+            )
+            if result.fetchone():
+                continue  # 已存在，跳过
+
+            api_key_enc = encrypt_key(p["api_key"]) if p["api_key"] else None
+            await session.execute(
+                text("""
+                    INSERT INTO provider_registry (kind, display_name, base_url, model, api_key_enc, health_status)
+                    VALUES (:kind, :name, :base_url, :model, :api_key_enc, 'unknown')
+                """),
+                {
+                    "kind": p["kind"],
+                    "name": p["display_name"],
+                    "base_url": p["base_url"],
+                    "model": p["model"],
+                    "api_key_enc": api_key_enc,
+                },
+            )
+            logger.info("Seeded provider from env", kind=p["kind"], name=p["display_name"])
+
+
+async def _ensure_community_memory_schema(db):
+    """Create community memory persistence for existing databases."""
+    from sqlalchemy import text
+
+    async with db.session() as session:
+        await session.execute(text("""
+            CREATE TABLE IF NOT EXISTS community_memories (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+                cluster_id UUID REFERENCES clusters(id) ON DELETE CASCADE,
+                summary TEXT,
+                method_families JSONB NOT NULL DEFAULT '[]'::jsonb,
+                key_claims JSONB NOT NULL DEFAULT '[]'::jsonb,
+                limitations JSONB NOT NULL DEFAULT '[]'::jsonb,
+                future_directions JSONB NOT NULL DEFAULT '[]'::jsonb,
+                foundation_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
+                development_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
+                frontier_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
+                representative_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
+                cross_community_links JSONB NOT NULL DEFAULT '[]'::jsonb,
+                proof_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, cluster_id)
+            )
+        """))
+        await session.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_community_memories_project_id ON community_memories(project_id)"
+        ))
+        await session.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_community_memories_cluster_id ON community_memories(cluster_id)"
+        ))
+
+
+async def _ensure_evidence_card_schema(db):
+    """Add project-scoped evidence-card persistence for existing databases."""
+    from sqlalchemy import text
+
+    async with db.session() as session:
+        await session.execute(text(
+            "ALTER TABLE evidence_cards ADD COLUMN IF NOT EXISTS project_id UUID"
+        ))
+        await session.execute(text("""
+            UPDATE evidence_cards ec
+            SET project_id = c.project_id
+            FROM clusters c
+            WHERE ec.cluster_id = c.id
+              AND ec.project_id IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM projects p WHERE p.id = c.project_id
+              )
+        """))
+        await session.execute(text("""
+            WITH ranked_cards AS (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY project_id, paper_id
+                           ORDER BY created_at ASC, id ASC
+                       ) AS rn
+                FROM evidence_cards
+                WHERE project_id IS NOT NULL
+            )
+            DELETE FROM evidence_cards ec
+            USING ranked_cards rc
+            WHERE ec.id = rc.id AND rc.rn > 1
+        """))
+        await session.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_evidence_cards_project_id ON evidence_cards(project_id)"
+        ))
+        await session.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_cards_project_paper
+            ON evidence_cards(project_id, paper_id)
+            WHERE project_id IS NOT NULL
+        """))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -97,6 +264,21 @@ async def lifespan(app: FastAPI):
         await _seed_admin(db, settings)
     except Exception as e:
         logger.warning("Failed to seed admin user", error=str(e))
+
+    try:
+        await _ensure_evidence_card_schema(db)
+        await _ensure_community_memory_schema(db)
+        await _seed_providers(db, settings)
+    except Exception as e:
+        logger.warning("Failed to initialize runtime schemas or seed providers", error=str(e))
+
+    # 初始化 Pipeline 配置表
+    try:
+        from .admin.pipeline_config import init_pipeline_config_table, _ensure_defaults
+        await init_pipeline_config_table()
+        await _ensure_defaults()
+    except Exception as e:
+        logger.warning("Failed to init pipeline config table", error=str(e))
 
     yield
 
@@ -144,9 +326,13 @@ def create_app() -> FastAPI:
     from .routes import router
     from .sse import router as sse_router
     from .auth_routes import router as auth_router
+    from .console import router as console_router
+    from .admin import router as admin_router
     app.include_router(auth_router, prefix="/api")
     app.include_router(router, prefix="/api")
     app.include_router(sse_router, prefix="/api")
+    app.include_router(console_router, prefix="/api")
+    app.include_router(admin_router, prefix="/api")
 
     @app.get("/health")
     async def health():

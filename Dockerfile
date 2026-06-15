@@ -1,4 +1,4 @@
-# ---- Build stage ----
+# syntax=docker/dockerfile:1
 FROM ghcr.io/astral-sh/uv:0.7-python3.12-bookworm-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -8,18 +8,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 先复制依赖定义，利用 Docker layer cache
-COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-workspace
+ENV UV_LINK_MODE=copy
 
-# 复制源码并安装项目本身
+# Layer 1: 安装第三方依赖（pyproject.toml / uv.lock 不变时此层命中缓存）
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-dev --no-install-project
+
+# Layer 2: 复制源码并安装项目本体（源码变动只重跑这一层）
 COPY src/ src/
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-# ---- Production stage ----
 FROM python:3.12-slim AS production
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -30,18 +33,15 @@ RUN useradd -m -u 1000 appuser
 
 WORKDIR /app
 
-# 从 builder 复制已安装好的虚拟环境
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --from=builder --chown=appuser:appuser /app/pyproject.toml /app/pyproject.toml
 
-# 复制源码
 COPY --chown=appuser:appuser src/ src/
+COPY --chown=appuser:appuser jcrdata/ jcrdata/
 
-# 创建数据目录
 RUN mkdir -p data/raw data/processed data/embeddings logs && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser data logs
 
-# 设置虚拟环境 PATH
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

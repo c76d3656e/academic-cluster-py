@@ -5,12 +5,15 @@
 """
 
 import json
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 logger = structlog.get_logger()
+
+CORE_EVIDENCE_CARD_TARGET = 160
 
 
 EVIDENCE_SYSTEM_PROMPT = """你是一个学术证据分析专家。你的任务是从学术论文中提取结构化的证据信息。
@@ -119,9 +122,93 @@ async def generate_evidence_card(
     return result
 
 
+def _clean_text(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _truncate_text(value: Any, max_chars: int) -> str:
+    return _clean_text(value)[:max_chars]
+
+
+def _paper_year(paper: dict) -> int | None:
+    year = paper.get("year")
+    if year:
+        try:
+            return int(str(year)[:4])
+        except (TypeError, ValueError):
+            pass
+    publication_date = paper.get("publication_date")
+    if publication_date:
+        try:
+            return int(str(publication_date)[:4])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _clean_optional(value: Any, max_chars: int) -> str | None:
+    cleaned = _truncate_text(value, max_chars)
+    return cleaned or None
+
+
+def _clamp_confidence(value: Any) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if confidence != confidence:
+        return 0.0
+    return max(0.0, min(1.0, confidence))
+
+
+def fallback_missing_card(paper: dict) -> dict:
+    title = _clean_text(paper.get("title")) or "Untitled"
+    abstract = _clean_text(paper.get("abstract")) or title
+    return {
+        "paper_id": str(paper.get("id", "")),
+        "title": title,
+        "authors": paper.get("authors"),
+        "year": _paper_year(paper),
+        "claim": _truncate_text(abstract, 220),
+        "evidence_span": _truncate_text(abstract, 320),
+        "method": None,
+        "metric": None,
+        "limitation": "LLM evidence card extraction did not return a usable card for this paper.",
+        "source_api": "fallback_missing_card",
+        "confidence": 0.05,
+    }
+
+
+def normalize_evidence_card(raw_card: dict | None, paper: dict) -> dict:
+    if not isinstance(raw_card, dict):
+        return fallback_missing_card(paper)
+
+    card = dict(raw_card)
+    claim = _truncate_text(card.get("claim") or card.get("key_finding"), 500)
+    evidence_span = _truncate_text(card.get("evidence_span"), 500)
+    if not claim or not evidence_span:
+        return fallback_missing_card(paper)
+
+    return {
+        **card,
+        "paper_id": str(paper.get("id", "")),
+        "title": _clean_text(paper.get("title")) or _clean_text(card.get("title")) or "Untitled",
+        "authors": card.get("authors") or paper.get("authors"),
+        "year": card.get("year") or _paper_year(paper),
+        "claim": claim,
+        "evidence_span": evidence_span,
+        "method": _clean_optional(card.get("method"), 240),
+        "metric": card.get("metric"),
+        "limitation": _clean_optional(card.get("limitation"), 240),
+        "source_api": _clean_text(card.get("source_api")) or "llm",
+        "confidence": _clamp_confidence(card.get("confidence")),
+    }
+
+
 async def generate_evidence_cards_batch(
     papers: list[dict],
     cluster_topics: dict[str, list[str]] | None = None,
+    concurrency: int | None = None,
 ) -> list[dict]:
     """
     批量生成证据卡片
@@ -138,27 +225,36 @@ async def generate_evidence_cards_batch(
     if cluster_topics is None:
         cluster_topics = {}
 
-    tasks = [
-        generate_evidence_card(
-            paper=paper,
-            cluster_topics=cluster_topics.get(paper.get("id")),
-        )
-        for paper in papers
-    ]
+    max_concurrency = max(1, int(concurrency or len(papers) or 1))
+    semaphore = asyncio.Semaphore(max_concurrency)
 
+    async def _bounded_generate(paper: dict):
+        async with semaphore:
+            return await generate_evidence_card(
+                paper=paper,
+                cluster_topics=cluster_topics.get(paper.get("id")),
+            )
+
+    tasks = [_bounded_generate(paper) for paper in papers]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     evidence_cards = []
-    for result in results:
+    for paper, result in zip(papers, results):
         if isinstance(result, Exception):
-            logger.error("Evidence generation failed", error=str(result))
-            continue
-        evidence_cards.append(result)
+            logger.error(
+                "Evidence generation failed, using fallback card",
+                paper_id=paper.get("id"),
+                error=str(result),
+            )
+            evidence_cards.append(fallback_missing_card(paper))
+        else:
+            evidence_cards.append(normalize_evidence_card(result, paper))
 
     logger.info(
         "Evidence cards generated",
         total=len(papers),
         successful=len(evidence_cards),
+        concurrency=max_concurrency,
     )
 
     return evidence_cards

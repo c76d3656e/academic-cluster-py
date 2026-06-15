@@ -12,6 +12,11 @@ from langgraph.graph import add_messages
 from pydantic import BaseModel, Field
 
 
+def _last_write_wins(old: Any, new: Any) -> Any:
+    """Reducer: 并行节点写同一 key 时，保留最新值。"""
+    return new
+
+
 class PipelineState(BaseModel):
     """
     主 Pipeline 状态
@@ -25,20 +30,21 @@ class PipelineState(BaseModel):
     # === 元数据 ===
     project_id: str
     query: str
-    status: str = "created"
+    status: Annotated[str, _last_write_wins] = "created"
     current_node: Optional[str] = None
     errors: Annotated[list[str], add] = Field(default_factory=list)
     retry_count: int = 0
 
     # === 搜索阶段 ===
     # 论文 ID 列表（详情存储在 PostgreSQL）
-    paper_ids: Annotated[list[str], add] = Field(default_factory=list)
+    paper_ids: list[str] = Field(default_factory=list)
     total_searched: int = 0
 
     # === 过滤阶段 ===
     filtered_paper_ids: list[str] = Field(default_factory=list)
-    core_paper_ids: list[str] = Field(default_factory=list)
-    auxiliary_paper_ids: list[str] = Field(default_factory=list)
+    reranked_paper_ids: list[str] = Field(default_factory=list)  # 全部 reranked 论文（用于 KG、聚类）
+    core_paper_ids: list[str] = Field(default_factory=list)      # top N 核心论文（用于 evidence cards）
+    auxiliary_paper_ids: list[str] = Field(default_factory=list)  # 辅助论文（用于 review 写作）
 
     # === 嵌入阶段 ===
     # 嵌入向量 ID 列表（向量存储在向量数据库）
@@ -56,10 +62,11 @@ class PipelineState(BaseModel):
 
     # === 证据阶段 ===
     evidence_card_ids: list[str] = Field(default_factory=list)
+    community_memory_ids: list[str] = Field(default_factory=list)
     gap_analysis_ids: list[str] = Field(default_factory=list)
     needs_targeted_refinement: bool = False
     refinement_attempt: int = 0
-    max_refinement_attempts: int = 2
+    max_refinement_attempts: int = 5
 
     # === 写作阶段 ===
     outline_id: Optional[str] = None
@@ -76,7 +83,10 @@ class PipelineState(BaseModel):
 
     # === 覆盖审计 ===
     coverage_score: float = 0.0
+    weighted_coverage_bp: int = 10000
     invalid_citation_count: int = 0
+    weak_citation_support_count: int = 0
+    orphan_cluster_count: int = 0
     needs_revision: bool = False
 
     # === 可观测性 ===
@@ -107,6 +117,7 @@ class ClusteringState(BaseModel):
     kg_entity_ids: list[str] = Field(default_factory=list)
     kg_relation_ids: list[str] = Field(default_factory=list)
     evidence_card_ids: list[str] = Field(default_factory=list)
+    community_memory_ids: list[str] = Field(default_factory=list)
 
     hybrid_graph_id: Optional[str] = None
     cluster_ids: list[str] = Field(default_factory=list)
@@ -129,5 +140,8 @@ class WritingState(BaseModel):
 
     # 覆盖审计
     coverage_score: float = 0.0
+    weighted_coverage_bp: int = 10000
     invalid_citation_count: int = 0
+    weak_citation_support_count: int = 0
+    orphan_cluster_count: int = 0
     needs_revision: bool = False

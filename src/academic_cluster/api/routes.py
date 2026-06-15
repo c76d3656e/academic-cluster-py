@@ -207,10 +207,18 @@ async def start_pipeline(
 
     async def run_in_background():
         try:
+            # 加载 pipeline 配置（DB 中的可调参数 + 项目自定义配置）
+            from .admin.pipeline_config import get_pipeline_config_dict, build_node_config
+            raw_config = await get_pipeline_config_dict()
+            pipeline_config = build_node_config(raw_config)
+            # 项目自定义配置覆盖 DB 配置
+            project_config = project.get("config") or {}
+            pipeline_config.update(project_config)
+
             await run_pipeline(
                 query=project.get("query", ""),
                 project_id=project_id,
-                config=project.get("config") or {},
+                config=pipeline_config,
                 sse_manager=sse_manager,
             )
         except Exception as e:
@@ -255,10 +263,17 @@ async def resume_pipeline(
 
     async def run_in_background():
         try:
+            # 加载 pipeline 配置（DB 中的可调参数 + 项目自定义配置）
+            from .admin.pipeline_config import get_pipeline_config_dict, build_node_config
+            raw_config = await get_pipeline_config_dict()
+            pipeline_config = build_node_config(raw_config)
+            project_config = project.get("config") or {}
+            pipeline_config.update(project_config)
+
             await run_pipeline(
                 query=project.get("query", ""),
                 project_id=project_id,
-                config=project.get("config") or {},
+                config=pipeline_config,
                 sse_manager=sse_manager,
                 resume=True,
             )
@@ -348,10 +363,12 @@ async def get_review(
             from sqlalchemy import text
             result = await session.execute(
                 text("""
-                    SELECT ec.* FROM evidence_cards ec
-                    JOIN clusters c ON ec.cluster_id = c.id
-                    WHERE c.project_id = :project_id
-                    LIMIT 50
+                    SELECT DISTINCT ON (ec.id) ec.*
+                    FROM evidence_cards ec
+                    LEFT JOIN clusters c ON ec.cluster_id = c.id
+                    WHERE ec.project_id = :project_id OR c.project_id = :project_id
+                    ORDER BY ec.id, ec.created_at
+                    LIMIT 200
                 """),
                 {"project_id": project_id}
             )

@@ -69,3 +69,42 @@ def get_review_style_prompt() -> str:
 def get_write_section_prompt() -> str:
     """获取章节写作提示"""
     return _load_prompt("write_section.md")
+
+
+def get_assemble_review_prompt() -> str:
+    """获取综述拼装提示（过渡语句、统一风格）"""
+    return _load_prompt("assemble_review.md")
+
+
+def get_kg_json_repair_prompt() -> str:
+    """获取 KG JSON 修复提示"""
+    return _load_prompt("kg_json_repair.md")
+
+
+def get_section_outline_prompt() -> str:
+    """获取章节段落级写作规划提示"""
+    return _load_prompt("section_outline.md")
+
+
+def get_section_evaluator_prompt() -> str:
+    """获取章节质量评估提示"""
+    return _load_prompt("section_evaluator.md")
+
+
+# === 写作规则（统一管理） ===
+
+from .writing_rules import (  # noqa: E402, F401
+    AI_WORDS_EN,
+    AI_WORDS_ZH,
+    BANNED_FILLER_PHRASES_ZH,
+    BANNED_SUMMARY_CONNECTORS,
+    PARAGRAPH_TASK_TYPES,
+    SYNTHESIS_STRATEGIES,
+    TASK_TYPE_SEQUENCES,
+    THROAT_CLEARING_EN,
+    THROAT_CLEARING_ZH,
+    format_banned_phrases_for_prompt,
+    format_synthesis_strategies_for_prompt,
+    format_task_types_for_prompt,
+    get_all_banned_phrases,
+)

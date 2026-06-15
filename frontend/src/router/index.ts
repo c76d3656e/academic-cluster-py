@@ -4,6 +4,12 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/',
+      name: 'chat',
+      component: () => import('../views/ChatView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/login',
       name: 'login',
       component: () => import('../views/LoginView.vue'),
@@ -14,12 +20,6 @@ const router = createRouter({
       name: 'register',
       component: () => import('../views/RegisterView.vue'),
       meta: { guestOnly: true },
-    },
-    {
-      path: '/',
-      name: 'dashboard',
-      component: () => import('../views/DashboardView.vue'),
-      meta: { requiresAuth: true },
     },
     {
       path: '/projects/new',
@@ -33,11 +33,83 @@ const router = createRouter({
       component: () => import('../views/ProjectDetailView.vue'),
       meta: { requiresAuth: true },
     },
+    // User Console
+    {
+      path: '/console',
+      component: () => import('../layouts/AppLayout.vue'),
+      meta: { requiresAuth: true },
+      children: [
+        { path: '', redirect: '/console/overview' },
+        {
+          path: 'overview',
+          name: 'console-overview',
+          component: () => import('../views/console/ConsoleOverview.vue'),
+        },
+        {
+          path: 'projects',
+          name: 'console-projects',
+          component: () => import('../views/console/ConsoleProjects.vue'),
+        },
+        {
+          path: 'usage',
+          name: 'console-usage',
+          component: () => import('../views/console/ConsoleUsage.vue'),
+        },
+        {
+          path: 'profile',
+          name: 'console-profile',
+          component: () => import('../views/console/ConsoleProfile.vue'),
+        },
+        {
+          path: 'recharge',
+          name: 'console-recharge',
+          component: () => import('../views/console/ConsoleRecharge.vue'),
+        },
+      ],
+    },
+    // Admin Panel
     {
       path: '/admin',
-      name: 'admin',
-      component: () => import('../views/AdminView.vue'),
+      component: () => import('../layouts/AppLayout.vue'),
       meta: { requiresAuth: true, requiresAdmin: true },
+      children: [
+        { path: '', redirect: '/admin/overview' },
+        {
+          path: 'overview',
+          name: 'admin-overview',
+          component: () => import('../views/admin/AdminOverview.vue'),
+        },
+        {
+          path: 'users',
+          name: 'admin-users',
+          component: () => import('../views/admin/AdminUsers.vue'),
+        },
+        {
+          path: 'projects',
+          name: 'admin-projects',
+          component: () => import('../views/admin/AdminProjects.vue'),
+        },
+        {
+          path: 'providers',
+          name: 'admin-providers',
+          component: () => import('../views/admin/AdminProviders.vue'),
+        },
+        {
+          path: 'usage',
+          name: 'admin-usage',
+          component: () => import('../views/admin/AdminUsage.vue'),
+        },
+        {
+          path: 'audit',
+          name: 'admin-audit',
+          component: () => import('../views/admin/AdminAudit.vue'),
+        },
+        {
+          path: 'pipeline-config',
+          name: 'admin-pipeline-config',
+          component: () => import('../views/admin/AdminPipelineConfig.vue'),
+        },
+      ],
     },
   ],
 })
@@ -60,11 +132,11 @@ router.beforeEach((to) => {
   }
 
   if (to.meta.requiresAdmin && user?.role !== 'admin') {
-    return { name: 'dashboard' }
+    return { path: '/' }
   }
 
   if (to.meta.guestOnly && token) {
-    return { name: 'dashboard' }
+    return { path: '/' }
   }
 })
 

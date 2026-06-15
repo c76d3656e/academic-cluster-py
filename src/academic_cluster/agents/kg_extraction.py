@@ -9,6 +9,7 @@
 
 import json
 import re
+import uuid
 from typing import Callable, Optional
 
 import structlog
@@ -326,6 +327,15 @@ def canonical_relation_type(raw: str) -> str:
     return raw.strip()
 
 
+def _is_valid_uuid(value: str) -> bool:
+    """检查字符串是否为合法的 UUID 格式"""
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
 def normalized_name(value: str) -> str:
     """规范化名称（对齐 Rust 版 normalized_name）"""
     # 非字母数字字符替换为空格，转小写，合并空白
@@ -358,19 +368,38 @@ def _extract_json_object(text: str) -> str | None:
     return None
 
 
+def _strip_markdown_fences(text: str) -> str:
+    """去除 markdown 代码块标记"""
+    text = re.sub(r'```(?:json)?\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+    return text.strip()
+
+
+def _fix_illegal_escapes(text: str) -> str:
+    """修复 JSON 中的非法转义字符（如 \\U, \\%, \\( 等）"""
+    # 保留合法的 JSON 转义: \\, \/, \", \n, \r, \t, \b, \f, \uXXXX
+    # 将其他 \\X 替换为 X（去掉反斜杠）
+    return re.sub(
+        r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})',
+        '',
+        text,
+    )
+
+
 def fix_json(json_str: str) -> str:
     """修复常见的 JSON 格式问题"""
-    # 尝试从 markdown 代码块中提取
+    # 1. 去除 markdown 代码块标记
+    json_str = _strip_markdown_fences(json_str)
+
+    # 2. 尝试从文本中提取 JSON 对象
     extracted = _extract_json_object(json_str)
     if extracted:
         json_str = extracted
-    else:
-        # 移除 markdown 代码块标记
-        json_str = re.sub(r'```json?\s*', '', json_str)
-        json_str = re.sub(r'```\s*$', '', json_str)
-        json_str = json_str.strip()
 
-    # 修复尾随逗号
+    # 3. 修复非法转义字符
+    json_str = _fix_illegal_escapes(json_str)
+
+    # 4. 修复尾随逗号
     json_str = re.sub(r',\s*}', '}', json_str)
     json_str = re.sub(r',\s*]', ']', json_str)
 
@@ -384,24 +413,26 @@ def parse_kg_response(response: str) -> dict:
     支持：
     - 标准 JSON
     - Markdown 代码块中的 JSON
+    - 非法转义字符修复
     - 常见格式错误的修复
     """
-    # 先尝试提取 JSON 对象
+    # 第一轮：尝试直接解析（先提取 JSON 对象，再 raw）
     extracted = _extract_json_object(response)
     if extracted:
         try:
-            return json.loads(extracted)
+            return json.loads(extracted, strict=False)
         except json.JSONDecodeError:
             pass
 
     try:
-        return json.loads(response)
+        return json.loads(response, strict=False)
     except json.JSONDecodeError:
         pass
 
+    # 第二轮：用 fix_json 修复后重试
     try:
         fixed = fix_json(response)
-        return json.loads(fixed)
+        return json.loads(fixed, strict=False)
     except json.JSONDecodeError as e:
         logger.error("Failed to parse KG response", error=str(e), response=response[:500])
         raise ValueError(f"LLM returned invalid JSON for KG extraction: {response[:200]}")
@@ -627,7 +658,8 @@ def normalize_kg(
 
         entity_type = canonical_entity_type(raw.get("entity_type") or raw.get("type") or "")
         confidence = clamp_confidence(raw.get("confidence", 0.5))
-        paper_ids = raw.get("paper_ids", [])
+        raw_paper_ids = raw.get("paper_ids", [])
+        paper_ids = [pid for pid in raw_paper_ids if pid and _is_valid_uuid(pid)]
         aliases = [a.strip() for a in raw.get("aliases", []) if a.strip()]
         evidence = (raw.get("evidence") or "").strip() or None
 
@@ -640,7 +672,7 @@ def normalize_kg(
                     existing["evidence"] = evidence
             # 合并 paper_ids
             for pid in paper_ids:
-                if pid and pid not in existing["paper_ids"]:
+                if pid not in existing["paper_ids"]:
                     existing["paper_ids"].append(pid)
             # 合并 aliases
             for alias in aliases:
@@ -651,7 +683,7 @@ def normalize_kg(
                 "name": name,
                 "entity_type": entity_type,
                 "normalized_name": key,
-                "paper_ids": [pid for pid in paper_ids if pid],
+                "paper_ids": paper_ids,
                 "aliases": aliases,
                 "confidence": confidence,
                 "evidence": evidence,
@@ -707,7 +739,8 @@ def normalize_kg(
             continue
         relation_keys.add(key)
 
-        paper_ids = raw.get("paper_ids", [])
+        raw_paper_ids = raw.get("paper_ids", [])
+        paper_ids = [pid for pid in raw_paper_ids if pid and _is_valid_uuid(pid)]
         confidence = clamp_confidence(raw.get("confidence", 0.5))
         evidence = (raw.get("evidence") or "").strip() or None
 
@@ -715,7 +748,7 @@ def normalize_kg(
             "source": source_name,
             "target": target_name,
             "relation_type": rel_type,
-            "paper_ids": [pid for pid in paper_ids if pid],
+            "paper_ids": paper_ids,
             "confidence": confidence,
             "evidence": evidence,
         })

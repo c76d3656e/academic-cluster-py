@@ -1,18 +1,19 @@
 """
 学术搜索工具
 
-实现对多个学术数据源的搜索：
-- Semantic Scholar
-- PubMed
-- arXiv
-- OpenAlex
-- Crossref
+实现对多个学术数据源的搜索（对齐 Rust 版 5 个源）：
+- Semantic Scholar (200 results)
+- PubMed (200 results)
+- arXiv (200 results)
+- OpenAlex (100 results)
+- Crossref (200 results)
 
 各 API 速率限制（已在 _RATE_LIMITS 中配置）：
 - arXiv:            1 请求 / 3 秒（无认证，最严格）
 - Semantic Scholar:  1 请求 / 秒（无 key），100 请求 / 秒（有 key）
 - PubMed:           3 请求 / 秒（无 key），10 请求 / 秒（有 key）
 - OpenAlex:         ~10 请求 / 秒（无 mailto），~100 请求 / 秒（polite pool）
+- Crossref:         ~5 请求 / 秒（polite pool）
 """
 
 import asyncio
@@ -48,6 +49,7 @@ def _get_rate_limits() -> dict[str, float]:
         "semantic_scholar": 1.0,                                 # 1 req / s / key
         "pubmed": 0.1 if settings.pubmed_api_key else 0.34,      # 有 key: 10 rps, 无 key: 3 rps
         "openalex": 0.1,                                         # polite pool
+        "crossref": 0.2,                                         # 5 req / s（polite pool）
     }
     return _RATE_LIMITS
 
@@ -680,35 +682,165 @@ async def search_openalex(
 
 
 # =============================================================================
+# Crossref
+# =============================================================================
+
+async def search_crossref(
+    query: str,
+    limit: int = 200,
+    from_year: Optional[int] = None,
+    to_year: Optional[int] = None,
+) -> list[dict]:
+    """
+    搜索 Crossref
+
+    API 文档: https://api.crossref.org/swagger-ui/index.html
+    对齐 Rust 版 academic-cluster-rs 的 crossref 实现。
+    """
+    url = "https://api.crossref.org/works"
+
+    params = {
+        "query": query,
+        "rows": min(limit, 200),
+        "select": "DOI,title,author,published-print,container-title,is-referenced-by-count,abstract,ISSN,subject",
+    }
+
+    if from_year:
+        params["filter"] = f"from-pub-date:{from_year}"
+        if to_year:
+            params["filter"] += f",until-pub-date:{to_year}"
+
+    settings = get_settings()
+    headers = {}
+    if settings.pubmed_email:
+        headers["User-Agent"] = f"academic-cluster/1.0 (mailto:{settings.pubmed_email})"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await _request_with_retry(
+                client, "GET", url, "crossref",
+                params=params, headers=headers, timeout=30,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            papers = []
+            for item in data.get("message", {}).get("items", []):
+                # 提取标题
+                title_list = item.get("title", [])
+                title = title_list[0] if title_list else ""
+
+                # 提取作者
+                authors = []
+                for author in item.get("author", []):
+                    name_parts = []
+                    if author.get("given"):
+                        name_parts.append(author["given"])
+                    if author.get("family"):
+                        name_parts.append(author["family"])
+                    if name_parts:
+                        authors.append({"name": " ".join(name_parts)})
+
+                # 提取年份
+                pub_date = item.get("published-print", item.get("published-online", {}))
+                year = None
+                date_parts = pub_date.get("date-parts", [[]])
+                if date_parts and date_parts[0]:
+                    year = date_parts[0][0]
+
+                # 提取期刊
+                container = item.get("container-title", [])
+                journal = container[0] if container else ""
+
+                # 提取 DOI
+                raw_doi = item.get("DOI", "")
+                doi = normalize_doi(raw_doi) if raw_doi else None
+
+                # 提取摘要（Crossref 有时包含摘要）
+                abstract = item.get("abstract", "")
+                # Crossref 摘要可能包含 JATS XML 标签，简单清理
+                if abstract:
+                    import re
+                    abstract = re.sub(r'<[^>]+>', '', abstract).strip()
+
+                external_id = doi if doi and is_valid_doi(doi) else raw_doi or f"crossref:{raw_doi}"
+
+                papers.append({
+                    "external_id": external_id,
+                    "source": "crossref",
+                    "title": title,
+                    "abstract": abstract,
+                    "authors": authors,
+                    "publication_date": f"{year}" if year else None,
+                    "year": year,
+                    "journal": journal,
+                    "doi": doi,
+                    "url": f"https://doi.org/{doi}" if doi else "",
+                    "citation_count": item.get("is-referenced-by-count", 0),
+                    "fields_of_study": item.get("subject", []),
+                })
+
+            logger.info(
+                "Crossref search completed",
+                query=query,
+                results=len(papers),
+            )
+
+            return papers
+
+        except httpx.HTTPError as e:
+            logger.error(
+                "Crossref search failed",
+                query=query,
+                limit=limit,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return []
+        except Exception as e:
+            logger.error(
+                "Crossref search failed with unexpected error",
+                query=query,
+                limit=limit,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return []
+
+
+# =============================================================================
 # 统一搜索接口
 # =============================================================================
 
 async def search_all_sources(
     query: str,
-    limit_per_source: int = 100,
+    limit_per_source: int = 200,
     sources: Optional[list[str]] = None,
     timeout: float = 120.0,
 ) -> list[dict]:
     """
     并行搜索所有数据源
 
+    对齐 Rust 版 academic-cluster-rs：默认 5 个源，每源 200 结果。
+
     Args:
         query: 搜索查询
-        limit_per_source: 每个源的最大结果数
-        sources: 要搜索的源列表，默认全部
+        limit_per_source: 每个源的最大结果数（默认 200）
+        sources: 要搜索的源列表，默认全部 5 个源
         timeout: 总体超时时间（秒），默认 120 秒
 
     Returns:
         合并的论文列表
     """
     if sources is None:
-        sources = ["semantic_scholar", "pubmed", "arxiv", "openalex"]
+        sources = ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"]
 
     search_functions = {
         "semantic_scholar": search_semantic_scholar,
         "pubmed": search_pubmed,
         "arxiv": search_arxiv,
         "openalex": search_openalex,
+        "crossref": search_crossref,
     }
 
     tasks = []

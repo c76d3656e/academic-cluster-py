@@ -1,0 +1,249 @@
+GOAL: Rebuild the Python review-generation pipeline to match a high-quality survey workflow,
+  replacing the current weak section-level writing flow with a verifiable evidence-grounded,
+  community-memory-driven, paragraph/subsection-level workflow.
+
+  CONTEXT:
+  Repository: D:\study\academic-cluster-py
+  Reference Rust repository: D:\study\academic-cluster-rs
+  Primary project for validation: ac5cceb7-e13b-40de-8f83-5e8c882dd574
+
+  External references:
+  1. SurveyG paper: https://arxiv.org/abs/2510.07733
+     Reference for hierarchical citation graph, Foundation/Development/Frontier layering,
+     community/path summaries, writer/evaluator flow.
+  2. AutoSurvey repo: https://github.com/AutoSurveys/AutoSurvey
+     Reference for outline -> subsection outline -> subsection writing -> citation check -> local
+     coherence enhancement.
+  3. AutoSurvey prompts: https://github.com/AutoSurveys/AutoSurvey/blob/main/src/prompt.py
+     Reference for rough outline, merge outline, subsection outline, subsection writing, citation
+     correction, LCE prompts.
+  4. AutoSurvey outline writer:
+  https://github.com/AutoSurveys/AutoSurvey/blob/main/src/agents/outline_writer.py
+     Reference for chunked outline generation, outline merge, subsection outline, final outline
+     edit.
+  5. AutoSurvey writer: https://github.com/AutoSurveys/AutoSurvey/blob/main/src/agents/writer.py
+     Reference for section/subsection parallel writing, citation correction, previous/current/
+     following coherence refinement.
+  6. nature-writing skill:
+  https://github.com/Yuan1z0825/nature-skills/tree/main/skills/nature-writing
+     Reference for one paragraph one job, evidence-outward writing, paragraph-flow check,
+     unsupported novelty removal.
+  7. academic-paper skill:
+  https://github.com/Imbad0202/academic-research-skills/blob/main/academic-paper/SKILL.md
+     Reference for multi-agent stage boundaries, writer/evaluator separation, citation compliance,
+     final integrity gate.
+
+  TASK:
+  Implement a new review-generation workflow with these stages:
+
+  1. Search / Dedup
+     - Produce a deduplicated candidate paper pool.
+     - Preserve title, abstract, year, citation_count, venue, source, DOI, URL.
+
+  2. Embedding / Rerank
+     - Score papers using relevance, citation count, recency, venue/source quality, and abstract/
+     title match.
+
+  3. Initial Community Detection without KG
+     - Build an embedding/KNN-based graph before KG extraction.
+     - Produce clusters and cluster assignments.
+     - Compute per-paper cluster centrality / representativeness.
+
+  4. Core 160 Selection
+     - Select exactly 160 core papers before KG extraction.
+     - Selection must be community-balanced:
+       - each non-trivial cluster gets minimum coverage;
+       - larger clusters receive proportional allocation;
+       - within each cluster, rank by rerank score, centrality, citation count, recency, and venue/
+       source quality.
+     - Also select auxiliary papers separately.
+
+  5. Evidence Cards for Core 160
+     - Generate evidence cards for all 160 core papers.
+     - Each card must contain:
+       - paper_id
+       - cluster_id
+       - claim
+       - evidence_span
+       - method
+       - metric
+       - limitation
+       - confidence
+     - Concurrency must be controlled by provider available slots.
+     - Do not hard-code fixed concurrency unless config is explicitly fixed.
+
+  6. KG Extraction for Core 160
+     - Run KG extraction only after core papers are selected.
+     - Extract entities:
+       - method / model / framework
+       - task / dataset / benchmark
+       - application scenario
+       - limitation / open problem
+       - theory / concept
+     - Extract relations:
+       - improves
+       - extends
+       - compares_with
+       - applies_to
+       - fails_on
+       - addresses_limitation
+       - uses_dataset
+       - evaluated_by
+     - KG is not used to decide initial core papers; KG is used to explain and structure the
+     selected core papers.
+
+  7. Community Memory Synthesis
+     - Add a persistent community memory layer.
+     - For each cluster, synthesize KG + evidence cards + paper metadata into structured JSON.
+     - Create or update DB schema for persistent community memories.
+     - Each community memory must include:
+       - cluster_id
+       - summary
+       - method_families
+       - key_claims
+       - limitations
+       - future_directions
+       - foundation_papers
+       - development_papers
+       - frontier_papers
+       - representative_papers
+       - cross_community_links
+       - proof_ids
+     - KG should define the structure; evidence cards should provide proof and citation grounding.
+     - Avoid re-extracting evidence from papers if evidence cards already contain the needed
+     fields.
+
+  8. Outline Generation
+     - Rewrite outline generation to consume community memories instead of raw scattered clusters/
+     evidence/KG.
+     - Each section must include:
+       - section title
+       - section role
+       - target_words
+       - target_communities
+       - method_families
+       - expected_claims
+       - limitations_to_cover
+       - future_directions_to_cover
+       - proof_ids
+     - The outline must cover:
+       - background/foundation
+       - development/method families
+       - frontier/application directions
+       - limitations
+       - future development
+
+  9. Section Planning
+     - For each section, generate paragraph/subsection-level plans.
+     - Each paragraph/subsection must include:
+       - task_type: context / gap / approach / result / comparison / mechanism / implication /
+       limitation
+       - target_words
+       - allowed_paper_ids
+       - proof_ids
+       - synthesis_instruction
+       - transition_from_previous
+       - transition_to_next
+     - Planning must consider previous section summary and next section intent.
+
+  10. Paragraph/Subsection-Level Writing
+     - Do not write an entire section in one LLM call.
+     - Write by paragraph or subsection using the plan.
+     - Each writing unit must:
+       - use only allowed_paper_ids / proof_ids;
+       - include citations for all important claims;
+       - satisfy target word range;
+       - avoid Markdown subheadings inside body text;
+       - avoid reference-list output;
+       - avoid visible labels such as “局限性：”, “结论：”, “核心问题：” inside prose.
+
+  11. Local Coherence Enhancement
+     - Implement AutoSurvey-style local coherence refinement:
+       - refine even-indexed units first;
+       - refine odd-indexed units second;
+       - each refinement sees previous/current/next only;
+       - preserve citations and proof_ids;
+       - remove redundancy and improve transitions.
+
+  12. Audit and Repair Loop
+     - Final audit must not immediately fail without repair.
+     - Add repair routing:
+       - invalid citation -> citation repair
+       - low cluster coverage -> expand citation plan or rewrite affected unit
+       - low citation support -> replace citation or weaken claim
+       - section too short/long -> targeted rewrite
+       - paragraph structure failure -> rewrite affected unit
+       - heading leakage -> deterministic cleanup or rewrite affected unit
+     - Allow bounded retries, e.g. max 2-3 repair rounds.
+     - Only fail after retries are exhausted.
+
+  VERIFIABLE ACCEPTANCE CRITERIA:
+
+  A. Core selection
+     - A test or DB query proves exactly 160 core papers are selected before KG extraction.
+     - Core selection is community-balanced.
+     - KG extraction logs show it runs after core selection.
+
+  B. Evidence cards
+     - For the validation project, DB must contain 160 evidence cards for core papers.
+     - All cards must have non-empty claim, method, limitation, and confidence.
+     - Evidence generation must respect provider-slot concurrency.
+
+  C. KG
+     - KG extraction must run only for core papers by default.
+     - KG entities and relations must be linked to paper_ids.
+     - KG output must include method/framework/task/dataset/limitation/open-problem style entities.
+
+  D. Community memory
+     - DB contains one community memory per cluster.
+     - Each community memory contains summary, method_families, limitations, future_directions,
+     representative_papers, proof_ids.
+     - At least 90% of core papers are referenced by some community memory proof_ids or
+     representative_papers.
+     - Community memories are persisted and reused by outline/write_review checkpoints.
+
+  E. Outline
+     - Outline sections contain target_communities, method_families, proof_ids,
+     limitations_to_cover, future_directions_to_cover.
+     - Outline generation no longer depends primarily on raw scattered cluster/evidence/KG dumps.
+
+  F. Writing
+     - Written content is generated at paragraph/subsection level.
+     - Each section has multiple paragraphs, not one giant paragraph.
+     - No body paragraph starts with Markdown heading markers (#, ##, ###).
+     - No visible body labels like “核心问题：”, “局限性：”, “结论：”, “未来方向：”.
+     - Each major claim has a valid numeric citation.
+
+  G. Audit
+     - Citation validation passes.
+     - Coverage audit route is pass after repair, or failure report lists exhausted repair attempts
+     and exact unresolved causes.
+     - Section length deviation is within configured tolerance.
+     - Citation support audit has a configurable minimum support rate and triggers repair when
+     below threshold.
+
+  H. Tests
+     - Add focused unit tests for:
+       - core paper selection allocation;
+       - community memory synthesis input/output;
+       - outline generation payload includes community memory fields;
+       - paragraph plan schema validation;
+       - heading leakage detection;
+       - citation repair routing.
+     - Run tests with uv:
+       - uv run pytest ...
+       - uv run python -m compileall ...
+
+  RULES:
+  - Use uv for Python commands.
+  - Prefer existing project patterns and Rust implementation alignment.
+  - Do not remove unrelated user changes.
+  - Do not rely on a single prompt-only fix; implement deterministic schema, persistence,
+  validation, and repair gates.
+  - Keep provider concurrency dynamic: fixed config wins only when explicitly set; auto/-1 uses
+  provider available slot total.
+  - Do not use KG as a prerequisite for initial core selection.
+  - KG and evidence cards must jointly feed community memory:
+    - KG determines structure and relations.
+    - evidence cards provide claim/evidence/method/metric/limitation proof.
+  - Final output must be inspectable in the UI and verifiable from DB queries.

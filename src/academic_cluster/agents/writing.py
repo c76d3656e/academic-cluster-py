@@ -3,9 +3,15 @@
 
 负责生成综述内容，包括大纲、章节和引用。
 参考 Rust 版本的 prompt 设计，提供高质量的学术写作指导。
+
+对齐 Rust 版 academic-cluster-rs 的关键改进：
+- 章节写作注入 community context 摘要
+- assemble_review 统一风格和过渡语句
+- evidence limitations 上下文
 """
 
 import json
+import re
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -14,11 +20,79 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..prompts import (
     get_generate_outline_prompt,
+    get_review_structure_prompt,
     get_review_style_prompt,
     get_write_section_prompt,
 )
+from ..prompts.writing_rules import (
+    format_banned_phrases_for_prompt,
+)
 
 logger = structlog.get_logger()
+
+
+# =============================================================================
+# 文献堆叠检测（Synthesis-First 违规检测）
+# =============================================================================
+
+# 检测"Author A [N] verb ... Author B [N] verb ..."的逐篇罗列模式
+_PAPER_STACKING_PATTERNS = [
+    # 中文模式：张三 [1] 提出了...李四 [2] 提出了...
+    re.compile(
+        r"[一-鿿]{2,4}\s*\[\d+(?:,\s*\d+)*\]\s*"
+        r"(?:提出|发现|证明|指出|认为|采用|设计|给出|报告|表明|展示了?)\b"
+        r".*?[一-鿿]{2,4}\s*\[\d+(?:,\s*\d+)*\]\s*"
+        r"(?:提出|发现|证明|指出|认为|采用|设计|给出|报告|表明|展示了?)\b",
+        re.DOTALL,
+    ),
+    # 英文模式：Author A [N] proposed... Author B [N] proposed...
+    re.compile(
+        r"[A-Z][a-z]+\s+(?:et\s+al\.?\s+)?\[\d+(?:,\s*\d+)*\]\s*"
+        r"(?:proposed|presented|developed|introduced|showed|demonstrated|found|reported|designed)\b"
+        r".*?[A-Z][a-z]+\s+(?:et\s+al\.?\s+)?\[\d+(?:,\s*\d+)*\]\s*"
+        r"(?:proposed|presented|developed|introduced|showed|demonstrated|found|reported|designed)\b",
+        re.DOTALL,
+    ),
+]
+
+
+def detect_paper_stacking(text: str) -> list[str]:
+    """
+    检测综述文本中的文献堆叠模式（逐篇罗列）。
+
+    Args:
+        text: 章节文本
+
+    Returns:
+        违规段落的警告列表，空列表表示未检测到问题
+    """
+    warnings = []
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+    for i, para in enumerate(paragraphs, 1):
+        # 检测连续的"[N] + 动词"模式（3 处以上视为堆叠）
+        citation_verb_matches = re.findall(
+            r"\[\d+(?:,\s*\d+)*\]\s*"
+            r"(?:提出|发现|证明|指出|认为|采用|设计|给出|报告|表明|展示|"
+            r"proposed|presented|developed|introduced|showed|demonstrated|found|reported|designed)",
+            para,
+        )
+        if len(citation_verb_matches) >= 3:
+            warnings.append(
+                f"段落 {i}: 检测到文献堆叠模式（{len(citation_verb_matches)} 处连续引用-动词结构），"
+                "建议改为按主题/机制进行综合论述"
+            )
+            continue
+
+        # 检测正则模式
+        for pattern in _PAPER_STACKING_PATTERNS:
+            if pattern.search(para):
+                warnings.append(
+                    f"段落 {i}: 检测到逐篇罗列模式，建议改为综合对比或归纳"
+                )
+                break
+
+    return warnings
 
 
 async def _ainvoke_with_retry(agent, messages, max_retries=3):
@@ -70,7 +144,8 @@ async def generate_outline(
     clusters: list[dict],
     kg_summary: dict,
     evidence_cards: list[dict] | None = None,
-    total_target_words: int = 12000,
+    community_summaries: list[dict] | None = None,
+    cluster_layers: dict[str, str] | None = None,
 ) -> dict:
     """
     生成综述大纲
@@ -80,14 +155,22 @@ async def generate_outline(
         clusters: 聚类信息列表
         kg_summary: 知识图谱摘要
         evidence_cards: 证据卡片列表
-        total_target_words: 总目标字数
+        community_summaries: 社区摘要列表（每个聚类的 key_findings 和 representative_methods）
+        cluster_layers: 聚类层次分类 {cluster_id: "foundation"|"development"|"frontier"}
 
     Returns:
         大纲数据
     """
     agent = create_writing_agent()
 
-    # 构建聚类统计上下文（对齐 Rust 版 render_cluster_stats）
+    # 层次标签中文映射
+    _LAYER_LABELS = {
+        "foundation": "Foundation(基础层)",
+        "development": "Development(发展层)",
+        "frontier": "Frontier(前沿层)",
+    }
+
+    # 构建聚类统计上下文（对齐 Rust 版 render_cluster_stats），附加层次标签
     clusters_context_parts = []
     for i, c in enumerate(clusters):
         cluster_size = c.get("size", 0)
@@ -100,11 +183,42 @@ async def generate_outline(
                 if name and name not in entity_names:
                     entity_names.append(name)
         entity_str = ", ".join(entity_names[:12]) if entity_names else ""
-        line = f"cluster {i}: {cluster_size} papers"
+        cid = c.get("id", str(i))
+        layer = (cluster_layers or {}).get(cid, "development")
+        layer_tag = _LAYER_LABELS.get(layer, "Development(发展层)")
+        line = f"cluster {i}: {cluster_size} papers; layer: {layer_tag}"
         if entity_str:
             line += f"; entities: {entity_str}"
         clusters_context_parts.append(line)
     clusters_context = "\n".join(clusters_context_parts) if clusters_context_parts else "暂无聚类数据"
+
+    # 构建层次分类指导段落
+    layer_guidance_block = ""
+    if cluster_layers:
+        # 按层分组
+        layer_groups: dict[str, list[int]] = {"foundation": [], "development": [], "frontier": []}
+        for idx, c in enumerate(clusters):
+            cid = c.get("id", str(idx))
+            layer = cluster_layers.get(cid, "development")
+            layer_groups.setdefault(layer, []).append(idx)
+
+        layer_lines = ["## 聚类层次分类（指导大纲结构）"]
+        layer_lines.append("")
+        layer_lines.append("以下聚类已按研究演进阶段分类，请据此安排章节顺序：")
+        layer_lines.append("")
+        if layer_groups.get("foundation"):
+            indices = ", ".join(f"cluster {i}" for i in layer_groups["foundation"])
+            layer_lines.append(f"- **Foundation（基础层）**: {indices}")
+            layer_lines.append("  → 应安排在综述前部（研究背景、经典方法、奠基性工作）")
+        if layer_groups.get("development"):
+            indices = ", ".join(f"cluster {i}" for i in layer_groups["development"])
+            layer_lines.append(f"- **Development（发展层）**: {indices}")
+            layer_lines.append("  → 应安排在综述中部（技术演进、方法对比、改进工作）")
+        if layer_groups.get("frontier"):
+            indices = ", ".join(f"cluster {i}" for i in layer_groups["frontier"])
+            layer_lines.append(f"- **Frontier（前沿层）**: {indices}")
+            layer_lines.append("  → 应安排在综述后部（前沿方向、未来展望、新兴探索）")
+        layer_guidance_block = "\n".join(layer_lines)
 
     # 构建知识图谱摘要上下文（对齐 Rust 版 render_kg_summary）
     kg_parts = []
@@ -137,6 +251,25 @@ async def generate_outline(
         if card_lines:
             kg_context += "\n\nEvidence cards:\n" + "\n".join(card_lines)
 
+    # 构建社区摘要上下文
+    community_context = ""
+    if community_summaries:
+        cs_parts = []
+        for cs in community_summaries:
+            label = cs.get("cluster_label", cs.get("cluster_id", ""))
+            paper_count = cs.get("paper_count", 0)
+            findings = cs.get("key_findings", [])
+            methods = cs.get("representative_methods", [])
+            lines = [f"### {label} ({paper_count} papers)"]
+            if findings:
+                lines.append("key_findings:")
+                for f in findings:
+                    lines.append(f"  - {f}")
+            if methods:
+                lines.append("representative_methods: " + "; ".join(methods))
+            cs_parts.append("\n".join(lines))
+        community_context = "\n\n".join(cs_parts)
+
     # 加载大纲生成提示模板
     outline_prompt_template = get_generate_outline_prompt()
     if not outline_prompt_template:
@@ -149,6 +282,8 @@ async def generate_outline(
 
 ## 知识图谱摘要（关键实体和关系）
 {kg_summary}
+
+{community_summaries}
 
 请生成一份有深度的综述大纲，返回以下 JSON 格式：
 
@@ -168,21 +303,59 @@ async def generate_outline(
 
 ## 大纲设计要求
 
-1. **总字数目标**：整篇综述目标 {total_target_words} 字。各章 target_words 之和应接近此目标。
-2. **标题要精准、学术化**：不要使用「大背景」「核心分析」等泛泛标题。每个标题应直接反映该章节的核心内容。
-3. **章节数量**：生成 5-8 章。如果某方面研究成果丰富，可拆为两章；如果某一方向尚不成熟，合并或精简。
-4. **每章应有明确的核心论点**：不要写成"介绍A、B、C方法"，而是有分析逻辑的论述方向。
-5. **字数分配合理**：核心论述章节（通常 2-3 章）占总字数 60% 以上，每章 target_words 不低于 1200。"""
+1. **标题要精准、学术化**：不要使用「大背景」「核心分析」等泛泛标题。每个标题应直接反映该章节的核心内容。
+2. **章节数量（强制）**：必须生成 4-6 个 sections。禁止只生成 1-2 个章节。每个 section 对应综述的一个独立主题方向。如果某方面研究成果丰富，可拆为两章；如果某一方向尚不成熟，合并或精简。
+3. **每章应有明确的核心论点**：不要写成"介绍A、B、C方法"，而是有分析逻辑的论述方向。
+4. **字数分配合理**：核心论述章节（通常 2-3 章）占总字数 60% 以上。
+5. **综合优先于列举**：每个章节的 description 必须明确指出综合方式（对比/归纳/演进/分类），而非简单描述为"介绍XX方法"。例如：
+   - "对比三类主流方法在精度与效率上的权衡，分析各自适用场景"
+   - "归纳该领域从手工特征到端到端学习的演进趋势"
+   - 禁止："介绍A方法、B方法、C方法"这类罗列式描述"""
 
-    prompt = outline_prompt_template.format(
-        topic=topic,
-        cluster_stats=clusters_context,
-        kg_summary=kg_context,
-        total_target_words=total_target_words,
-    )
+    # 构建社区摘要段落（如果模板不包含占位符则追加到末尾）
+    community_block = ""
+    if community_context:
+        community_block = f"\n\n## 社区摘要（各聚类关键发现与代表性方法）\n{community_context}\n"
+
+    # 如果模板包含 {community_summaries} 占位符则替换，否则在 kg_summary 后追加
+    if "{community_summaries}" in outline_prompt_template:
+        prompt = outline_prompt_template.format(
+            topic=topic,
+            cluster_stats=clusters_context,
+            kg_summary=kg_context,
+            community_summaries=community_block,
+        )
+    else:
+        prompt = outline_prompt_template.format(
+            topic=topic,
+            cluster_stats=clusters_context,
+            kg_summary=kg_context,
+        )
+        # 在聚类统计后插入社区摘要
+        if community_block:
+            prompt = prompt.replace(
+                "## 知识图谱摘要",
+                f"{community_block}\n## 知识图谱摘要",
+            )
+
+    # 注入层次分类指导（在社区摘要之后、知识图谱摘要之前）
+    if layer_guidance_block:
+        prompt = prompt.replace(
+            "## 知识图谱摘要",
+            f"{layer_guidance_block}\n\n## 知识图谱摘要",
+        )
 
     messages = [
-        SystemMessage(content="你是一位精通学术写作的综述专家。请基于提供的聚类和知识图谱数据生成大纲。"),
+        SystemMessage(content=(
+            "你是一位精通学术写作的综述专家。请基于提供的聚类和知识图谱数据生成大纲。所有标题和描述必须使用中文。\n\n"
+            "关键原则：综述是综合分析，不是文献堆叠。每个章节的 description 必须体现主题式的分析逻辑，"
+            "而非逐篇介绍论文。大纲应为后续写作奠定'综合优先于列举'的基调——"
+            "每个 section 的核心论点应围绕机制/方法/结论的对比或归纳展开，而非罗列各论文的发现。\n\n"
+            "层次结构指导：聚类已按研究演进阶段分为 Foundation（基础层）、Development（发展层）、Frontier（前沿层）三层。"
+            "请据此安排章节顺序：Foundation 层聚类对应综述前部（研究背景、经典方法），"
+            "Development 层聚类对应综述中部（技术演进、方法对比），"
+            "Frontier 层聚类对应综述后部（前沿方向、未来展望）。"
+        )),
         HumanMessage(content=prompt),
     ]
 
@@ -211,13 +384,88 @@ async def generate_outline(
                 try:
                     outline = json.loads(content[start:end + 1])
                 except json.JSONDecodeError:
-                    logger.error("Failed to parse outline response", response=raw_content[:500])
-                    raise ValueError(f"LLM returned invalid JSON for outline: {raw_content[:200]}")
+                    # JSON 被截断：尝试修复不完整的 JSON
+                    outline = _try_repair_truncated_json(content[start:])
             else:
                 logger.error("Failed to parse outline response", response=raw_content[:500])
                 raise ValueError(f"LLM returned invalid JSON for outline: {raw_content[:200]}")
 
+    # 验证大纲：至少 3 个章节，否则使用 fallback
+    sections = outline.get("sections", [])
+    if len(sections) < 3:
+        logger.warning(
+            "LLM returned too few sections, using fallback outline",
+            section_count=len(sections),
+        )
+        from ..graphs.nodes.outline_generation import _default_outline
+        outline = _default_outline(topic)
+
     return outline
+
+
+def _try_repair_truncated_json(content: str) -> dict:
+    """
+    尝试修复被 LLM 截断的 JSON。
+
+    常见截断模式：
+    1. 字符串未关闭：  "title": "xxx   → 补 "
+    2. 数组未关闭：    "sections": [{...}, {  → 移除不完整元素，补 ]
+    3. 对象未关闭：    {...                 → 补 }
+    """
+    import re
+
+    # 逐步截断到最近的完整 JSON 结构
+    # 先找到所有完整的 section 对象
+    sections = []
+    # 匹配完整的 section 块：{ "name": "...", "title": "...", ... }
+    section_pattern = re.compile(
+        r'\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"title"\s*:\s*"([^"]+)"'
+        r'(?:\s*,\s*"description"\s*:\s*"([^"]*)")?'
+        r'(?:\s*,\s*"target_words"\s*:\s*(\d+))?'
+        r'(?:\s*,\s*"key_clusters"\s*:\s*\[([^\]]*)\])?'
+        r'(?:\s*,\s*"key_entities"\s*:\s*\[([^\]]*)\])?'
+        r'\s*\}',
+        re.DOTALL,
+    )
+
+    # 提取 title
+    title_match = re.search(r'"title"\s*:\s*"([^"]+)"', content)
+    review_title = title_match.group(1) if title_match else "综述"
+
+    for m in section_pattern.finditer(content):
+        section = {
+            "name": m.group(1),
+            "title": m.group(2),
+        }
+        if m.group(3):
+            section["description"] = m.group(3)
+        if m.group(4):
+            section["target_words"] = int(m.group(4))
+        if m.group(5):
+            try:
+                section["key_clusters"] = [int(x.strip()) for x in m.group(5).split(",") if x.strip()]
+            except ValueError:
+                section["key_clusters"] = []
+        if m.group(6):
+            try:
+                section["key_entities"] = [
+                    x.strip().strip('"') for x in m.group(6).split(",") if x.strip()
+                ]
+            except Exception:
+                section["key_entities"] = []
+        sections.append(section)
+
+    if sections:
+        logger.warning(
+            "Repaired truncated JSON outline",
+            original_length=len(content),
+            recovered_sections=len(sections),
+        )
+        return {"title": review_title, "sections": sections}
+
+    # 如果正则也没法提取，直接报错
+    logger.error("Failed to repair truncated JSON", content_preview=content[:500])
+    raise ValueError(f"LLM returned invalid JSON for outline: {content[:200]}")
 
 
 async def write_section(
@@ -228,9 +476,17 @@ async def write_section(
     sample_papers: str,
     references: str,
     evidence_cards: list[dict] | None = None,
+    community_context: str | None = None,
+    evidence_limitations: str | None = None,
+    section_outline: dict | None = None,
+    prev_summary: str = "",
+    next_outline: dict | None = None,
 ) -> str:
     """
-    撰写一个章节
+    撰写一个章节（对齐 Rust 版 write_section_user_with_communities）
+
+    注入 community_context（社区上下文摘要）和 evidence_limitations（证据局限性），
+    帮助 LLM 写出更有深度和准确性的章节。
 
     Args:
         topic: 研究主题
@@ -240,11 +496,24 @@ async def write_section(
         sample_papers: 样本论文
         references: 该章节分配的参考文献列表（局部编号）
         evidence_cards: 该章节相关的证据卡片
+        community_context: 社区上下文摘要（对齐 Rust 版 render_section_community_context）
+        evidence_limitations: 证据局限性说明（对齐 Rust 版 render_section_evidence_limitations）
+        section_outline: 来自 section_outline_planner 的段落规划
+        prev_summary: 前序 section 的核心论点摘要
+        next_outline: 后序 section 的大纲信息
 
     Returns:
         章节内容
     """
     agent = create_writing_agent(temperature=0.7)
+
+    # 注入 community context 和 evidence limitations 到 cluster_data
+    # 对齐 Rust 版 append_optional_block / append_review_context_block
+    enriched_cluster_data = cluster_data
+    if community_context:
+        enriched_cluster_data += f"\n\n## community_context\n{community_context}"
+    if evidence_limitations:
+        enriched_cluster_data += f"\n\n## evidence_limitations\n{evidence_limitations}"
 
     # 构建证据卡片上下文
     evidence_context = ""
@@ -263,34 +532,80 @@ async def write_section(
             ec_lines.append(line)
         evidence_context = "\n".join(ec_lines)
 
+    # 构建段落规划上下文
+    section_outline_context = ""
+    if section_outline:
+        core_question = section_outline.get("core_question", "")
+        narrative_arc = section_outline.get("narrative_arc", "")
+        paragraphs = section_outline.get("paragraphs", [])
+        transition_from_prev = section_outline.get("transition_from_prev", "自然切入")
+        transition_to_next = section_outline.get("transition_to_next", "总结本节")
+
+        outline_lines = ["## 本章节段落规划"]
+        if core_question:
+            outline_lines.append(f"核心问题：{core_question}")
+        if narrative_arc:
+            outline_lines.append(f"论述逻辑：{narrative_arc}")
+        outline_lines.append("")
+        if paragraphs:
+            outline_lines.append("段落安排：")
+            for p in paragraphs:
+                idx = p.get("index", "")
+                target = p.get("target_words", "")
+                direction = p.get("direction", "")
+                synthesis = p.get("synthesis_instruction", "")
+                outline_lines.append(f"### 第 {idx} 段（约 {target} 字）")
+                if direction:
+                    outline_lines.append(f"方向：{direction}")
+                if synthesis:
+                    outline_lines.append(f"综合要求：{synthesis}")
+                outline_lines.append("")
+        outline_lines.append("衔接要求：")
+        outline_lines.append(f"- 开头过渡：{transition_from_prev}")
+        outline_lines.append(f"- 结尾铺垫：{transition_to_next}")
+        section_outline_context = "\n".join(outline_lines)
+
+    # 构建前文摘要上下文
+    prev_summary_context = ""
+    if prev_summary:
+        prev_summary_context = f"## 前文摘要（已写内容，不要重复）\n{prev_summary}"
+
+    # 构建后文预告上下文
+    next_outline_context = ""
+    if next_outline:
+        next_title = next_outline.get("title", "")
+        next_desc = next_outline.get("description", "")
+        next_outline_context = f"## 后文预告\n下一节：{next_title} — {next_desc}"
+
     # 加载章节写作提示模板
     section_prompt_template = get_write_section_prompt()
     if not section_prompt_template:
-        section_prompt_template = """你正在撰写一篇学术综述文章的一个章节。
+        banned_block = format_banned_phrases_for_prompt()
+        section_prompt_template = f"""你正在撰写一篇学术综述文章的一个章节。
 
 ## 研究主题
-{topic}
+{{topic}}
 
 ## 综述标题
-{review_title}
+{{review_title}}
 
 ## 当前章节
-章节名称: {section_title}
-章节描述: {section_description}
-目标字数: {target_words} 字
+章节名称: {{section_title}}
+章节描述: {{section_description}}
+目标字数: {{target_words}} 字
 
 ## 相关聚类数据
-{cluster_data}
+{{cluster_data}}
 
 ## 相关论文样本
-{sample_papers}
+{{sample_papers}}
 
 ## 真实可用的参考文献（只能从这里引用）
 以下是从学术数据库中提取的真实论文，编号为本章节专用编号。请只引用以下列表中的论文，不得编造。
 
-{references}
+{{references}}
 
-{evidence_section}
+{{evidence_section}}
 
 ## 写作要求
 
@@ -315,7 +630,12 @@ async def write_section(
 ### 输出规范
 - 直接输出章节正文（纯段落文本）
 - 不要输出章节标题、不要输出参考文献列表、不要输出元说明
-- 字数控制在 {target_words} 字左右，正负 20%"""
+- 字数严格控制在 {{target_words}} 字左右，正负 20%。超出过多会被截断。
+
+### 禁用表达
+{banned_block}
+每个段落应以实质性的分析判断或研究发现收尾，而非空洞的总结句。
+用具体的分析逻辑（如"由于X限制，Y方法转向Z策略"）替代这些泛化短语。"""
 
     evidence_section = ""
     if evidence_context:
@@ -330,26 +650,138 @@ async def write_section(
         section_title=section_plan.get("title", ""),
         section_description=section_plan.get("description", ""),
         target_words=section_plan.get("target_words", 2000),
-        cluster_data=cluster_data,
+        cluster_data=enriched_cluster_data,
         sample_papers=sample_papers,
         references=references,
         evidence_section=evidence_section,
     )
 
-    # 加载写作风格规范
+    # 注入段落规划、前文摘要、后文预告到写作要求之前
+    extra_context_blocks = []
+    if section_outline_context:
+        extra_context_blocks.append(section_outline_context)
+    if prev_summary_context:
+        extra_context_blocks.append(prev_summary_context)
+    if next_outline_context:
+        extra_context_blocks.append(next_outline_context)
+    if extra_context_blocks:
+        injection = "\n\n".join(extra_context_blocks) + "\n\n"
+        prompt = prompt.replace("## 写作要求", f"{injection}## 写作要求")
+
+    # 加载写作风格规范和结构指南（对齐 Rust 版 review_system）
     style_guide = get_review_style_prompt()
+    structure_guide = get_review_structure_prompt()
 
-    messages = [
-        SystemMessage(content=f"""你是一位精通学术写作的综述专家。请严格按照以下写作规范撰写章节：
+    system_prompt = f"""You write grounded Chinese academic literature reviews using only supplied evidence.
 
+Review structure guide:
+{structure_guide}
+
+Review style guide:
 {style_guide}
 
-关键要求：
-1. 只使用连贯段落，严禁分点列表
-2. 禁止出现聚类标记（Cluster 0, Cluster 1等）
-3. 禁止口语化表达
-4. 使用IEEE引用格式 [1], [2], [1,2]
-5. 正文不使用markdown标题"""),
+Hard rules:
+- Use only supplied papers and evidence.
+- Do not invent references, authors, venues, years, DOI, or claims.
+- Use IEEE-style [N] citations matching supplied evidence numbers.
+- NEVER use author-year citations like (Friedman, 2024) or (Smith et al., 2023). Only [1], [1,2], [1-3] format.
+- NEVER use paper_id (like p1, p2) as citation numbers. Only use the [N] numbers from the reference list.
+- Keep output as UTF-8 markdown.
+- Avoid internal labels such as Cluster 0 or pipeline implementation details.
+- Do NOT output a reference list or bibliography at the end of the section.
+- Do NOT output meta-commentary like "(字数统计：1520字)" or "(以上为...)".
+- Strictly adhere to the target word count (±20%).
+
+SYNTHESIS-FIRST RULE (critical):
+A literature review is NOT a collection of individual paper summaries. Each paragraph must be organized around a central thesis or analytical theme, with multiple papers serving as supporting evidence.
+- BANNED PATTERN — paper-by-paper listing: "Author A [1] proposed X. Author B [2] proposed Y. Author C [3] proposed Z." This is a summary list, not a review.
+- BANNED PATTERN — sequential paper introduction: Each sentence introduces a different paper's finding without analytical connection.
+- REQUIRED PATTERN — thematic synthesis: "Two dominant paradigms have emerged for X: attention-based approaches [1,2] achieve Y through Z, while state-space models [3,4] trade precision for efficiency. The hybrid approach [5] attempts to bridge this gap, though at the cost of..."
+- REQUIRED PATTERN — comparative analysis: "Although [1] and [3] both adopt strategy X, the former focuses on Y while the latter targets Z; this divergence stems from their different assumptions about..."
+- When comparing research, explicitly state similarities, differences, and underlying reasons — never simply juxtapose findings.
+- Organize paragraphs by mechanism, method category, or conclusion theme — not by individual papers."""
+
+    # 输出卫生规则 + 引用约束补充（对齐 Rust 版 write_section_user 的额外约束）
+    output_hygiene_rules = """## Output hygiene rules
+- Treat related paper samples, evidence summary, claim, evidence_span, method, metric, limitation, confidence, reference candidates, citation candidates, cluster data, community context, and evidence_limitations as private working material only.
+- Do not copy those labels or raw working-material blocks into the section.
+- Output only polished section body paragraphs. Do not output a section title, reference list, bibliography, candidate list, evidence-card JSON, audit notes, or implementation details.
+- Use only [N] citation numbers from the provided usable reference list, and cite a source only when it directly supports the sentence.
+- The same [N] number must always refer to the same paper_id, title, and evidence_card_id shown in the related paper samples and usable reference list.
+- Never cite a sentence with [N] if the claim was taken from another paper_id, even when both papers discuss a similar topic."""
+
+    citation_constraint_supplement = """## 引用约束补充
+- 本章节必须使用本章节"真实可用的参考文献"列表中的 [N] 编号。
+- 本章节会提供约 20-30 篇候选文献；请只选择真正支撑论点的文献，不要为了凑引用而引用。
+- 每个 section 尽量使用 10-20 篇有证据支撑的文献；如果证据不足，可以少于 10 篇，但必须改写或删除无法被候选文献支撑的判断。
+- 每一句包含事实判断、方法比较、指标、趋势、局限或结论的句子，都必须能被同句或邻近句中的 [N] 文献支撑。
+- 如果同一论文支撑多个判断，可以重复引用，但不得引用列表外编号。
+- 不能编造引用、作者、年份、期刊、DOI 或论文结论。
+- **引用格式强制**：只使用 [N] 数字编号。禁止 (Author, Year) 格式。禁止使用 paper_id 作为引用号。"""
+
+    # 在写作要求之后插入 output hygiene rules 和引用约束
+    prompt = prompt.replace(
+        "## 写作要求",
+        f"{output_hygiene_rules}\n\n{citation_constraint_supplement}\n\n## 写作要求",
+    )
+
+    # 注入段落规划 + 上下文链（来自 section_outline_planner）
+    if section_outline:
+        outline_parts = []
+        core_q = section_outline.get("core_question", "")
+        arc = section_outline.get("narrative_arc", "")
+        if core_q:
+            outline_parts.append(f"核心问题：{core_q}")
+        if arc:
+            outline_parts.append(f"论述逻辑：{arc}")
+
+        paragraphs = section_outline.get("paragraphs", [])
+        if paragraphs:
+            outline_parts.append("\n段落安排：")
+            for p in paragraphs:
+                idx = p.get("index", 0)
+                direction = p.get("direction", "")
+                pw = p.get("target_words", "")
+                synth = p.get("synthesis_instruction", "")
+                line = f"### 第 {idx} 段（约 {pw} 字）\n方向：{direction}"
+                if synth:
+                    line += f"\n综合要求：{synth}"
+                outline_parts.append(line)
+
+        trans_prev = section_outline.get("transition_from_prev", "")
+        trans_next = section_outline.get("transition_to_next", "")
+        if trans_prev:
+            outline_parts.append(f"\n开头过渡方向：{trans_prev}")
+        if trans_next:
+            outline_parts.append(f"结尾铺垫方向：{trans_next}")
+
+        already = section_outline.get("already_covered", [])
+        if already:
+            outline_parts.append(f"\n前序已覆盖（不要重复）：{'; '.join(already)}")
+
+        section_outline_block = "\n".join(outline_parts)
+        prompt = prompt.replace(
+            "## 写作要求",
+            f"## 本章节段落规划\n{section_outline_block}\n\n## 写作要求",
+        )
+
+    if prev_summary:
+        prompt = prompt.replace(
+            "## 写作要求",
+            f"## 前文摘要（已写内容，不要重复）\n{prev_summary}\n\n## 写作要求",
+        )
+
+    if next_outline:
+        next_title = next_outline.get("title", "")
+        next_desc = next_outline.get("description", "")
+        if next_title:
+            prompt = prompt.replace(
+                "## 写作要求",
+                f"## 后文预告\n下一节：{next_title} — {next_desc}\n请在结尾为此做铺垫。\n\n## 写作要求",
+            )
+
+    messages = [
+        SystemMessage(content=system_prompt),
         HumanMessage(content=prompt),
     ]
 
@@ -363,6 +795,196 @@ async def write_section(
             for block in content
         )
     return content
+
+
+def _coerce_llm_text(content) -> str:
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in content
+        )
+    return str(content or "")
+
+
+def _as_single_unit(text: str) -> str:
+    lines = []
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#") or line.startswith("- ") or re.match(r"^\d+[.)]\s+", line):
+            continue
+        if line.lower().startswith(("references", "bibliography")):
+            break
+        lines.append(line)
+    return " ".join(lines).strip()
+
+
+def _unit_outline(section_outline: dict, paragraph: dict) -> dict:
+    outline = dict(section_outline or {})
+    outline["paragraphs"] = [paragraph]
+    return outline
+
+
+def _next_unit_hint(paragraphs: list[dict], index: int, next_outline: dict | None) -> dict | None:
+    if index + 1 < len(paragraphs):
+        para = paragraphs[index + 1]
+        return {
+            "title": f"next paragraph {para.get('index', index + 2)}",
+            "description": "; ".join(
+                part for part in [
+                    f"task_type={para.get('task_type', '')}",
+                    str(para.get("direction", "")),
+                    str(para.get("synthesis_instruction", "")),
+                ]
+                if part
+            ),
+        }
+    return next_outline
+
+
+async def refine_section_units_local_coherence(
+    units: list[str],
+    section_outline: dict,
+    references: str,
+) -> list[str]:
+    """
+    AutoSurvey-style local coherence enhancement over paragraph/subsection units.
+
+    The refinement is intentionally local: each call sees previous/current/next
+    only and must preserve citation numbers.
+    """
+    if len(units) <= 1:
+        return units
+
+    agent = create_writing_agent(temperature=0.3)
+    paragraphs = section_outline.get("paragraphs", []) if section_outline else []
+    refined = list(units)
+
+    async def _refine_at(i: int) -> None:
+        para_plan = paragraphs[i] if i < len(paragraphs) else {}
+        prompt = f"""Refine only the CURRENT paragraph of a Chinese academic review.
+
+Rules:
+- Return only the revised CURRENT paragraph, no heading, no list, no notes.
+- Preserve all valid [N] citation numbers already present unless a sentence is removed.
+- Do not add citations outside the usable reference list.
+- Improve local transition, remove redundancy, and keep the paragraph's single task.
+- Do not merge with previous or next paragraph.
+
+Paragraph plan:
+task_type: {para_plan.get('task_type', '')}
+direction: {para_plan.get('direction', '')}
+synthesis_instruction: {para_plan.get('synthesis_instruction', '')}
+target_words: {para_plan.get('target_words', '')}
+
+Usable references:
+{references}
+
+PREVIOUS paragraph:
+{refined[i - 1] if i > 0 else ''}
+
+CURRENT paragraph:
+{refined[i]}
+
+NEXT paragraph:
+{refined[i + 1] if i + 1 < len(refined) else ''}
+"""
+        response = await _ainvoke_with_retry(
+            agent,
+            [
+                SystemMessage(content="You are a strict academic prose editor. Preserve evidence grounding and numeric citations."),
+                HumanMessage(content=prompt),
+            ],
+            max_retries=2,
+        )
+        candidate = _as_single_unit(_coerce_llm_text(response.content))
+        if candidate:
+            refined[i] = candidate
+
+    for start in (0, 1):
+        for idx in range(start, len(refined), 2):
+            await _refine_at(idx)
+
+    return refined
+
+
+async def write_section_units(
+    topic: str,
+    review_title: str,
+    section_plan: dict,
+    cluster_data: str,
+    sample_papers: str,
+    references: str,
+    evidence_cards: list[dict] | None = None,
+    community_context: str | None = None,
+    evidence_limitations: str | None = None,
+    section_outline: dict | None = None,
+    prev_summary: str = "",
+    next_outline: dict | None = None,
+) -> str:
+    """
+    Write a section as paragraph/subsection units instead of one monolithic call.
+    """
+    paragraphs = list((section_outline or {}).get("paragraphs") or [])
+    if not paragraphs:
+        return await write_section(
+            topic=topic,
+            review_title=review_title,
+            section_plan=section_plan,
+            cluster_data=cluster_data,
+            sample_papers=sample_papers,
+            references=references,
+            evidence_cards=evidence_cards,
+            community_context=community_context,
+            evidence_limitations=evidence_limitations,
+            section_outline=section_outline,
+            prev_summary=prev_summary,
+            next_outline=next_outline,
+        )
+
+    units: list[str] = []
+    for idx, paragraph in enumerate(paragraphs):
+        unit_plan = dict(section_plan)
+        unit_plan["target_words"] = paragraph.get(
+            "target_words",
+            max(250, int(section_plan.get("target_words", 1500) / max(len(paragraphs), 1))),
+        )
+        unit_plan["description"] = " ".join(
+            part for part in [
+                str(section_plan.get("description", "")),
+                f"Current writing unit task_type={paragraph.get('task_type', '')}.",
+                str(paragraph.get("direction", "")),
+                str(paragraph.get("synthesis_instruction", "")),
+            ]
+            if part
+        )
+
+        unit_prev = prev_summary
+        if units:
+            unit_prev = f"{prev_summary}\n\nPrevious paragraph in this section:\n{units[-1]}"
+
+        raw_unit = await write_section(
+            topic=topic,
+            review_title=review_title,
+            section_plan=unit_plan,
+            cluster_data=cluster_data,
+            sample_papers=sample_papers,
+            references=references,
+            evidence_cards=evidence_cards,
+            community_context=community_context,
+            evidence_limitations=evidence_limitations,
+            section_outline=_unit_outline(section_outline or {}, paragraph),
+            prev_summary=unit_prev,
+            next_outline=_next_unit_hint(paragraphs, idx, next_outline),
+        )
+        unit_text = _as_single_unit(_coerce_llm_text(raw_unit))
+        if not unit_text:
+            raise ValueError(f"Paragraph unit {idx + 1} produced empty content")
+        units.append(unit_text)
+
+    units = await refine_section_units_local_coherence(units, section_outline or {}, references)
+    return "\n\n".join(unit for unit in units if unit.strip())
 
 
 async def revise_section(
@@ -411,3 +1033,159 @@ async def revise_section(
             for block in content
         )
     return content
+
+
+# =============================================================================
+# 组装综述（对齐 Rust 版 assemble_review）
+# =============================================================================
+
+def render_section_community_context(
+    section_plan: dict,
+    clusters: list[dict],
+    papers: list[dict],
+    evidence_cards: list[dict] | None = None,
+    kg_entities: list[dict] | None = None,
+) -> str:
+    """
+    渲染章节的社区上下文摘要（对齐 Rust 版 render_section_community_context）。
+
+    为每个章节的关键聚类生成简要摘要，帮助 LLM 理解社区结构。
+    包含：论文数、代表性论文、top entities、关键发现。
+    """
+    key_clusters = section_plan.get("target_communities") or section_plan.get("key_clusters", [])
+    if not key_clusters:
+        return ""
+
+    parts = []
+    paper_map = {p.get("id"): p for p in papers}
+    paper_set_all = {p.get("id") for p in papers}
+
+    # 构建 paper_id -> entity names 映射
+    entity_by_paper: dict[str, list[str]] = {}
+    if kg_entities:
+        for ent in kg_entities:
+            for pid in ent.get("paper_ids", []):
+                entity_by_paper.setdefault(pid, []).append(ent.get("name", ""))
+
+    for cid in key_clusters:
+        cluster = next((c for c in clusters if str(c.get("id")) == str(cid)), None)
+        if not cluster:
+            continue
+
+        cluster_papers = cluster.get("paper_ids", [])
+        cluster_paper_set = set(cluster_papers)
+        size = len(cluster_papers)
+
+        # 提取代表性论文标题
+        sample_titles = []
+        for pid in cluster_papers[:5]:
+            p = paper_map.get(pid)
+            if p:
+                sample_titles.append(p.get("title", ""))
+
+        # 提取 top entities（对齐 Rust 版 top_entities）
+        entity_counts: dict[str, int] = {}
+        for pid in cluster_papers:
+            for ename in entity_by_paper.get(pid, []):
+                entity_counts[ename] = entity_counts.get(ename, 0) + 1
+        top_entities = sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+        entity_str = ", ".join(f"{name}({cnt})" for name, cnt in top_entities)
+
+        # 提取该社区的 evidence cards
+        cluster_evidence = []
+        if evidence_cards:
+            for card in evidence_cards:
+                card_pid = card.get("paper_id", "")
+                if card_pid in cluster_paper_set:
+                    claim = card.get("claim", card.get("key_finding", ""))
+                    if claim:
+                        cluster_evidence.append(claim)
+
+        line = f"community {cid}: papers={size}"
+        if sample_titles:
+            line += f"; representatives={'; '.join(sample_titles[:3])}"
+        if entity_str:
+            line += f"; top_entities={entity_str}"
+        if cluster_evidence:
+            line += f"; key_findings={'; '.join(cluster_evidence[:3])}"
+        parts.append(line)
+
+    return "\n".join(parts) if parts else ""
+
+
+def render_section_evidence_limitations(
+    section_plan: dict,
+    evidence_cards: list[dict] | None = None,
+) -> str:
+    """
+    渲染证据局限性说明（对齐 Rust 版 render_section_evidence_limitations）。
+
+    指出该章节证据的局限性，帮助 LLM 在写作中更准确地表述。
+    """
+    if not evidence_cards:
+        return ""
+
+    # 统计低置信度证据
+    low_confidence = []
+    for card in evidence_cards:
+        conf = card.get("confidence", 1.0)
+        if isinstance(conf, str):
+            try:
+                conf = float(conf)
+            except ValueError:
+                conf = 1.0
+        if conf < 0.5:
+            title = card.get("title", card.get("paper_title", ""))
+            low_confidence.append(f"{title} (confidence={conf:.2f})")
+
+    if not low_confidence:
+        return ""
+
+    return (
+        "Evidence limitations for this section:\n"
+        + "\n".join(f"- {lc}" for lc in low_confidence[:5])
+        + "\nNote: Low-confidence evidence should be cited with appropriate hedging language."
+    )
+
+
+async def assemble_review(
+    topic: str,
+    review_title: str,
+    sections: list[dict],
+    references: str,
+    citation_style: str = "IEEE",
+) -> str:
+    """
+    拼装综述（对齐 Rust 版 assemble_review_user）。
+
+    1. 确定性拼装：按顺序拼接各章节
+    2. LLM 审计：使用 assemble_review prompt 检查风格一致性
+
+    Args:
+        topic: 研究主题
+        review_title: 综述标题
+        sections: 章节列表，每个含 "title" 和 "content"
+        references: 参考文献列表
+        citation_style: 引用格式
+
+    Returns:
+        完整的综述 markdown
+    """
+    # 确定性拼装（对齐 Rust 版 assemble_review_deterministic）
+    section_parts = []
+    for sec in sections:
+        title = sec.get("title", "")
+        content = sec.get("content", "")
+        section_parts.append(f"## {title}\n\n{content}")
+
+    deterministic_md = f"# {review_title}\n\n" + "\n\n".join(section_parts)
+
+    # 如果有参考文献，追加
+    if references:
+        deterministic_md += f"\n\n## References\n\n{references}"
+
+    logger.info(
+        "Using deterministic assembly",
+        policy="llm_assembly_disabled_final_uses_deterministic_markdown",
+    )
+    return deterministic_md

@@ -153,7 +153,8 @@ class Settings(BaseSettings):
 
     # KG 抽取配置
     kg_batch_size: int = 1
-    kg_concurrency: int = 10
+    kg_concurrency: int = -1
+    evidence_concurrency: int = -1
 
     # 写作配置
     writing_model: str = "gpt-4o"
@@ -165,6 +166,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+
+    # Provider 加密密钥（Fernet key 或任意密码，程序自动派生）
+    provider_encryption_key: Optional[str] = None
 
     # 默认管理员账户（首次启动时自动创建）
     # admin_password 无默认值，必须通过环境变量或 .env 显式设置

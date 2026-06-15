@@ -21,6 +21,7 @@ from .kg_extraction import kg_extraction_node
 # 聚类阶段节点
 from .community_detection import community_detection_node
 from .visualize_community import visualize_community_node
+from .community_memory import community_memory_node
 
 # 证据阶段节点
 from .evidence_cards import evidence_cards_node
@@ -53,6 +54,7 @@ __all__ = [
     # 聚类阶段
     "community_detection_node",
     "visualize_community_node",
+    "community_memory_node",
     # 证据阶段
     "evidence_cards_node",
     "gap_analysis_node",

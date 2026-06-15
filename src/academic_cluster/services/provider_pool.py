@@ -81,6 +81,18 @@ class LiteLLMPool:
         """获取所有部署配置"""
         return self._model_list
 
+    def get_total_rpm_limit(self, default_per_deployment: int = 10) -> int:
+        """Return the summed configured RPM budget for this pool."""
+        total = 0
+        for deployment in self._model_list:
+            params = deployment.get("litellm_params", {})
+            try:
+                rpm = int(params.get("rpm") or default_per_deployment)
+            except (TypeError, ValueError):
+                rpm = default_per_deployment
+            total += max(1, rpm)
+        return max(1, total)
+
     def get_stats(self) -> dict:
         """获取池统计"""
         return {
@@ -338,6 +350,13 @@ def get_llm_pool() -> LiteLLMPool:
     if _llm_pool is None:
         raise RuntimeError("LLM pool not initialized. Call init_pools() first.")
     return _llm_pool
+
+
+def get_llm_available_slots(default: int = 10) -> int:
+    """Return the current LLM queue capacity derived from enabled providers."""
+    if _llm_pool is None:
+        return max(1, default)
+    return _llm_pool.get_total_rpm_limit(default_per_deployment=default)
 
 
 def get_embedding_pool() -> LiteLLMPool:

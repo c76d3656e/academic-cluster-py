@@ -29,8 +29,30 @@ const isStarting = ref(false)
 const progressLogs = ref<Array<{ time: string; node: string; message: string }>>([])
 const currentProgressNode = ref('')
 const progressMessage = ref('')
+const completedNodes = ref<Set<string>>(new Set())
+const failedNodes = ref<Set<string>>(new Set())
+const nodeDetails = ref<Record<string, string>>({})
 let eventSource: EventSource | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+// Pipeline stages for visual progress
+const pipelineStages = [
+  { key: 'search', label: '搜索', icon: '🔍' },
+  { key: 'deduplicate', label: '去重', icon: '🔄' },
+  { key: 'filter', label: '过滤', icon: '🔽' },
+  { key: 'bm25', label: 'BM25', icon: '📊' },
+  { key: 'embedding', label: '嵌入', icon: '📐' },
+  { key: 'pgvector_knn', label: 'KNN', icon: '🕸️' },
+  { key: 'rerank', label: '重排序', icon: '📈' },
+  { key: 'kg_extraction', label: '实体抽取', icon: '🏷️' },
+  { key: 'community_detection', label: '聚类', icon: '🧩' },
+  { key: 'visualize_community', label: '可视化', icon: '🎨' },
+  { key: 'evidence_cards', label: '证据卡片', icon: '📋' },
+  { key: 'outline_generation', label: '大纲', icon: '📝' },
+  { key: 'gap_analysis', label: '缺口分析', icon: '🔎' },
+  { key: 'write_review', label: '写作', icon: '✍️' },
+  { key: 'finalize', label: '完成', icon: '✅' },
+]
 
 const isRunning = computed(() => {
   const s = project.value?.status || ''
@@ -139,8 +161,10 @@ function formatTime(): string {
 
 function connectSSE() {
   if (eventSource) return
+  const token = localStorage.getItem('access_token')
+  if (!token) return
   const baseUrl = import.meta.env.VITE_API_URL || '/api'
-  const url = `${baseUrl}/stream/${projectId}`
+  const url = `${baseUrl}/stream/${projectId}?token=${encodeURIComponent(token)}`
   eventSource = new EventSource(url)
 
   eventSource.addEventListener('connected', () => {
@@ -151,11 +175,26 @@ function connectSSE() {
     const data = JSON.parse(e.data)
     currentProgressNode.value = data.node || ''
     progressMessage.value = data.message || ''
+    if (data.node) {
+      nodeDetails.value[data.node] = data.message || ''
+    }
     if (data.message) {
       progressLogs.value.push({ time: formatTime(), node: data.node || '', message: data.message })
     }
     if (project.value && data.node) {
       project.value.status = `running:${data.node}`
+    }
+  })
+
+  eventSource.addEventListener('node_finished', (e) => {
+    const data = JSON.parse(e.data)
+    if (data.node) {
+      if (data.status === 'succeeded') {
+        completedNodes.value.add(data.node)
+        failedNodes.value.delete(data.node)
+      } else if (data.status === 'failed') {
+        failedNodes.value.add(data.node)
+      }
     }
   })
 
@@ -188,6 +227,11 @@ function startStatusPolling() {
     try {
       const status = await projectsApi.getProjectStatus(projectId)
       if (project.value) project.value.status = status.status
+      // Sync current node from status for progress visualization
+      if (status.status?.startsWith('running:')) {
+        const node = status.status.replace('running:', '')
+        currentProgressNode.value = node
+      }
       if (status.status === 'completed' || status.status === 'failed') {
         stopStatusPolling()
         loadReview()
@@ -222,8 +266,18 @@ onMounted(async () => {
       startStatusPolling()
     }
     await loadReview()
-  } catch {
-    router.push('/')
+  } catch (e: unknown) {
+    const err = e as { response?: { status?: number } }
+    if (err.response?.status === 401 || err.response?.status === 403) {
+      router.push('/login')
+    } else {
+      toast.error('加载项目失败')
+      if (window.history.length > 1) {
+        router.back()
+      } else {
+        router.push('/console/projects')
+      }
+    }
   } finally {
     isLoading.value = false
   }
@@ -364,11 +418,9 @@ function scrollToReferences() {
     <!-- Top Navigation Bar -->
     <header class="border-b border-border sticky top-0 z-10 bg-background/80 backdrop-blur-sm">
       <div class="max-w-[1100px] mx-auto px-6 py-2.5 flex items-center gap-3">
-        <router-link to="/">
-          <Button variant="ghost" size="sm" class="gap-1 text-muted-foreground hover:text-foreground">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-            Projects
-          </Button>
+        <router-link to="/console/overview" class="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          返回
         </router-link>
         <Separator orientation="vertical" class="h-5" />
         <h1 class="text-sm font-medium text-foreground truncate">{{ project?.name || 'Loading...' }}</h1>
@@ -404,24 +456,67 @@ function scrollToReferences() {
 
     <main v-else-if="project" class="max-w-[1100px] mx-auto px-6">
       <!-- Running: Progress Panel -->
-      <div v-if="isRunning || progressLogs.length > 0" class="my-6 border border-border rounded-xl bg-card p-5">
-        <div class="flex items-center gap-2 mb-4">
-          <span v-if="isRunning" class="relative flex h-2 w-2">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-          </span>
-          <span class="text-sm font-medium">Pipeline Progress</span>
-        </div>
-        <div v-if="isRunning && progressMessage" class="mb-4 p-3 bg-secondary rounded-lg text-sm font-medium">
-          {{ progressMessage }}
-        </div>
-        <div class="max-h-48 overflow-y-auto space-y-1 font-mono text-xs text-muted-foreground">
-          <div v-for="(log, i) in progressLogs" :key="i" class="flex gap-2 py-1 border-b border-border/50 last:border-0">
-            <span class="shrink-0 tabular-nums">{{ log.time }}</span>
-            <span v-if="log.node" class="shrink-0 text-foreground/40">[{{ log.node }}]</span>
-            <span class="text-foreground/70">{{ log.message }}</span>
+      <div v-if="isRunning || progressLogs.length > 0" class="my-6">
+        <!-- Progress Bar -->
+        <div class="border border-border rounded-xl bg-card p-5 mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <span v-if="isRunning" class="relative flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              <span class="text-sm font-medium">
+                {{ isRunning ? '正在执行...' : project?.status === 'completed' ? '已完成' : '已停止' }}
+              </span>
+            </div>
+            <span class="text-xs text-muted-foreground tabular-nums">
+              {{ completedNodes.size }}/{{ pipelineStages.length }} 阶段
+            </span>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="progress-bar-track">
+            <div
+              class="progress-bar-fill"
+              :class="{ 'progress-bar-failed': project?.status === 'failed' }"
+              :style="{ width: Math.round((completedNodes.size / pipelineStages.length) * 100) + '%' }"
+            ></div>
+          </div>
+
+          <!-- Current Stage -->
+          <div class="flex items-center justify-between mt-3">
+            <div class="flex items-center gap-2 text-sm">
+              <template v-if="currentProgressNode">
+                <span>{{ pipelineStages.find(s => s.key === currentProgressNode)?.icon }}</span>
+                <span class="font-medium">{{ pipelineStages.find(s => s.key === currentProgressNode)?.label }}</span>
+              </template>
+              <template v-else-if="project?.status === 'completed'">
+                <span>✅</span>
+                <span class="font-medium">全部完成</span>
+              </template>
+            </div>
+            <span class="text-xs text-muted-foreground">
+              {{ progressMessage || '' }}
+            </span>
           </div>
         </div>
+
+        <!-- Log Panel (collapsible) -->
+        <details class="border border-border rounded-xl bg-card overflow-hidden">
+          <summary class="px-5 py-3 text-sm font-medium cursor-pointer hover:bg-muted/50 transition-colors">
+            执行日志 ({{ progressLogs.length }})
+          </summary>
+          <div class="max-h-64 overflow-y-auto space-y-1 font-mono text-xs text-muted-foreground px-5 pb-4">
+            <div v-for="(log, i) in progressLogs" :key="i" class="flex gap-2 py-1 border-b border-border/50 last:border-0">
+              <span class="shrink-0 tabular-nums text-muted-foreground/60">{{ log.time }}</span>
+              <span v-if="log.node" class="shrink-0 text-foreground/40">[{{ log.node }}]</span>
+              <span class="text-foreground/70">{{ log.message }}</span>
+            </div>
+            <div v-if="progressLogs.length === 0" class="text-center py-4 text-muted-foreground/50">
+              等待日志...
+            </div>
+          </div>
+        </details>
       </div>
 
       <!-- Not started yet -->
@@ -843,5 +938,31 @@ function scrollToReferences() {
   border-left: 2px solid var(--border);
   padding-left: 0.625rem;
   font-style: italic;
+}
+
+/* ============================================ */
+/* Pipeline progress bar                        */
+/* ============================================ */
+.progress-bar-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--muted);
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: oklch(0.65 0.15 145);
+  transition: width 0.6s ease;
+}
+
+.progress-bar-failed {
+  background: oklch(0.65 0.15 25);
+}
+
+.stage-icon {
+  font-size: 0.875rem;
 }
 </style>

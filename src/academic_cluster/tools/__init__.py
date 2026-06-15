@@ -19,7 +19,7 @@ from .text_processing import (
 )
 from .clustering import (
     build_hybrid_graph,
-    leiden_clustering,
+    community_detection,
     generate_community_visualization,
 )
 
@@ -36,6 +36,6 @@ __all__ = [
     "extract_keywords",
     # 聚类
     "build_hybrid_graph",
-    "leiden_clustering",
+    "community_detection",
     "generate_community_visualization",
 ]

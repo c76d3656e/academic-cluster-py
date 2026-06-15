@@ -193,6 +193,11 @@ class LLMCallbackHandler(BaseCallbackHandler):
         self.tracker = tracker
         self.db_caller = db_caller  # async callable(node_name, provider, model, call_type, prompt_tokens, completion_tokens, latency_ms)
         self._start_times: dict[str, float] = {}
+        # 捕获主事件循环，用于从线程池调度异步调用
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
 
     def on_llm_start(self, serialized, prompts, *, run_id, **kwargs):
         self._start_times[str(run_id)] = time.monotonic()
@@ -200,9 +205,8 @@ class LLMCallbackHandler(BaseCallbackHandler):
 
     def on_llm_end(self, response: LLMResult, *, run_id, **kwargs):
         try:
-            elapsed_ms = int(
-                (time.monotonic() - self._start_times.pop(str(run_id), 0)) * 1000
-            )
+            start_time = self._start_times.pop(str(run_id), None)
+            elapsed_ms = int((time.monotonic() - start_time) * 1000) if start_time is not None else 0
 
             # 提取 token 用量
             usage: dict = {}
@@ -233,9 +237,9 @@ class LLMCallbackHandler(BaseCallbackHandler):
             )
 
             # 异步记录到 tracker（fire-and-forget for sync callback）
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(
+            # 使用 run_coroutine_threadsafe 从线程池安全地调度异步调用
+            if self._loop is not None:
+                asyncio.run_coroutine_threadsafe(
                     self.tracker.record(
                         node_name=node_name,
                         provider_name=provider_name,
@@ -245,11 +249,12 @@ class LLMCallbackHandler(BaseCallbackHandler):
                         completion_tokens=completion_tokens,
                         cost=0.0,  # cost 在调用方计算
                         latency_ms=elapsed_ms,
-                    )
+                    ),
+                    self._loop,
                 )
                 # 持久化 llm_call 到数据库
                 if self.db_caller:
-                    asyncio.ensure_future(
+                    asyncio.run_coroutine_threadsafe(
                         self.db_caller(
                             node_name=node_name,
                             provider_name=provider_name,
@@ -258,15 +263,15 @@ class LLMCallbackHandler(BaseCallbackHandler):
                             prompt_tokens=prompt_tokens,
                             completion_tokens=completion_tokens,
                             latency_ms=elapsed_ms,
-                        )
+                        ),
+                        self._loop,
                     )
         except Exception as e:
             structlog.get_logger().warning("LLM callback on_llm_end error", error=str(e))
 
     def on_llm_error(self, error, *, run_id, **kwargs):
-        elapsed_ms = int(
-            (time.monotonic() - self._start_times.pop(str(run_id), 0)) * 1000
-        )
+        start_time = self._start_times.pop(str(run_id), None)
+        elapsed_ms = int((time.monotonic() - start_time) * 1000) if start_time is not None else 0
         logger = structlog.get_logger()
         logger.error(
             "llm_call_failed",
@@ -275,6 +280,51 @@ class LLMCallbackHandler(BaseCallbackHandler):
             elapsed_ms=elapsed_ms,
             node=_current_node.get(),
         )
+
+
+# ===========================================================================
+# PipelineStatusCallback -- 节点启动时实时更新项目状态
+# ===========================================================================
+
+
+class PipelineStatusCallback(BaseCallbackHandler):
+    """
+    在 LangGraph 节点开始执行时更新项目状态。
+
+    解决 stream_mode="updates" 只在节点完成后才 emit 事件的问题。
+    通过 on_chain_start 在节点实际开始前更新状态。
+    """
+
+    def __init__(self, project_id: str, db_caller: Callable):
+        super().__init__()
+        self.project_id = project_id
+        self.db_caller = db_caller  # async callable(project_id, status)
+        self._last_node = None
+        # 捕获主事件循环，用于从线程池调度异步调用
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
+
+    def on_chain_start(self, serialized, inputs, *, run_id, **kwargs):
+        """LangGraph 节点开始时调用"""
+        try:
+            # LangGraph 的 node name 从 serialized.name 或 inputs 的 __name__ 获取
+            node_name = serialized.get("name", "") if isinstance(serialized, dict) else ""
+            if not node_name:
+                # 尝试从 kwargs 获取
+                node_name = kwargs.get("name", "")
+            if node_name and node_name != self._last_node:
+                self._last_node = node_name
+                status = f"running:{node_name}"
+                structlog.get_logger().info("PipelineStatusCallback: node started", node=node_name)
+                # 使用 run_coroutine_threadsafe 从线程池安全地调度异步调用
+                if self._loop is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        self.db_caller(self.project_id, status), self._loop
+                    )
+        except Exception as e:
+            structlog.get_logger().warning("PipelineStatusCallback error", error=str(e))
 
 
 # ===========================================================================
@@ -376,9 +426,11 @@ class PipelineTracker:
         db_finish_node: Optional[Callable] = None,
     ):
         """结束节点执行"""
-        elapsed_ms = int(
-            (time.monotonic() - self._node_starts.pop(node_name, 0)) * 1000
-        )
+        node_start = self._node_starts.pop(node_name, None)
+        if node_start is not None:
+            elapsed_ms = int((time.monotonic() - node_start) * 1000)
+        else:
+            elapsed_ms = 0
         exec_id = self._node_ids.get(node_name)
 
         node_stats = self.token_tracker.by_node.get(node_name, {})

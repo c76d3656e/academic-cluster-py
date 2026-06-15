@@ -5,12 +5,71 @@
 所有 agent 和 node 应通过此模块获取 LLM 客户端。
 """
 
+import asyncio
+import re
 from typing import Optional
 
 import structlog
 from langchain_openai import ChatOpenAI
 
 logger = structlog.get_logger()
+
+_rr_counter = 0
+_llm_queue_semaphore: asyncio.Semaphore | None = None
+_llm_queue_capacity = 0
+
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL)
+_REASONING_BLOCK_RE = re.compile(
+    r"^\s*(?:analysis|reasoning|thought|思考|推理)\s*[:：].*?(?=\n\n|$)",
+    re.IGNORECASE | re.DOTALL | re.MULTILINE,
+)
+
+
+def strip_llm_reasoning_content(content):
+    """Strip provider-visible reasoning blocks while preserving normal content."""
+    if isinstance(content, str):
+        cleaned = _THINK_BLOCK_RE.sub("", content)
+        cleaned = _REASONING_BLOCK_RE.sub("", cleaned)
+        return cleaned.strip()
+    if isinstance(content, list):
+        cleaned_blocks = []
+        for block in content:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                new_block = dict(block)
+                new_block["text"] = strip_llm_reasoning_content(new_block["text"])
+                if new_block["text"]:
+                    cleaned_blocks.append(new_block)
+            elif isinstance(block, str):
+                cleaned = strip_llm_reasoning_content(block)
+                if cleaned:
+                    cleaned_blocks.append(cleaned)
+            else:
+                cleaned_blocks.append(block)
+        return cleaned_blocks
+    return content
+
+
+def sanitize_llm_response(response):
+    """Best-effort response sanitizer for models that return visible thinking."""
+    try:
+        response.content = strip_llm_reasoning_content(response.content)
+    except Exception:
+        logger.debug("Failed to sanitize LLM response content")
+    return response
+
+
+def _get_llm_queue_semaphore() -> asyncio.Semaphore:
+    """Build a process-local queue gate from enabled provider capacity."""
+    global _llm_queue_semaphore, _llm_queue_capacity
+
+    from .provider_pool import get_llm_available_slots
+
+    capacity = get_llm_available_slots(default=10)
+    if _llm_queue_semaphore is None or capacity != _llm_queue_capacity:
+        _llm_queue_capacity = capacity
+        _llm_queue_semaphore = asyncio.Semaphore(capacity)
+        logger.info("LLM queue capacity resolved", capacity=capacity)
+    return _llm_queue_semaphore
 
 # 轮询计数器
 _rr_counter = 0
@@ -58,12 +117,16 @@ def create_llm(
         api_key=params["api_key"],
         base_url=params.get("api_base"),
         max_tokens=max_tokens,
+        timeout=180,  # 单次 HTTP 请求超时 3 分钟
     )
+    # 在 llm 对象上附加 provider 别名，供 ainvoke_with_callbacks 读取
+    llm._provider_alias = deployment.get("model_name", "")
+    llm._provider_rpm_limit = int(params.get("rpm") or 10)
 
     return llm
 
 
-async def ainvoke_with_callbacks(llm, input, config=None, **kwargs):
+async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0, **kwargs):
     """
     包装 LLM ainvoke 调用，手动追踪 token 用量和持久化到 DB。
 
@@ -74,6 +137,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, **kwargs):
         llm = create_llm()
         response = await ainvoke_with_callbacks(llm, messages)
     """
+    import asyncio
     import time as _time
 
     from .observability import get_current_node, get_current_tracker
@@ -82,7 +146,14 @@ async def ainvoke_with_callbacks(llm, input, config=None, **kwargs):
     node_name = get_current_node() or "unknown"
     tracker = get_current_tracker()
 
-    response = await llm.ainvoke(input, config=config, **kwargs)
+    try:
+        semaphore = _get_llm_queue_semaphore()
+        async with semaphore:
+            response = await asyncio.wait_for(llm.ainvoke(input, config=config, **kwargs), timeout=timeout)
+            response = sanitize_llm_response(response)
+    except asyncio.TimeoutError:
+        logger.error("LLM call timed out", node=node_name, timeout_s=timeout)
+        raise TimeoutError(f"LLM call timed out after {timeout}s")
 
     elapsed_ms = int((_time.monotonic() - start_time) * 1000)
 
@@ -105,17 +176,32 @@ async def ainvoke_with_callbacks(llm, input, config=None, **kwargs):
             prompt_tokens = token_usage.get("prompt_tokens", 0)
             completion_tokens = token_usage.get("completion_tokens", 0)
 
+    # 从 llm 对象获取真实的 provider 别名（如 "gitee"、"siliconflow"）
+    provider_alias = getattr(llm, "_provider_alias", "") or "llm"
+
+    # 按当前定价计算 cost（使用真实的 provider 别名匹配数据库定价）
+    cost = 0.0
+    try:
+        from .database import get_database
+        _db = get_database()
+        from ..api.admin.providers import get_provider_pricing
+        input_price, output_price = await get_provider_pricing(_db, provider_alias, model_name)
+        if input_price or output_price:
+            cost = (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
+    except Exception:
+        pass
+
     # 记录到 tracker
     if tracker:
         try:
             await tracker.token_tracker.record(
                 node_name=node_name,
-                provider_name="llm",
+                provider_name=provider_alias,
                 model_name=model_name,
                 call_type="llm",
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                cost=0.0,
+                cost=cost,
                 latency_ms=elapsed_ms,
             )
         except Exception:
@@ -125,7 +211,6 @@ async def ainvoke_with_callbacks(llm, input, config=None, **kwargs):
     if tracker and tracker.run_id:
         try:
             from .database import get_database
-            from .observability import _current_node as _node_cv
             db = get_database()
             exec_id = tracker._node_ids.get(node_name)
             if exec_id:
@@ -133,7 +218,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, **kwargs):
                     pipeline_run_id=tracker.run_id,
                     node_execution_id=exec_id,
                     call_type="llm",
-                    provider_name="llm",
+                    provider_name=provider_alias,
                     model_name=model_name,
                     latency_ms=elapsed_ms,
                 )
@@ -142,6 +227,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, **kwargs):
                     status="success",
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
+                    cost=cost,
                     latency_ms=elapsed_ms,
                 )
         except Exception as e:

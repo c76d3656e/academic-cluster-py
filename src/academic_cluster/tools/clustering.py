@@ -1,7 +1,7 @@
 """
 聚类工具
 
-实现混合图构建、Leiden 社区检测、可视化生成等功能。
+实现混合图构建、社区检测（Leiden / Walktrap）、可视化生成等功能。
 """
 
 import math
@@ -13,6 +13,22 @@ import networkx as nx
 import structlog
 
 logger = structlog.get_logger()
+
+
+def _plain_float(value, default: float = 0.0) -> float:
+    """Return a checkpoint-safe Python float from numpy or numeric values."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _plain_int(value, default: int = 0) -> int:
+    """Return a checkpoint-safe Python int from numpy or numeric values."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 # =============================================================================
@@ -48,6 +64,12 @@ def build_hybrid_graph(
     Returns:
         NetworkX 图
     """
+    knn_edges = knn_edges or []
+    kg_relations = kg_relations or []
+    kg_entities = kg_entities or []
+    evidence_cards = evidence_cards or []
+    core_paper_ids = core_paper_ids or []
+
     if weights is None:
         weights = {
             "knn": 0.45,
@@ -79,7 +101,7 @@ def build_hybrid_graph(
     for relation in kg_relations:
         source_entity = relation.get("source_entity")
         target_entity = relation.get("target_entity")
-        paper_ids = relation.get("paper_ids", [])
+        paper_ids = relation.get("paper_ids") or []
 
         # 通过共享关系连接论文
         for i, paper_a in enumerate(paper_ids):
@@ -95,7 +117,7 @@ def build_hybrid_graph(
     entity_to_papers = defaultdict(list)
     for entity in kg_entities:
         entity_id = entity.get("id")
-        for paper_id in entity.get("paper_ids", []):
+        for paper_id in entity.get("paper_ids") or []:
             entity_to_papers[entity_id].append(paper_id)
 
     # 实体类型权重
@@ -112,7 +134,7 @@ def build_hybrid_graph(
     for entity in kg_entities:
         entity_type = entity.get("type", "Concept")
         type_weight = entity_type_weights.get(entity_type, 0.8)
-        paper_ids = entity.get("paper_ids", [])
+        paper_ids = entity.get("paper_ids") or []
 
         for i, paper_a in enumerate(paper_ids):
             for paper_b in paper_ids[i + 1:]:
@@ -162,90 +184,118 @@ def build_hybrid_graph(
 
 
 # =============================================================================
-# Leiden 社区检测
+# 社区检测（igraph 原生 API，支持 Leiden / Walktrap）
 # =============================================================================
 
-def leiden_clustering(
+def community_detection(
     graph: nx.Graph,
+    algorithm: str = "leiden",
     resolution: float = 1.0,
     seed: int = 42,
     max_iterations: int = 100,
 ) -> list[dict]:
     """
-    使用 Leiden 算法进行社区检测
+    社区检测入口，支持多种算法。
 
     Args:
         graph: NetworkX 图
-        resolution: 分辨率参数，越大社区越多
-        seed: 随机种子
-        max_iterations: 最大迭代次数
+        algorithm: "leiden" 或 "walktrap"
+        resolution: 分辨率参数（仅 leiden 有效），越大社区越多
+        seed: 随机种子（仅 leiden 有效）
+        max_iterations: 最大迭代次数（仅 leiden 有效）
 
     Returns:
         聚类列表 [{id, paper_ids, size}]
     """
-    try:
-        import leidenalg
-        import igraph as ig
+    if graph.number_of_nodes() == 0:
+        return []
 
-        # 转换为 igraph 格式
-        # 创建节点映射
-        nodes = list(graph.nodes())
-        node_to_idx = {node: i for i, node in enumerate(nodes)}
-
-        # 创建边列表和权重
-        edges = []
-        weights = []
-        for u, v, data in graph.edges(data=True):
-            edges.append((node_to_idx[u], node_to_idx[v]))
-            weights.append(data.get("weight", 1.0))
-
-        # 创建 igraph
-        ig_graph = ig.Graph(
-            n=len(nodes),
-            edges=edges,
-            directed=False,
-        )
-        ig_graph.es["weight"] = weights
-
-        # 运行 Leiden 算法
-        partition = leidenalg.find_partition(
-            ig_graph,
-            leidenalg.RBConfigurationVertexPartition,
-            resolution_parameter=resolution,
-            seed=seed,
-            n_iterations=max_iterations,
-        )
-
-        # 转换结果
-        clusters = []
-        for i, cluster_nodes in enumerate(partition):
-            paper_ids = [nodes[idx] for idx in cluster_nodes]
-            clusters.append({
-                "id": str(uuid.uuid4()),
-                "name": f"cluster_{i}",
-                "paper_ids": paper_ids,
-                "size": len(paper_ids),
-            })
-
-        logger.info(
-            "Leiden clustering completed",
-            clusters=len(clusters),
-            total_nodes=len(nodes),
-        )
-
-        return clusters
-
-    except ImportError:
-        logger.warning("leidenalg not installed, falling back to connected components")
+    if graph.number_of_edges() == 0:
         return _fallback_clustering(graph)
+
+    try:
+        import igraph as ig
+    except ModuleNotFoundError:
+        logger.warning("igraph unavailable, using NetworkX fallback clustering")
+        return _fallback_clustering(graph)
+
+    # 转换为 igraph 格式
+    nodes = list(graph.nodes())
+    node_to_idx = {node: i for i, node in enumerate(nodes)}
+
+    edges = []
+    weights = []
+    for u, v, data in graph.edges(data=True):
+        edges.append((node_to_idx[u], node_to_idx[v]))
+        weights.append(data.get("weight", 1.0))
+
+    ig_graph = ig.Graph(n=len(nodes), edges=edges, directed=False)
+    ig_graph.es["weight"] = weights
+
+    algo = algorithm.lower().strip()
+
+    if algo == "walktrap":
+        clusters = _run_walktrap(ig_graph, nodes)
+    else:
+        clusters = _run_leiden(ig_graph, nodes, resolution, seed, max_iterations)
+
+    logger.info(
+        "Community detection completed",
+        algorithm=algo,
+        clusters=len(clusters),
+        total_nodes=len(nodes),
+    )
+
+    return clusters
+
+
+def _run_leiden(
+    ig_graph,
+    nodes: list,
+    resolution: float,
+    seed: int,
+    max_iterations: int,
+) -> list[dict]:
+    """igraph 原生 Leiden 社区检测。"""
+    partition = ig_graph.community_leiden(
+        objective_function="modularity",
+        weights="weight",
+        resolution=resolution,
+        beta=0.01,
+        n_iterations=max_iterations,
+    )
+
+    clusters = []
+    for i, cluster_nodes in enumerate(partition):
+        paper_ids = [nodes[idx] for idx in cluster_nodes]
+        clusters.append({
+            "id": str(uuid.uuid4()),
+            "name": f"cluster_{i}",
+            "paper_ids": paper_ids,
+            "size": len(paper_ids),
+        })
+    return clusters
+
+
+def _run_walktrap(ig_graph, nodes: list) -> list[dict]:
+    """igraph 原生 Walktrap 社区检测。"""
+    dendrogram = ig_graph.community_walktrap(weights="weight")
+    partition = dendrogram.as_clustering()
+
+    clusters = []
+    for i, cluster_nodes in enumerate(partition):
+        paper_ids = [nodes[idx] for idx in cluster_nodes]
+        clusters.append({
+            "id": str(uuid.uuid4()),
+            "name": f"cluster_{i}",
+            "paper_ids": paper_ids,
+            "size": len(paper_ids),
+        })
+    return clusters
 
 
 def _fallback_clustering(graph: nx.Graph) -> list[dict]:
-    """
-    备用聚类方法：使用连通分量
-
-    当 leidenalg 不可用时使用
-    """
+    """备用聚类：连通分量（无边或 igraph 不可用时使用）。"""
     clusters = []
     for i, component in enumerate(nx.connected_components(graph)):
         clusters.append({
@@ -254,7 +304,6 @@ def _fallback_clustering(graph: nx.Graph) -> list[dict]:
             "paper_ids": list(component),
             "size": len(component),
         })
-
     return clusters
 
 
@@ -283,7 +332,7 @@ def generate_community_visualization(
     # 创建论文 ID 到聚类的映射
     paper_to_cluster = {}
     for cluster in clusters:
-        for paper_id in cluster.get("paper_ids", []):
+        for paper_id in cluster.get("paper_ids") or []:
             paper_to_cluster[paper_id] = cluster["id"]
 
     # 创建论文 ID 到论文的映射
@@ -315,13 +364,13 @@ def generate_community_visualization(
         nodes.append({
             "id": node_id,
             "label": paper.get("title", "")[:50],
-            "x": pos[node_id][0] if node_id in pos else 0,
-            "y": pos[node_id][1] if node_id in pos else 0,
+            "x": _plain_float(pos[node_id][0]) if node_id in pos else 0.0,
+            "y": _plain_float(pos[node_id][1]) if node_id in pos else 0.0,
             "cluster": cluster_id,
             "color": cluster_color_map.get(cluster_id, "#999999"),
-            "size": math.log(paper.get("citation_count", 0) + 1) * 3 + 5,
+            "size": _plain_float(math.log(paper.get("citation_count", 0) + 1) * 3 + 5),
             "title": paper.get("title", ""),
-            "citation_count": paper.get("citation_count", 0),
+            "citation_count": _plain_int(paper.get("citation_count", 0)),
         })
 
     # 生成边数据
@@ -332,8 +381,8 @@ def generate_community_visualization(
             edges.append({
                 "source": u,
                 "target": v,
-                "weight": weight,
-                "width": weight * 3,
+                "weight": _plain_float(weight),
+                "width": _plain_float(weight * 3),
             })
 
     # 生成聚类摘要
@@ -341,12 +390,12 @@ def generate_community_visualization(
     for cluster in clusters:
         cluster_papers = [
             paper_map.get(pid, {})
-            for pid in cluster.get("paper_ids", [])
+            for pid in cluster.get("paper_ids") or []
         ]
 
         cluster_summaries.append({
             "id": cluster["id"],
-            "size": cluster["size"],
+            "size": _plain_int(cluster["size"]),
             "color": cluster_color_map.get(cluster["id"], "#999999"),
             "papers": [
                 {

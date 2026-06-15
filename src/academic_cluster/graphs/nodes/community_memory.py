@@ -1,0 +1,443 @@
+"""Community memory synthesis node."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections import Counter
+from datetime import datetime
+from typing import Any
+
+import structlog
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from ...services.database import get_database
+from ...services.llm_client import ainvoke_with_callbacks, create_llm
+from ..state import PipelineState
+from .progress import send_progress
+
+logger = structlog.get_logger()
+
+
+def _as_list(value: Any) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _paper_year(paper: dict) -> int:
+    value = paper.get("year") or paper.get("publication_date")
+    if value:
+        try:
+            return int(str(value)[:4])
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _top_unique(values: list[Any], limit: int = 8) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = " ".join(str(value or "").split())
+        if text and text.lower() not in seen:
+            result.append(text)
+            seen.add(text.lower())
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _json_text(value: Any, max_chars: int = 800) -> str:
+    text = " ".join(str(value or "").split())
+    return text[:max_chars]
+
+
+def _parse_json_object(content: Any) -> dict:
+    if isinstance(content, list):
+        content = "".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in content
+        )
+    text = str(content or "").strip()
+    if not text:
+        raise ValueError("empty LLM response")
+    text = text.replace("```json", "").replace("```", "").strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        value = json.loads(text[start:end + 1])
+    if not isinstance(value, dict):
+        raise ValueError("LLM response is not a JSON object")
+    return value
+
+
+def _normalize_memory_enrichment(raw: dict, fallback: dict) -> dict:
+    """Normalize LLM community synthesis while preserving deterministic IDs."""
+    enriched = dict(fallback)
+    metadata = dict(enriched.get("metadata") or {})
+
+    summary = _json_text(raw.get("community_summary") or raw.get("summary"), 1200)
+    if summary:
+        enriched["summary"] = summary
+
+    for field, limit in (
+        ("method_families", 10),
+        ("limitations", 10),
+        ("future_directions", 8),
+    ):
+        values = raw.get(field)
+        if isinstance(values, list):
+            cleaned = _top_unique(values, limit)
+            if cleaned:
+                enriched[field] = cleaned
+
+    claims = raw.get("representative_claims") or raw.get("key_claims")
+    normalized_claims = []
+    if isinstance(claims, list):
+        for item in claims[:12]:
+            if isinstance(item, dict):
+                claim = _json_text(item.get("claim"), 600)
+                if not claim:
+                    continue
+                normalized_claims.append({
+                    "paper_id": str(item.get("paper_id") or ""),
+                    "claim": claim,
+                    "evidence_card_id": str(item.get("evidence_card_id") or ""),
+                    "support": _json_text(item.get("support") or item.get("evidence_span"), 500),
+                    "synthesis_role": _json_text(item.get("synthesis_role"), 200),
+                })
+            else:
+                text = _json_text(item, 600)
+                if text:
+                    normalized_claims.append({"paper_id": "", "claim": text})
+    if normalized_claims:
+        enriched["key_claims"] = normalized_claims
+
+    cohesion = raw.get("coherence_assessment") or raw.get("coherence")
+    if isinstance(cohesion, dict):
+        metadata["coherence_assessment"] = {
+            "score": cohesion.get("score"),
+            "rationale": _json_text(cohesion.get("rationale"), 500),
+            "outlier_paper_ids": [
+                str(pid) for pid in cohesion.get("outlier_paper_ids", [])[:12]
+            ] if isinstance(cohesion.get("outlier_paper_ids"), list) else [],
+        }
+
+    topic_relevance = raw.get("topic_relevance")
+    if isinstance(topic_relevance, dict):
+        metadata["topic_relevance"] = {
+            "score": topic_relevance.get("score"),
+            "rationale": _json_text(topic_relevance.get("rationale"), 500),
+        }
+
+    evidence_gaps = raw.get("evidence_gaps")
+    if isinstance(evidence_gaps, list):
+        metadata["evidence_gaps"] = _top_unique(evidence_gaps, 8)
+
+    metadata["synthesis_mode"] = "llm_enriched"
+    enriched["metadata"] = metadata
+    return enriched
+
+
+def synthesize_community_memory(
+    *,
+    project_id: str,
+    cluster: dict,
+    papers: list[dict],
+    evidence_cards: list[dict],
+    kg_entities: list[dict],
+    kg_relations: list[dict],
+) -> dict:
+    """Build deterministic structured memory for one community."""
+    cluster_id = str(cluster.get("id"))
+    paper_by_id = {str(p.get("id")): p for p in papers if p.get("id")}
+    cluster_paper_ids = [str(pid) for pid in cluster.get("paper_ids") or []]
+    cluster_papers = [paper_by_id[pid] for pid in cluster_paper_ids if pid in paper_by_id]
+
+    cards = [c for c in evidence_cards if str(c.get("paper_id")) in set(cluster_paper_ids)]
+    entities = [
+        e for e in kg_entities
+        if set(str(pid) for pid in _as_list(e.get("paper_ids"))) & set(cluster_paper_ids)
+    ]
+    relations = [
+        r for r in kg_relations
+        if set(str(pid) for pid in _as_list(r.get("paper_ids"))) & set(cluster_paper_ids)
+    ]
+
+    method_values = [c.get("method") for c in cards]
+    method_values.extend(
+        e.get("name") for e in entities
+        if str(e.get("entity_type", "")).lower() in {"method", "model", "framework", "algorithm", "technique", "approach"}
+    )
+    method_families = _top_unique(method_values, 10)
+
+    key_claims = [
+        {
+            "paper_id": str(c.get("paper_id")),
+            "claim": c.get("claim"),
+            "evidence_card_id": str(c.get("id")),
+        }
+        for c in cards
+        if c.get("claim")
+    ][:12]
+    limitations = _top_unique([c.get("limitation") for c in cards], 10)
+    if not limitations:
+        limitations = _top_unique(
+            e.get("name") for e in entities
+            if str(e.get("entity_type", "")).lower() in {"limitation", "open_problem", "open problem"}
+        )
+
+    future_directions = [
+        f"Address limitation: {item}" for item in limitations[:5]
+    ] or ["Clarify open problems through stronger comparative evidence."]
+
+    sorted_papers = sorted(
+        cluster_papers,
+        key=lambda p: (int(p.get("citation_count") or 0), _paper_year(p)),
+        reverse=True,
+    )
+    current_year = datetime.now().year
+    foundation = [
+        str(p.get("id")) for p in sorted_papers
+        if _paper_year(p) and _paper_year(p) <= current_year - 8
+    ][:8]
+    frontier = [
+        str(p.get("id")) for p in sorted_papers
+        if _paper_year(p) and _paper_year(p) >= current_year - 3
+    ][:8]
+    development = [
+        str(p.get("id")) for p in sorted_papers
+        if str(p.get("id")) not in set(foundation + frontier)
+    ][:8]
+    representative = [str(p.get("id")) for p in sorted_papers[:12]]
+
+    proof_ids = []
+    for card in cards:
+        if card.get("id"):
+            proof_ids.append({"type": "evidence_card", "id": str(card["id"]), "paper_id": str(card.get("paper_id"))})
+    for pid in representative:
+        proof_ids.append({"type": "paper", "id": pid})
+
+    relation_counts = Counter(str(r.get("relation_type")) for r in relations if r.get("relation_type"))
+    entity_counts = Counter(str(e.get("entity_type")) for e in entities if e.get("entity_type"))
+    top_titles = _top_unique([p.get("title") for p in sorted_papers], 3)
+    summary = (
+        f"Community {cluster.get('name') or cluster_id} contains {len(cluster_paper_ids)} papers. "
+        f"Representative work centers on {', '.join(method_families[:4]) or 'related methods'}"
+        f" with claims from {len(cards)} evidence cards."
+    )
+    if top_titles:
+        summary += " Representative papers include " + "; ".join(top_titles) + "."
+
+    return {
+        "project_id": project_id,
+        "cluster_id": cluster_id,
+        "summary": summary,
+        "method_families": method_families,
+        "key_claims": key_claims,
+        "limitations": limitations,
+        "future_directions": future_directions,
+        "foundation_papers": foundation,
+        "development_papers": development,
+        "frontier_papers": frontier,
+        "representative_papers": representative,
+        "cross_community_links": [],
+        "proof_ids": proof_ids,
+        "metadata": {
+            "paper_count": len(cluster_paper_ids),
+            "evidence_card_count": len(cards),
+            "kg_entity_count": len(entities),
+            "kg_relation_count": len(relations),
+            "entity_type_counts": dict(entity_counts),
+            "relation_type_counts": dict(relation_counts),
+        },
+    }
+
+
+async def enrich_community_memory_with_llm(
+    *,
+    topic: str,
+    fallback_memory: dict,
+    cluster: dict,
+    papers: list[dict],
+    evidence_cards: list[dict],
+    kg_entities: list[dict],
+    kg_relations: list[dict],
+) -> dict:
+    """Produce SurveyG-style community synthesis from KG and evidence cards."""
+    cluster_paper_ids = {str(pid) for pid in cluster.get("paper_ids") or []}
+    cluster_papers = [p for p in papers if str(p.get("id")) in cluster_paper_ids][:24]
+    cards = [c for c in evidence_cards if str(c.get("paper_id")) in cluster_paper_ids][:24]
+    entities = [
+        e for e in kg_entities
+        if set(str(pid) for pid in _as_list(e.get("paper_ids"))) & cluster_paper_ids
+    ][:40]
+    relations = [
+        r for r in kg_relations
+        if set(str(pid) for pid in _as_list(r.get("paper_ids"))) & cluster_paper_ids
+    ][:30]
+
+    paper_lines = []
+    for p in cluster_papers:
+        paper_lines.append({
+            "paper_id": str(p.get("id")),
+            "title": _json_text(p.get("title"), 180),
+            "year": _paper_year(p) or None,
+            "abstract": _json_text(p.get("abstract"), 450),
+            "citation_count": p.get("citation_count"),
+        })
+    card_lines = []
+    for c in cards:
+        card_lines.append({
+            "evidence_card_id": str(c.get("id") or ""),
+            "paper_id": str(c.get("paper_id") or ""),
+            "claim": _json_text(c.get("claim"), 450),
+            "evidence_span": _json_text(c.get("evidence_span"), 450),
+            "method": _json_text(c.get("method"), 220),
+            "metric": _json_text(c.get("metric"), 220),
+            "limitation": _json_text(c.get("limitation"), 220),
+            "confidence": c.get("confidence"),
+        })
+    entity_lines = [
+        {
+            "name": _json_text(e.get("name"), 120),
+            "type": _json_text(e.get("entity_type"), 80),
+            "paper_ids": [str(pid) for pid in _as_list(e.get("paper_ids"))[:8]],
+        }
+        for e in entities
+    ]
+    relation_lines = [
+        {
+            "type": _json_text(r.get("relation_type"), 80),
+            "paper_ids": [str(pid) for pid in _as_list(r.get("paper_ids"))[:8]],
+        }
+        for r in relations
+    ]
+
+    prompt = f"""Research topic:
+{topic}
+
+Cluster id: {cluster.get("id")}
+Cluster name: {cluster.get("name", "")}
+
+Papers:
+{json.dumps(paper_lines, ensure_ascii=False)}
+
+Evidence cards:
+{json.dumps(card_lines, ensure_ascii=False)}
+
+KG entities:
+{json.dumps(entity_lines, ensure_ascii=False)}
+
+KG relations:
+{json.dumps(relation_lines, ensure_ascii=False)}
+
+Task:
+Synthesize this research community for an academic survey. Follow SurveyG/AutoSurvey principles:
+1. summarize the community as a coherent research direction, not a paper list;
+2. identify method families, limitations, and future directions from the evidence;
+3. flag weak coherence, outlier papers, and topic drift instead of forcing unrelated papers together;
+4. do not invent paper_ids, evidence_card_ids, metrics, or claims.
+
+Return strict JSON:
+{{
+  "community_summary": "Chinese synthesis, 3-5 sentences",
+  "method_families": ["..."],
+  "representative_claims": [
+    {{"paper_id": "...", "evidence_card_id": "...", "claim": "...", "support": "...", "synthesis_role": "foundation|development|frontier|contrast|limitation"}}
+  ],
+  "limitations": ["..."],
+  "future_directions": ["..."],
+  "evidence_gaps": ["..."],
+  "coherence_assessment": {{"score": 0.0, "rationale": "...", "outlier_paper_ids": ["..."]}},
+  "topic_relevance": {{"score": 0.0, "rationale": "..."}}
+}}"""
+
+    llm = create_llm(temperature=0.2, max_tokens=2200)
+    response = await ainvoke_with_callbacks(
+        llm,
+        [
+            SystemMessage(content="You synthesize academic literature communities. Return only strict JSON."),
+            HumanMessage(content=prompt),
+        ],
+        timeout=240,
+    )
+    raw = _parse_json_object(response.content)
+    return _normalize_memory_enrichment(raw, fallback_memory)
+
+
+async def community_memory_node(state: PipelineState) -> dict:
+    """Persist one structured memory per cluster."""
+    db = get_database()
+    logger.info("Starting community memory synthesis", clusters=len(state.cluster_ids))
+
+    clusters = await db.get_clusters_by_ids(state.cluster_ids)
+    all_paper_ids = list(dict.fromkeys((state.core_paper_ids or []) + (state.auxiliary_paper_ids or [])))
+    papers = await db.get_papers_by_ids(all_paper_ids)
+    evidence_cards = await db.get_evidence_cards_by_ids(state.evidence_card_ids)
+    kg_entities = await db.get_kg_entities_by_ids(state.kg_entity_ids)
+    kg_relations = await db.get_kg_relations_by_ids(state.kg_relation_ids)
+
+    async def _build_memory(cluster: dict) -> dict:
+        fallback = synthesize_community_memory(
+            project_id=state.project_id,
+            cluster=cluster,
+            papers=papers,
+            evidence_cards=evidence_cards,
+            kg_entities=kg_entities,
+            kg_relations=kg_relations,
+        )
+        try:
+            return await enrich_community_memory_with_llm(
+                topic=state.query,
+                fallback_memory=fallback,
+                cluster=cluster,
+                papers=papers,
+                evidence_cards=evidence_cards,
+                kg_entities=kg_entities,
+                kg_relations=kg_relations,
+            )
+        except Exception as e:
+            metadata = dict(fallback.get("metadata") or {})
+            metadata["synthesis_mode"] = "deterministic_fallback"
+            metadata["llm_error"] = str(e)[:300]
+            fallback["metadata"] = metadata
+            logger.warning(
+                "Community LLM synthesis failed, using deterministic fallback",
+                cluster_id=cluster.get("id"),
+                error=str(e),
+            )
+            return fallback
+
+    from ...services.provider_pool import get_llm_available_slots
+
+    requested_concurrency = int((state.config or {}).get("community_memory_concurrency", -1))
+    provider_slots = get_llm_available_slots(default=10)
+    concurrency = provider_slots if requested_concurrency <= 0 else min(requested_concurrency, provider_slots)
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def _bounded(cluster: dict) -> dict:
+        async with semaphore:
+            return await _build_memory(cluster)
+
+    memories = await asyncio.gather(*[_bounded(cluster) for cluster in clusters])
+
+    memory_ids: list[str] = []
+    for memory in memories:
+        memory_ids.append(await db.save_community_memory(memory))
+
+    await send_progress(
+        state.project_id,
+        "community_memory",
+        f"社区记忆生成完成，共 {len(memory_ids)} 个",
+        detail={"community_memory_count": len(memory_ids)},
+    )
+
+    logger.info("Community memory synthesis completed", memories=len(memory_ids))
+    return {
+        "community_memory_ids": memory_ids,
+        "status": "community_memory_synthesized",
+    }

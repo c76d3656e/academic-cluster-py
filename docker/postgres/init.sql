@@ -147,6 +147,7 @@ CREATE TABLE IF NOT EXISTS written_content (
 -- Evidence cards table
 CREATE TABLE IF NOT EXISTS evidence_cards (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     paper_id UUID REFERENCES papers(id) ON DELETE CASCADE,
     claim TEXT,
     evidence_span TEXT,
@@ -156,6 +157,28 @@ CREATE TABLE IF NOT EXISTS evidence_cards (
     confidence FLOAT,
     cluster_id UUID REFERENCES clusters(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Community memories synthesized from clusters, evidence cards, KG, and paper metadata
+CREATE TABLE IF NOT EXISTS community_memories (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    cluster_id UUID REFERENCES clusters(id) ON DELETE CASCADE,
+    summary TEXT,
+    method_families JSONB NOT NULL DEFAULT '[]'::jsonb,
+    key_claims JSONB NOT NULL DEFAULT '[]'::jsonb,
+    limitations JSONB NOT NULL DEFAULT '[]'::jsonb,
+    future_directions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    foundation_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    development_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    frontier_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    representative_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    cross_community_links JSONB NOT NULL DEFAULT '[]'::jsonb,
+    proof_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(project_id, cluster_id)
 );
 
 -- Knowledge graph entities
@@ -214,7 +237,12 @@ CREATE INDEX idx_cluster_assignments_paper_id ON cluster_assignments(paper_id);
 CREATE INDEX idx_outlines_project_id ON outlines(project_id);
 CREATE INDEX idx_written_content_outline_id ON written_content(outline_id);
 CREATE INDEX idx_evidence_cards_paper_id ON evidence_cards(paper_id);
-CREATE INDEX idx_kg_entities_normalized_name ON kg_entities(normalized_name);
+CREATE INDEX idx_evidence_cards_project_id ON evidence_cards(project_id);
+CREATE UNIQUE INDEX idx_evidence_cards_project_paper ON evidence_cards(project_id, paper_id)
+    WHERE project_id IS NOT NULL;
+CREATE INDEX idx_community_memories_project_id ON community_memories(project_id);
+CREATE INDEX idx_community_memories_cluster_id ON community_memories(cluster_id);
+CREATE UNIQUE INDEX idx_kg_entities_normalized_name ON kg_entities(normalized_name);
 CREATE INDEX idx_kg_relations_source ON kg_relations(source_entity_id);
 CREATE INDEX idx_kg_relations_target ON kg_relations(target_entity_id);
 CREATE INDEX idx_pipeline_checkpoints_project ON pipeline_checkpoints(project_id);
@@ -334,6 +362,45 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_node ON llm_calls(node_execution_id);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_provider ON llm_calls(provider_name, model_name);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status);
+
+-- ============================================================================
+-- Provider Registry: 管理 LLM/Embedding/Rerank Provider 配置
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS provider_registry (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    kind            VARCHAR(20) NOT NULL,           -- llm / embedding / rerank
+    display_name    VARCHAR(100) NOT NULL,
+    base_url        TEXT NOT NULL,
+    model           VARCHAR(200),
+    api_key_enc     TEXT,                            -- Fernet 加密
+    is_enabled      BOOLEAN DEFAULT true,
+    priority        INTEGER DEFAULT 100,
+    rpm_limit       INTEGER DEFAULT 10,
+    weight          INTEGER DEFAULT 1,
+    extra_keys      JSONB DEFAULT '[]',              -- 多 Key（Fernet 加密数组）
+    key_strategy    VARCHAR(20) DEFAULT 'round_robin',
+    health_status   VARCHAR(20) DEFAULT 'unknown',
+    last_health_check TIMESTAMPTZ,
+    last_error      TEXT,
+    failure_count   INTEGER DEFAULT 0,
+    auto_ban        BOOLEAN DEFAULT true,
+    cooldown_until  TIMESTAMPTZ,
+    test_model      VARCHAR(200),
+    input_price_per_m  DOUBLE PRECISION DEFAULT 0,
+    output_price_per_m DOUBLE PRECISION DEFAULT 0,
+    metadata        JSONB DEFAULT '{}',
+    created_by      UUID REFERENCES users(id),
+    created_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_provider_registry_kind ON provider_registry(kind);
+CREATE INDEX IF NOT EXISTS idx_provider_registry_enabled ON provider_registry(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_provider_registry_health ON provider_registry(health_status);
+
+CREATE TRIGGER update_provider_registry_updated_at
+    BEFORE UPDATE ON provider_registry
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Function for KNN vector search
 CREATE OR REPLACE FUNCTION search_similar_papers(

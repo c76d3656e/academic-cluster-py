@@ -2,6 +2,7 @@
 重排序节点 - 使用 Rerank 模型对论文进行重排序
 
 使用 Provider Pool 自动负载均衡多个 Rerank 端点。
+对齐 Rust 版 quality scoring: 0.40*relevance + 0.20*venue + 0.15*recency + 0.15*meta + 0.10*rel2
 """
 
 import asyncio
@@ -16,6 +17,87 @@ from ..state import PipelineState
 from .progress import send_progress
 
 logger = structlog.get_logger()
+
+# 质量评分公式权重（对齐 Rust 版 score_and_tier_papers）
+_QUALITY_WEIGHT_RELEVANCE = 0.40
+_QUALITY_WEIGHT_VENUE = 0.20
+_QUALITY_WEIGHT_RECENCY = 0.15
+_QUALITY_WEIGHT_META = 0.15
+_QUALITY_WEIGHT_REL2 = 0.10
+_CURRENT_YEAR = 2026  # 用于 recency 计算
+
+
+def _metadata_completeness(paper: dict) -> int:
+    """
+    计算论文元数据完整度（对齐 Rust 版 metadata_completeness）。
+
+    满分 4 分：
+    - has_title: 1
+    - has_useful_abstract: 1 (>120 chars)
+    - has_publication_name: 1
+    - has_doi: 1
+    """
+    score = 0
+    if paper.get("title"):
+        score += 1
+    abstract = paper.get("abstract", "")
+    if abstract and len(abstract) > 120:
+        score += 1
+    if paper.get("journal") or paper.get("venue"):
+        score += 1
+    if paper.get("doi"):
+        score += 1
+    return score
+
+
+def _compute_quality_score(paper: dict) -> float:
+    """
+    计算论文质量分数（对齐 Rust 版 score_and_tier_papers）。
+
+    公式: 0.40*relevance + 0.20*venue + 0.15*recency + 0.15*meta + 0.10*rel2
+    """
+    relevance = max(0.0, min(1.0, paper.get("rerank_score", 0.0)))
+
+    # venue_score: 目前未实现 JCR 数据，hardcode 0.0（与 Rust 版一致）
+    venue_score = 0.0
+
+    # recency: (year - 2015) / (2026 - 2015), clamped [0, 1]
+    year = paper.get("year")
+    if year:
+        try:
+            year = int(year)
+            recency = max(0.0, min(1.0, (year - 2015) / (_CURRENT_YEAR - 2015)))
+        except (ValueError, TypeError):
+            recency = 0.0
+    else:
+        recency = 0.0
+
+    # meta_score: metadata_completeness / 4.0
+    meta_score = _metadata_completeness(paper) / 4.0
+
+    # rel2: boosted relevance, capped at 1.0
+    rel2 = min(1.0, relevance * 2.0)
+
+    quality = (
+        _QUALITY_WEIGHT_RELEVANCE * relevance
+        + _QUALITY_WEIGHT_VENUE * venue_score
+        + _QUALITY_WEIGHT_RECENCY * recency
+        + _QUALITY_WEIGHT_META * meta_score
+        + _QUALITY_WEIGHT_REL2 * rel2
+    )
+
+    return round(quality, 4)
+
+
+def _quality_tier(score: float) -> str:
+    """质量等级（对齐 Rust 版 tier 划分）"""
+    if score >= 0.40:
+        return "A"
+    elif score >= 0.16:
+        return "B"
+    elif score >= 0.06:
+        return "C"
+    return "noise"
 
 
 async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) -> list[dict]:
@@ -69,7 +151,13 @@ async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) 
                 paper["rerank_score"] = score
                 reranked.append(paper)
 
-        reranked.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
+        # 应用质量评分（对齐 Rust 版 score_and_tier_papers）
+        for paper in reranked:
+            paper["quality_score"] = _compute_quality_score(paper)
+            paper["quality_tier"] = _quality_tier(paper["quality_score"])
+
+        # 按质量分数排序
+        reranked.sort(key=lambda x: x.get("quality_score", 0), reverse=True)
         return reranked
 
     return await asyncio.wait_for(
@@ -99,50 +187,101 @@ async def rerank_node(state: PipelineState) -> dict:
     )
 
     config = state.config or {}
-    core_count = config.get("core_reference_count", 80)
-    auxiliary_count = config.get("auxiliary_reference_count", 160)
-
+    max_papers = config.get("rerank.max_papers", 500)
     db = get_database()
     papers = await db.get_papers_by_ids(state.paper_ids)
 
     if not papers:
         logger.warning("No papers to rerank")
         return {
-            "core_paper_ids": [],
-            "auxiliary_paper_ids": [],
+            "reranked_paper_ids": [],
             "status": "reranked",
         }
 
     try:
         # 重排序（通过 Provider Pool 自动负载均衡）
+        import time as _time
+        _rerank_start = _time.monotonic()
         reranked_papers = await rerank_papers(state.query, papers)
+        _rerank_elapsed = int((_time.monotonic() - _rerank_start) * 1000)
 
-        # 分为核心和辅助参考
-        core_paper_ids = [p.get("id") for p in reranked_papers[:core_count]]
-        auxiliary_paper_ids = [p.get("id") for p in reranked_papers[core_count:core_count + auxiliary_count]]
+        # 记录 rerank 调用到 tracker 和 DB
+        if tracker and tracker.run_id:
+            try:
+                from ...api.admin.providers import get_provider_pricing
+                from ...services.provider_pool import get_rerank_pool
+
+                db = get_database()
+                rerank_pool = get_rerank_pool()
+                # 获取当前使用的 provider 名称
+                provider_name = rerank_pool._providers[0].name if rerank_pool._providers else "unknown"
+                rerank_model = rerank_pool._providers[0].model if rerank_pool._providers else "unknown"
+
+                # rerank 通常按文档数计费，这里用调用次数近似
+                prompt_tokens = len(papers)  # 每篇论文算 1 token
+                completion_tokens = 0
+
+                # 计算 cost（rerank 通常按调用次数计费，这里按 token 近似）
+                input_price, output_price = await get_provider_pricing(db, provider_name, rerank_model)
+                cost = 0.0
+                if input_price:
+                    cost = (prompt_tokens * input_price) / 1_000_000
+
+                await tracker.token_tracker.record(
+                    node_name="rerank",
+                    provider_name=provider_name,
+                    model_name=rerank_model,
+                    call_type="rerank",
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=0,
+                    cost=cost,
+                    latency_ms=_rerank_elapsed,
+                )
+
+                exec_id = tracker._node_ids.get("rerank")
+                if exec_id:
+                    call_id = await db.create_llm_call(
+                        pipeline_run_id=tracker.run_id,
+                        node_execution_id=exec_id,
+                        call_type="rerank",
+                        provider_name=provider_name,
+                        model_name=rerank_model,
+                        latency_ms=_rerank_elapsed,
+                    )
+                    await db.finish_llm_call(
+                        call_id=call_id,
+                        status="success",
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=0,
+                        cost=cost,
+                        latency_ms=_rerank_elapsed,
+                    )
+            except Exception:
+                pass  # 追踪失败不影响主流程
+
+        # 取 top max_papers（默认 500）作为最终 reranked 结果
+        reranked_papers = reranked_papers[:max_papers]
+        reranked_paper_ids = [p.get("id") for p in reranked_papers]
 
         logger.info(
             "Reranking completed",
-            total_papers=len(reranked_papers),
-            core_count=len(core_paper_ids),
-            auxiliary_count=len(auxiliary_paper_ids),
+            total_input=len(papers),
+            reranked_count=len(reranked_paper_ids),
         )
 
         await send_progress(
             state.project_id, "rerank",
-            f"重排序完成，核心 {len(core_paper_ids)} 篇，辅助 {len(auxiliary_paper_ids)} 篇",
+            f"重排序完成，筛选出 {len(reranked_paper_ids)} 篇高质量论文",
         )
 
         result = {
-            "core_paper_ids": core_paper_ids,
-            "auxiliary_paper_ids": auxiliary_paper_ids,
+            "reranked_paper_ids": reranked_paper_ids,
             "status": "reranked",
         }
 
         if tracker:
             await tracker.end_node("rerank", "succeeded", output_summary={
-                "core_count": len(core_paper_ids),
-                "auxiliary_count": len(auxiliary_paper_ids),
+                "reranked_count": len(reranked_paper_ids),
             })
         return result
 

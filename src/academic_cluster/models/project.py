@@ -51,7 +51,7 @@ class ProjectConfig(BaseModel):
     citation_style: str = "apa"
 
     # 参考论文数量
-    core_reference_count: int = 80
+    core_reference_count: int = 160
     auxiliary_reference_count: int = 160
 
 
