@@ -80,6 +80,17 @@ export interface ReviewResponse {
   outline: Outline | null
   sections: WrittenSection[]
   evidence_cards: EvidenceCard[]
+  references?: Array<{
+    new_number: number
+    original_number: number
+    paper_id: string
+    title?: string
+    authors?: string
+    venue?: string
+    year?: string
+    doi?: string
+  }>
+  final_review?: string
   status: string
 }
 

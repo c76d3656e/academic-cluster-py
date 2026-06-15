@@ -170,6 +170,9 @@ _YEAR_BRACKET_RE = re.compile(r"\[(\d{4})(?:\s*[-–—]\s*(\d{4}))?\]")
 
 # Matches UUID-style paper_id in brackets, e.g. [433802d1-ebf8-49f7-8efc-0183ef0170b8]
 _UUID_CITATION_RE = re.compile(r"\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]")
+_PAREN_NUMERIC_CITATION_RE = re.compile(r"[（(]\s*(\[[0-9,\s;–—、，·\-]+\])\s*[）)]")
+_PAREN_PLACEHOLDER_CITATION_RE = re.compile(r"[（(]\s*\[[A-Za-z]+\]\s*[）)]")
+_PLACEHOLDER_CITATION_RE = re.compile(r"\[[A-Za-z]\]")
 
 # Pattern for the References heading (## or #) and everything after it.
 _REF_HEADING_RE = re.compile(
@@ -440,6 +443,24 @@ def replace_uuid_citations(
         return ""
 
     return _UUID_CITATION_RE.sub(_replace_uuid, markdown)
+
+
+def normalize_citation_surface(content: str) -> str:
+    """Normalize visible citation shapes to plain numeric [N] tokens.
+
+    LLMs sometimes emit parenthesized citations like ``([11])`` or placeholder
+    markers such as ``([x])``. The review renderer and finalizer only accept
+    numeric bracket citations, so this function removes the wrapper around real
+    citations and deletes non-numeric placeholders.
+    """
+    if not content:
+        return ""
+    content = _PAREN_NUMERIC_CITATION_RE.sub(r"\1", content)
+    content = _PAREN_PLACEHOLDER_CITATION_RE.sub("", content)
+    content = _PLACEHOLDER_CITATION_RE.sub("", content)
+    content = re.sub(r"[ \t]{2,}", " ", content)
+    content = re.sub(r"\s+([，,。；;：:])", r"\1", content)
+    return content.strip()
 
 
 # ---------------------------------------------------------------------------

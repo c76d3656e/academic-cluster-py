@@ -62,3 +62,24 @@ def test_finalize_review_markdown_uses_first_appearance_reference_mapping():
     assert "[2] Alice," in finalized.markdown
     assert finalized.reference_mappings[0]["paper_id"] == "paper-b"
     assert finalized.reference_mappings[1]["paper_id"] == "paper-a"
+
+
+def test_finalize_review_markdown_references_only_cited_papers():
+    paper_metadata = {
+        1: {"paper_id": "paper-a", "title": "Cited Paper", "authors": "Alice"},
+        2: {"paper_id": "paper-b", "title": "Uncited Paper", "authors": "Bob"},
+    }
+
+    finalized = finalize_review_markdown(
+        review_title="Review",
+        sections=[{"title": "Only cited references"}],
+        section_bodies=["Only one paper is cited ([1]); placeholder ([x]) is invalid."],
+        paper_metadata_map=paper_metadata,
+    )
+
+    assert "([1])" not in finalized.markdown
+    assert "([x])" not in finalized.markdown
+    assert "[1] Alice," in finalized.markdown
+    assert "Cited Paper" in finalized.markdown
+    assert "Uncited Paper" not in finalized.markdown
+    assert len(finalized.reference_mappings) == 1

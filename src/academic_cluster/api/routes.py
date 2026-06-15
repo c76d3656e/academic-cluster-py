@@ -375,11 +375,28 @@ async def get_review(
             rows = result.fetchall()
             evidence_cards = [dict(row._mapping) for row in rows]
 
+    final_artifact = await db.get_pipeline_checkpoint(project_id, "final_review_artifact")
+    final_review = None
+    references = []
+    if final_artifact:
+        snapshot = final_artifact.get("state_snapshot") or {}
+        if isinstance(snapshot, str):
+            import json as _json
+            try:
+                snapshot = _json.loads(snapshot)
+            except (_json.JSONDecodeError, TypeError):
+                snapshot = {}
+        if isinstance(snapshot, dict):
+            final_review = snapshot.get("final_review")
+            references = snapshot.get("references") or []
+
     return {
         "project_id": project_id,
         "outline": outline,
         "sections": sections,
         "evidence_cards": evidence_cards,
+        "references": references,
+        "final_review": final_review,
         "status": project.get("status", "pending"),
     }
 

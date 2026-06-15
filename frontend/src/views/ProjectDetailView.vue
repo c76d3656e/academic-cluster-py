@@ -66,6 +66,7 @@ const hasReview = computed(() => {
 const outline = computed<Outline | null>(() => reviewData.value?.outline ?? null)
 const sections = computed<WrittenSection[]>(() => reviewData.value?.sections ?? [])
 const evidenceCards = computed<EvidenceCard[]>(() => reviewData.value?.evidence_cards ?? [])
+const references = computed(() => reviewData.value?.references ?? [])
 
 /** Ordered outline section titles (indexed by position) */
 const outlineTitles = computed<string[]>(() => {
@@ -76,7 +77,12 @@ const outlineTitles = computed<string[]>(() => {
 /** Render a single section content as sanitized HTML with citation links */
 function renderSection(content: string): string {
   if (!content) return ''
-  let html = marked.parse(content) as string
+  let cleaned = content
+    .replace(/\(\s*\[(\d+)\]\s*\)/g, '[$1]')
+    .replace(/\(\s*\[x\]\s*\)/gi, '')
+    .replace(/（\s*\[(\d+)\]\s*）/g, '[$1]')
+    .replace(/（\s*\[x\]\s*）/gi, '')
+  let html = marked.parse(cleaned) as string
   // Convert [N] citation patterns to superscript links
   html = html.replace(/\[(\d+(?:[,、]\s*\d+)*)\]/g, (_, nums: string) => {
     return nums
@@ -375,14 +381,15 @@ function downloadTopicMd() {
 function downloadReferenceBib() {
   showDownloadMenu.value = false
   let bib = ''
-  for (let i = 0; i < evidenceCards.value.length; i++) {
-    const card = evidenceCards.value[i]
-    const key = `ref${i + 1}`
+  for (let i = 0; i < references.value.length; i++) {
+    const ref = references.value[i]
+    const key = `ref${ref.new_number || i + 1}`
     bib += `@article{${key},\n`
-    if (card.claim) bib += `  title = {${card.claim}},\n`
-    if (card.method) bib += `  note = {Method: ${card.method}},\n`
-    if (card.metric) bib += `  annote = {Metric: ${card.metric}},\n`
-    if (card.evidence_span) bib += `  abstract = {${card.evidence_span}},\n`
+    if (ref.title) bib += `  title = {${ref.title}},\n`
+    if (ref.authors) bib += `  author = {${ref.authors}},\n`
+    if (ref.year) bib += `  year = {${ref.year}},\n`
+    if (ref.venue) bib += `  journal = {${ref.venue}},\n`
+    if (ref.doi) bib += `  doi = {${ref.doi}},\n`
     bib += `}\n\n`
   }
   const safeTitle = (outline.value?.title || project.value?.query || 'reference').replace(/[<>:"/\\|?*]/g, '_').substring(0, 100)
@@ -589,25 +596,22 @@ function scrollToReferences() {
               <h2 class="text-lg font-semibold text-foreground tracking-tight mb-6">References</h2>
               <ol class="space-y-4">
                 <li
-                  v-for="(card, idx) in evidenceCards"
-                  :key="card.id"
+                  v-for="(ref, idx) in references"
+                  :key="`${ref.paper_id || idx}-${ref.new_number || idx}`"
                   :id="`ref-${idx + 1}`"
                   class="ref-card scroll-mt-20"
                 >
                   <div class="flex gap-3">
                     <span class="ref-num">{{ idx + 1 }}</span>
                     <div class="flex-1 min-w-0 space-y-1.5">
-                      <p v-if="card.claim" class="text-[0.8125rem] font-medium text-foreground leading-relaxed">
-                        {{ card.claim }}
-                      </p>
-                      <p v-if="card.evidence_span" class="text-[0.8125rem] text-foreground/65 leading-relaxed ref-quote">
-                        "{{ card.evidence_span }}"
+                      <p v-if="ref.title" class="text-[0.8125rem] font-medium text-foreground leading-relaxed">
+                        {{ ref.title }}
                       </p>
                       <div class="flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground">
-                        <span v-if="card.method"><b class="text-foreground/40">Method:</b> {{ card.method }}</span>
-                        <span v-if="card.metric"><b class="text-foreground/40">Metric:</b> {{ card.metric }}</span>
-                        <span v-if="card.limitation"><b class="text-foreground/40">Limitation:</b> {{ card.limitation }}</span>
-                        <span v-if="card.confidence != null"><b class="text-foreground/40">Confidence:</b> {{ (card.confidence * 100).toFixed(0) }}%</span>
+                        <span v-if="ref.authors"><b class="text-foreground/40">Authors:</b> {{ ref.authors }}</span>
+                        <span v-if="ref.venue"><b class="text-foreground/40">Venue:</b> {{ ref.venue }}</span>
+                        <span v-if="ref.year"><b class="text-foreground/40">Year:</b> {{ ref.year }}</span>
+                        <span v-if="ref.doi"><b class="text-foreground/40">DOI:</b> {{ ref.doi }}</span>
                       </div>
                     </div>
                   </div>

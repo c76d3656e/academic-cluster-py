@@ -25,6 +25,7 @@ from ...services.citation_utils import (
     clean_filler_phrases,
     is_primarily_chinese,
     replace_uuid_citations,
+    normalize_citation_surface,
     strip_author_year_citations,
     strip_body_structure_leakage,
     strip_meta_commentary,
@@ -47,6 +48,40 @@ from ..state import PipelineState
 from .progress import send_progress
 
 logger = structlog.get_logger()
+
+
+def _split_finalized_body_by_section(body_markdown: str, sections: list[dict]) -> list[str]:
+    """Split finalized review body back into section bodies for UI storage."""
+    if not body_markdown or not sections:
+        return []
+
+    lines = body_markdown.splitlines()
+    chunks: list[list[str]] = []
+    current: list[str] | None = None
+    expected_titles = {
+        str(section.get("title") or "").strip()
+        for section in sections
+        if section.get("title")
+    }
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("# "):
+            continue
+        if stripped.startswith("## "):
+            title = stripped[3:].strip()
+            if title in expected_titles:
+                if current is not None:
+                    chunks.append(current)
+                current = []
+                continue
+        if current is not None:
+            current.append(line)
+
+    if current is not None:
+        chunks.append(current)
+
+    return ["\n".join(chunk).strip() for chunk in chunks]
 
 
 def _paper_id_to_global_number(papers: list[dict]) -> dict[str, int]:
@@ -483,6 +518,7 @@ async def write_review_node(state: PipelineState) -> dict:
             content = strip_body_structure_leakage(content)
             content = strip_author_year_citations(content)
             content = strip_unsupported_precise_metrics(content, section_evidence)
+            content = normalize_citation_surface(content)
 
             # 替换 LLM 可能输出的 UUID 引用为正确编号
             paper_id_to_num = {
@@ -568,6 +604,7 @@ async def write_review_node(state: PipelineState) -> dict:
                 content = strip_body_structure_leakage(content)
                 content = strip_author_year_citations(content)
                 content = strip_unsupported_precise_metrics(content, section_evidence)
+                content = normalize_citation_surface(content)
 
             # 保存章节
             section_data = {
@@ -672,9 +709,33 @@ async def write_review_node(state: PipelineState) -> dict:
                 section_bodies=remapped_section_bodies,
                 paper_metadata_map=paper_metadata_map,
             )
+            displayed_section_bodies = _split_finalized_body_by_section(
+                finalization.body_markdown,
+                sections,
+            )
+            if len(displayed_section_bodies) == len(written_section_ids):
+                for idx, section_id in enumerate(written_section_ids):
+                    await db.save_written_section({
+                        "id": section_id,
+                        "outline_id": state.outline_id,
+                        "section_id": str(sections[idx].get("name", sections[idx].get("number", idx))),
+                        "content": displayed_section_bodies[idx],
+                        "word_count": len(displayed_section_bodies[idx]),
+                    })
             assembled_review = finalization.body_markdown
             final_review = finalization.markdown
             ref_mappings = finalization.reference_mappings
+            await db.save_pipeline_checkpoint({
+                "project_id": state.project_id,
+                "node_name": "final_review_artifact",
+                "state_snapshot": {
+                    "final_review": final_review,
+                    "body_markdown": finalization.body_markdown,
+                    "references": ref_mappings,
+                    "assembly_report": asdict(finalization.assembly_report),
+                },
+                "status": "completed",
+            })
             logger.info(
                 "Step 4a: deterministic assembly completed",
                 length=len(assembled_review),

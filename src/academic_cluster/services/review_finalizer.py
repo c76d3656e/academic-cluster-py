@@ -16,6 +16,7 @@ from typing import Any
 from .citation_utils import (
     _CITATION_RE,
     _YEAR_BRACKET_RE,
+    normalize_citation_surface,
     parse_citation_numbers,
     renumber_citations_by_first_use,
     strip_reference_block,
@@ -106,6 +107,7 @@ def assemble_review_deterministic(
     for idx, section in enumerate(sections):
         title = str(section.get("title") or f"Section {idx + 1}").strip()
         body = section_bodies[idx].strip() if idx < len(section_bodies) else ""
+        body = normalize_citation_surface(body)
         if not body:
             body = "No supported section draft was generated."
         rendered_sections.append(f"## {title}\n\n{body}")

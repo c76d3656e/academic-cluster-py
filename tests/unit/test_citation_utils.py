@@ -1,4 +1,5 @@
 from academic_cluster.services.citation_utils import (
+    normalize_citation_surface,
     strip_body_structure_leakage,
     strip_revision_commentary,
     strip_unsupported_precise_metrics,
@@ -69,3 +70,15 @@ def test_strip_unsupported_precise_metrics_does_not_remove_years_or_plain_citati
     cleaned = strip_unsupported_precise_metrics(content, [{"claim": "该方向仍在发展"}])
 
     assert cleaned == content
+
+
+def test_normalize_citation_surface_unwraps_parenthesized_numeric_citations():
+    content = "医疗场景（[7]）与自动驾驶([8])存在差异，而占位符([x])应删除。"
+
+    cleaned = normalize_citation_surface(content)
+
+    assert "（[7]）" not in cleaned
+    assert "([8])" not in cleaned
+    assert "([x])" not in cleaned
+    assert "[7]" in cleaned
+    assert "[8]" in cleaned
