@@ -76,6 +76,11 @@ def get_assemble_review_prompt() -> str:
     return _load_prompt("assemble_review.md")
 
 
+def get_generate_abstract_prompt() -> str:
+    """获取全文后置摘要生成提示"""
+    return _load_prompt("generate_abstract.md")
+
+
 def get_kg_json_repair_prompt() -> str:
     """获取 KG JSON 修复提示"""
     return _load_prompt("kg_json_repair.md")

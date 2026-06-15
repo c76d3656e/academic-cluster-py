@@ -48,8 +48,13 @@ def with_audit(node_name: str):
                         node_name, "compute",
                         db_create_node=db.create_node_execution,
                     )
-                except Exception:
-                    pass  # tracker 故障不影响节点执行
+                except Exception as e:
+                    logger.warning(
+                        "Failed to begin tracked node execution",
+                        node=node_name,
+                        project_id=project_id,
+                        error=str(e),
+                    )
 
             logger.info(
                 "Node execution started",
@@ -95,8 +100,13 @@ def with_audit(node_name: str):
                             output_summary=result if isinstance(result, dict) else {},
                             db_finish_node=db.finish_node_execution,
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to finish tracked node execution",
+                            node=node_name,
+                            project_id=project_id,
+                            error=str(e),
+                        )
 
                 # SSE: 推送节点完成事件
                 if project_id:
@@ -108,8 +118,13 @@ def with_audit(node_name: str):
                             "status": "succeeded",
                             "duration_ms": duration_ms,
                         })
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to finish failed tracked node execution",
+                            node=node_name,
+                            project_id=project_id,
+                            error=str(e),
+                        )
 
                 logger.info(
                     "Node execution completed",

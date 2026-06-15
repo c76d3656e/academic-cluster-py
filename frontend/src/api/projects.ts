@@ -91,6 +91,7 @@ export interface ReviewResponse {
     doi?: string
   }>
   final_review?: string
+  abstract?: string
   status: string
 }
 

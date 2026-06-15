@@ -115,8 +115,9 @@ const uniqueClusters = computed(() => {
   return ids.size
 })
 
-/** Extract abstract from first section (first paragraph) */
+/** Use backend abstract when available; fall back to first section only for legacy data. */
 const articleAbstract = computed(() => {
+  if (reviewData.value?.abstract) return reviewData.value.abstract.trim()
   if (!sections.value.length) return ''
   const firstContent = sections.value[0].content || ''
   const paragraphs = firstContent.split(/\n\n+/).filter((p) => p.trim() && !p.trim().startsWith('#'))

@@ -170,9 +170,13 @@ _YEAR_BRACKET_RE = re.compile(r"\[(\d{4})(?:\s*[-–—]\s*(\d{4}))?\]")
 
 # Matches UUID-style paper_id in brackets, e.g. [433802d1-ebf8-49f7-8efc-0183ef0170b8]
 _UUID_CITATION_RE = re.compile(r"\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]")
-_PAREN_NUMERIC_CITATION_RE = re.compile(r"[（(]\s*(\[[0-9,\s;–—、，·\-]+\])\s*[）)]")
-_PAREN_PLACEHOLDER_CITATION_RE = re.compile(r"[（(]\s*\[[A-Za-z]+\]\s*[）)]")
-_PLACEHOLDER_CITATION_RE = re.compile(r"\[[A-Za-z]\]")
+_PAREN_NUMERIC_CITATION_RE = re.compile(
+    r"[（(]\s*((?:\[[0-9,\s;–—、，·\-]+\]\s*)+)\s*[）)]"
+)
+_PAREN_PLACEHOLDER_CITATION_RE = re.compile(
+    r"[（(]\s*(?:\[[A-Za-z][A-Za-z0-9,\s;、，]*\]\s*)+\s*[）)]"
+)
+_PLACEHOLDER_CITATION_RE = re.compile(r"\[[A-Za-z][A-Za-z0-9,\s;、，]*\]")
 
 # Pattern for the References heading (## or #) and everything after it.
 _REF_HEADING_RE = re.compile(
@@ -455,11 +459,19 @@ def normalize_citation_surface(content: str) -> str:
     """
     if not content:
         return ""
-    content = _PAREN_NUMERIC_CITATION_RE.sub(r"\1", content)
+
+    def _unwrap_numeric_citation(match: re.Match) -> str:
+        inner = re.sub(r"\]\s*\[", ",", match.group(1).strip())
+        return inner
+
+    content = _PAREN_NUMERIC_CITATION_RE.sub(_unwrap_numeric_citation, content)
     content = _PAREN_PLACEHOLDER_CITATION_RE.sub("", content)
     content = _PLACEHOLDER_CITATION_RE.sub("", content)
+    content = re.sub(r"（\s*([A-Za-z]{1,3})\s*）", "", content)
+    content = re.sub(r"\(\s*([A-Za-z]{1,3})\s*\)", "", content)
     content = re.sub(r"[ \t]{2,}", " ", content)
     content = re.sub(r"\s+([，,。；;：:])", r"\1", content)
+    content = re.sub(r"([。！？])([A-Za-z\u4e00-\u9fff])", r"\1 \2", content)
     return content.strip()
 
 

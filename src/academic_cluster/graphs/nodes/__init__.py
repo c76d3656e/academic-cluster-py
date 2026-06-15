@@ -34,6 +34,7 @@ from .user_confirm import user_confirm_node
 from .write_review import write_review_node
 from .coverage_audit import coverage_audit_node
 from .section_revision import section_revision_node
+from .abstract_generation import generate_abstract_node
 
 # 产出阶段节点
 from .artifact_registration import artifact_registration_node
@@ -65,6 +66,7 @@ __all__ = [
     "write_review_node",
     "coverage_audit_node",
     "section_revision_node",
+    "generate_abstract_node",
     # 产出阶段
     "artifact_registration_node",
     "finalize_node",

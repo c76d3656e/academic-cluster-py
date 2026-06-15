@@ -686,6 +686,9 @@ Hard rules:
 - Use IEEE-style [N] citations matching supplied evidence numbers.
 - NEVER use author-year citations like (Friedman, 2024) or (Smith et al., 2023). Only [1], [1,2], [1-3] format.
 - NEVER use paper_id (like p1, p2) as citation numbers. Only use the [N] numbers from the reference list.
+- NEVER put citation-bearing prose inside parentheses, for example "（文献[24][28]已证实...）" or "([27][29])".
+- Citations must be part of the normal sentence syntax, for example "已有研究[24,28]证实..." or "该局限已在医疗与交通场景研究中得到讨论[27,29]".
+- Merge adjacent citation tokens: write [24,28], never [24][28].
 - Keep output as UTF-8 markdown.
 - Avoid internal labels such as Cluster 0 or pipeline implementation details.
 - Do NOT output a reference list or bibliography at the end of the section.
@@ -708,7 +711,9 @@ A literature review is NOT a collection of individual paper summaries. Each para
 - Output only polished section body paragraphs. Do not output a section title, reference list, bibliography, candidate list, evidence-card JSON, audit notes, or implementation details.
 - Use only [N] citation numbers from the provided usable reference list, and cite a source only when it directly supports the sentence.
 - The same [N] number must always refer to the same paper_id, title, and evidence_card_id shown in the related paper samples and usable reference list.
-- Never cite a sentence with [N] if the claim was taken from another paper_id, even when both papers discuss a similar topic."""
+- Never cite a sentence with [N] if the claim was taken from another paper_id, even when both papers discuss a similar topic.
+- Do not write parenthesized citation prose such as "（文献[24][28]已证实网络稳定性...）"; integrate the citation into the sentence instead.
+- Merge adjacent citation tokens: write [24,28], never [24][28]."""
 
     citation_constraint_supplement = """## 引用约束补充
 - 本章节必须使用本章节"真实可用的参考文献"列表中的 [N] 编号。
@@ -717,7 +722,9 @@ A literature review is NOT a collection of individual paper summaries. Each para
 - 每一句包含事实判断、方法比较、指标、趋势、局限或结论的句子，都必须能被同句或邻近句中的 [N] 文献支撑。
 - 如果同一论文支撑多个判断，可以重复引用，但不得引用列表外编号。
 - 不能编造引用、作者、年份、期刊、DOI 或论文结论。
-- **引用格式强制**：只使用 [N] 数字编号。禁止 (Author, Year) 格式。禁止使用 paper_id 作为引用号。"""
+- **引用格式强制**：只使用 [N] 数字编号。禁止 (Author, Year) 格式。禁止使用 paper_id 作为引用号。
+- **禁止括号化引用说明**：不要写"（文献[24][28]已证实...）"、"（[27][29]）"、"([x])"、"([1][2])"。引用必须进入正文句法，例如"已有研究[24,28]证实..."、"这种局限在医疗与交通场景中已有讨论[27,29]"。
+- **禁止相邻引用块**：不要写 [24][28]，合并为 [24,28]。"""
 
     # 在写作要求之后插入 output hygiene rules 和引用约束
     prompt = prompt.replace(
@@ -869,6 +876,8 @@ Rules:
 - Return only the revised CURRENT paragraph, no heading, no list, no notes.
 - Preserve all valid [N] citation numbers already present unless a sentence is removed.
 - Do not add citations outside the usable reference list.
+- Rewrite any parenthesized citation prose such as "（文献[24][28]已证实...）" into normal sentence syntax.
+- Merge adjacent citation tokens such as [24][28] into [24,28].
 - Improve local transition, remove redundancy, and keep the paragraph's single task.
 - Do not merge with previous or next paragraph.
 

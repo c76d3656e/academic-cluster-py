@@ -78,6 +78,7 @@ class PipelineState(BaseModel):
     # === 产出物 ===
     final_review_id: Optional[str] = None
     final_review: Optional[str] = None  # 最终综述内容
+    abstract: Optional[str] = None  # 基于最终全文生成的无引用摘要
     bibtex: Optional[str] = None
     artifact_id: Optional[str] = None
 
@@ -136,6 +137,7 @@ class WritingState(BaseModel):
     written_section_ids: list[str] = Field(default_factory=list)
 
     final_review: Optional[str] = None
+    abstract: Optional[str] = None
     bibtex: Optional[str] = None
 
     # 覆盖审计

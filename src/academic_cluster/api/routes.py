@@ -377,6 +377,7 @@ async def get_review(
 
     final_artifact = await db.get_pipeline_checkpoint(project_id, "final_review_artifact")
     final_review = None
+    abstract = None
     references = []
     if final_artifact:
         snapshot = final_artifact.get("state_snapshot") or {}
@@ -388,6 +389,7 @@ async def get_review(
                 snapshot = {}
         if isinstance(snapshot, dict):
             final_review = snapshot.get("final_review")
+            abstract = snapshot.get("abstract")
             references = snapshot.get("references") or []
 
     return {
@@ -397,6 +399,7 @@ async def get_review(
         "evidence_cards": evidence_cards,
         "references": references,
         "final_review": final_review,
+        "abstract": abstract,
         "status": project.get("status", "pending"),
     }
 

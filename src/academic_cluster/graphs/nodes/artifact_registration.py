@@ -39,6 +39,7 @@ async def artifact_registration_node(state: PipelineState) -> dict:
         artifact_data = {
             "project_id": state.project_id,
             "final_review": final_review,
+            "abstract": state.abstract,
             "bibtex": state.bibtex,
             "word_count": word_count,
             "citation_count": citation_count,

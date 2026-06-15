@@ -376,7 +376,7 @@ def _check_punctuation(draft: str) -> dict:
 
 def _check_citation_format(draft: str) -> dict:
     """
-    检测引用格式违规：author-year 格式、UUID 引用、meta-commentary。
+    检测引用格式违规：author-year 格式、UUID 引用、meta-commentary、括号化引用说明。
     """
     # Author-year citations: (Author, 2024), (Smith et al., 2023)
     author_year_re = re.compile(
@@ -390,27 +390,51 @@ def _check_citation_format(draft: str) -> dict:
     uuid_re = re.compile(r"\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]")
     uuid_matches = uuid_re.findall(draft)
 
+    adjacent_numeric_re = re.compile(r"(?:\[[0-9,\s;、，\-–—]+\]){2,}")
+    adjacent_numeric_matches = adjacent_numeric_re.findall(draft)
+
     # Meta-commentary: (字数统计：1520字), (以上为...)
     meta_re = re.compile(
         r"[（(][^）)]*(?:字数统计|总字数|字数达标|以上为|以下为|本节约|共\d+字|约\d+字)[^）)]*[）)]"
     )
     meta_matches = meta_re.findall(draft)
 
+    # Parenthesized citation prose: （文献[24][28]已证实...） or （[27][29]）
+    parenthesized_citation_re = re.compile(r"[（(]([^（）()]*\[[0-9][0-9,\s;、，\]\[]*\][^（）()]*)[）)]")
+    parenthesized_citation_matches = []
+    for match in parenthesized_citation_re.finditer(draft):
+        inner = match.group(1).strip()
+        if re.fullmatch(r"(?:\[[0-9,\s;、，\-–—]+\]\s*)+", inner):
+            parenthesized_citation_matches.append(match.group(0))
+        elif re.search(r"[\u4e00-\u9fffA-Za-z]", inner):
+            parenthesized_citation_matches.append(match.group(0))
+
     issues = []
     if author_year_matches:
         issues.append(f"author-year引用格式 {len(author_year_matches)} 处: {author_year_matches[:3]}")
     if uuid_matches:
         issues.append(f"UUID引用 {len(uuid_matches)} 处: {uuid_matches[:3]}")
+    if adjacent_numeric_matches:
+        issues.append(f"相邻引用未合并 {len(adjacent_numeric_matches)} 处: {adjacent_numeric_matches[:3]}")
     if meta_matches:
         issues.append(f"meta-commentary {len(meta_matches)} 处: {meta_matches[:3]}")
+    if parenthesized_citation_matches:
+        issues.append(
+            f"括号化引用说明 {len(parenthesized_citation_matches)} 处: "
+            f"{parenthesized_citation_matches[:3]}"
+        )
 
     return {
         "author_year_count": len(author_year_matches),
         "uuid_citation_count": len(uuid_matches),
+        "adjacent_numeric_citation_count": len(adjacent_numeric_matches),
         "meta_commentary_count": len(meta_matches),
+        "parenthesized_citation_count": len(parenthesized_citation_matches),
         "author_year_samples": author_year_matches[:5],
         "uuid_samples": uuid_matches[:5],
+        "adjacent_numeric_samples": adjacent_numeric_matches[:5],
         "meta_samples": meta_matches[:5],
+        "parenthesized_citation_samples": parenthesized_citation_matches[:5],
         "issues": issues,
     }
 
@@ -443,7 +467,9 @@ def _check_writing_quality(draft: str) -> dict:
     punctuation_warning_count = len(punctuation["warnings"])
     author_year_count = citation_format["author_year_count"]
     uuid_count = citation_format["uuid_citation_count"]
+    adjacent_numeric_count = citation_format["adjacent_numeric_citation_count"]
     meta_count = citation_format["meta_commentary_count"]
+    parenthesized_citation_count = citation_format["parenthesized_citation_count"]
 
     issues = []
     if ai_count > 5:
@@ -458,11 +484,21 @@ def _check_writing_quality(draft: str) -> dict:
         issues.append(f"author-year引用格式 {author_year_count} 处")
     if uuid_count > 0:
         issues.append(f"UUID引用 {uuid_count} 处")
+    if adjacent_numeric_count > 0:
+        issues.append(f"相邻引用未合并 {adjacent_numeric_count} 处")
     if meta_count > 0:
         issues.append(f"meta-commentary {meta_count} 处")
+    if parenthesized_citation_count > 0:
+        issues.append(f"括号化引用说明 {parenthesized_citation_count} 处")
 
     # 引用格式问题是 critical（必须修复）
-    citation_critical = author_year_count > 0 or uuid_count > 0 or meta_count > 0
+    citation_critical = (
+        author_year_count > 0
+        or uuid_count > 0
+        or adjacent_numeric_count > 0
+        or meta_count > 0
+        or parenthesized_citation_count > 0
+    )
 
     if ai_count > 10 or tc_count > 5 or citation_critical:
         severity = "critical"
@@ -923,9 +959,10 @@ async def revise_section(
 3. 引用格式保持 [N] 风格，只使用上方列出的参考文献
 4. 不要输出章节标题、参考文献列表或元说明
 5. 直接输出修订后的完整章节正文
-6. 禁止使用"综上所述"、"总之"、"总而言之"等禁用表达
-7. 禁止使用"从方法论角度"、"从技术演进角度"等泛化短语
-8. 每个段落以实质性的分析判断或研究发现收尾
+6. 如果原文含有括号化引用说明（如"（文献[24][28]已证实...）"、"（[27][29]）"），必须改写为正文句法中的内联引用
+7. 禁止使用"综上所述"、"总之"、"总而言之"等禁用表达
+8. 禁止使用"从方法论角度"、"从技术演进角度"等泛化短语
+9. 每个段落以实质性的分析判断或研究发现收尾
 
 请输出修订后的完整章节正文："""
 
@@ -933,7 +970,7 @@ async def revise_section(
     llm = create_llm(temperature=0.3, max_tokens=8192)
 
     messages = [
-        SystemMessage(content="你是一个学术写作修订专家。请根据评估反馈精确修订章节内容，保持学术严谨性。"),
+        SystemMessage(content="你是一个学术写作修订专家。请根据评估反馈精确修订章节内容，保持学术严谨性，并把所有引用写入正文句法。"),
         HumanMessage(content=prompt),
     ]
 
