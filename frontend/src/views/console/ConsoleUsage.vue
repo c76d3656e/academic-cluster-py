@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 
 const days = ref(7)
+const granularity = ref<'day' | 'hour'>('day')
 const trend = ref<ConsoleUsageTrend[]>([])
 const calls = ref<ConsoleLlmCall[]>([])
 const isLoadingTrend = ref(true)
@@ -14,13 +15,15 @@ const trendMode = ref<'tokens' | 'cost'>('tokens')
 async function loadTrend() {
   isLoadingTrend.value = true
   try {
-    trend.value = await consoleApi.getUsageTrend(days.value)
+    trend.value = await consoleApi.getUsageTrend(days.value, granularity.value)
   } catch {
     trend.value = []
   } finally {
     isLoadingTrend.value = false
   }
 }
+
+watch(granularity, loadTrend)
 
 async function loadCalls() {
   isLoadingCalls.value = true
@@ -91,9 +94,9 @@ const callTypeLabel: Record<string, string> = {
         <h2 class="text-heading font-medium tracking-tight">我的用量</h2>
         <p class="text-sm text-muted-foreground mt-1">Token 消耗与调用记录</p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex gap-2 items-center">
         <button
-          v-for="d in [7, 30]"
+          v-for="d in [1, 7, 30]"
           :key="d"
           @click="days = d"
           class="px-3 py-1.5 text-xs rounded-md transition-colors"
@@ -102,6 +105,18 @@ const callTypeLabel: Record<string, string> = {
             : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
         >
           {{ d }}天
+        </button>
+        <span class="w-px h-4 bg-border mx-1"></span>
+        <button
+          v-for="g in ([['day', '按日'], ['hour', '按小时']] as const)"
+          :key="g[0]"
+          @click="granularity = g[0] as any"
+          class="px-3 py-1.5 text-xs rounded-md transition-colors"
+          :class="granularity === g[0]
+            ? 'bg-foreground text-background'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+        >
+          {{ g[1] }}
         </button>
       </div>
     </div>

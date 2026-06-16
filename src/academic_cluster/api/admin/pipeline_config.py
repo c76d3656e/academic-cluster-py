@@ -151,6 +151,42 @@ DEFAULT_CONFIG = {
         "type": "int",
     },
 
+    "community_memory.concurrency": {
+        "value": "-1",
+        "label": "\u793e\u533a\u8bb0\u5fc6\u5e76\u53d1\u5ea6",
+        "description": "-1 \u8868\u793a\u81ea\u52a8\uff1a\u6309 provider slot \u4e0e\u5b89\u5168\u4e0a\u9650\u5171\u540c\u51b3\u5b9a\uff1b\u6b63\u6574\u6570\u8868\u793a\u624b\u52a8\u4e0a\u9650\u3002",
+        "group": "\u793e\u533a\u8bb0\u5fc6",
+        "type": "int",
+    },
+    "evidence.timeout_s": {
+        "value": "120",
+        "label": "Evidence card timeout",
+        "description": "Maximum seconds for one evidence-card LLM call. Timed-out papers get a deterministic fallback card so the batch can finish and persist.",
+        "group": "Evidence cards",
+        "type": "int",
+    },
+    "community_memory.timeout_s": {
+        "value": "90",
+        "label": "\u793e\u533a\u8bb0\u5fc6\u5355\u9879\u8d85\u65f6",
+        "description": "\u5355\u4e2a\u793e\u533a LLM \u589e\u5f3a\u7684\u6700\u957f\u7b49\u5f85\u79d2\u6570\uff0c\u8d85\u65f6\u540e\u4f7f\u7528 deterministic fallback\u3002",
+        "group": "\u793e\u533a\u8bb0\u5fc6",
+        "type": "int",
+    },
+    "community_memory.llm_limit": {
+        "value": "16",
+        "label": "\u793e\u533a\u8bb0\u5fc6 LLM \u589e\u5f3a\u4e0a\u9650",
+        "description": "\u53ea\u5bf9\u8bba\u6587\u6570\u6700\u591a\u7684\u524d N \u4e2a\u793e\u533a\u505a LLM \u589e\u5f3a\uff0c\u5176\u4f59\u4f7f\u7528 deterministic memory\u3002",
+        "group": "\u793e\u533a\u8bb0\u5fc6",
+        "type": "int",
+    },
+    "gap_analysis.timeout_s": {
+        "value": "45",
+        "label": "Gap judge timeout",
+        "description": "Maximum seconds for the optional LLM gap judge. On timeout, deterministic gaps are kept for diagnostics but the pipeline proceeds to outline generation.",
+        "group": "Gap analysis",
+        "type": "int",
+    },
+
     "clustering.algorithm": {
         "value": "leiden",
         "label": "社区检测算法",
@@ -350,6 +386,11 @@ def build_node_config(raw: dict[str, str]) -> dict:
         # kg
         "kg_concurrency": _int("kg.concurrency", -1),
         "evidence_concurrency": _int("evidence.concurrency", -1),
+        "evidence_timeout_s": _int("evidence.timeout_s", 120),
+        "community_memory_concurrency": _int("community_memory.concurrency", -1),
+        "community_memory_timeout_s": _int("community_memory.timeout_s", 90),
+        "community_memory_llm_limit": _int("community_memory.llm_limit", 16),
+        "gap_analysis_timeout_s": _int("gap_analysis.timeout_s", 45),
 
         # clustering
         "clustering_algorithm": raw.get("clustering.algorithm", "leiden"),

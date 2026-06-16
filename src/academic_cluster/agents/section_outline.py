@@ -17,6 +17,7 @@ from ..services.llm_client import ainvoke_with_callbacks, create_llm
 from ..tools.json_repair import try_parse_json
 
 logger = structlog.get_logger()
+DEFAULT_SECTION_OUTLINE_TIMEOUT_S = 90.0
 
 
 def _normalize_paragraph_word_budget(outline: dict, target_words: int) -> dict:
@@ -73,7 +74,12 @@ def _normalize_paragraph_word_budget(outline: dict, target_words: int) -> dict:
 # =============================================================================
 
 
-async def _ainvoke_with_retry(agent, messages, max_retries=3):
+async def _ainvoke_with_retry(
+    agent,
+    messages,
+    max_retries=2,
+    timeout_s: float = DEFAULT_SECTION_OUTLINE_TIMEOUT_S,
+):
     """带重试的 LLM 调用"""
 
     @retry(
@@ -82,7 +88,7 @@ async def _ainvoke_with_retry(agent, messages, max_retries=3):
         reraise=True,
     )
     async def _call():
-        return await ainvoke_with_callbacks(agent, messages)
+        return await ainvoke_with_callbacks(agent, messages, timeout=timeout_s)
 
     return await _call()
 

@@ -1,6 +1,8 @@
 ﻿"""
-鐭ヨ瘑鍥捐氨鎻愬彇鑺傜偣 - 浠庤鏂囦腑鎻愬彇瀹炰綋鍜屽叧绯?
-骞跺彂妯″紡锛氬悓鏃跺彂鍑?K 涓姹傦紝姣忎釜璇锋眰澶勭悊 1 绡囪鏂囥€?閰嶅悎骞傜瓑鎭㈠锛屼腑鏂悗鍙鐞嗘湭瀹屾垚鐨勮鏂囥€?"""
+知识图谱提取节点 - 从论文中提取实体和关系
+并发模式：同时发出 K 个请求，每个请求处理 1 篇论文。
+配合幂等恢复，中断后只处理未完成的论文。
+"""
 
 import asyncio
 import traceback
@@ -18,9 +20,11 @@ logger = structlog.get_logger()
 
 async def kg_extraction_node(state: PipelineState) -> dict:
     """
-    鐭ヨ瘑鍥捐氨鎻愬彇
+    知识图谱提取
 
-    灏嗚鏂囨寜 KG_BATCH_SIZE 鍒嗘壒锛屾瘡鎵规墦鍖呮垚涓€涓?LLM prompt銆?    鏀寔骞傜瓑鎭㈠锛氬紑濮嬫椂鏌ヨ DB 璺宠繃宸叉彁鍙栫殑璁烘枃銆?    """
+    将论文按 KG_BATCH_SIZE 分批，每批打包成一个 LLM prompt。
+    支持幂等恢复：开始时查询 DB 跳过已提取的论文。
+    """
     tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("kg_extraction", "llm", index=3)
@@ -202,7 +206,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
                         completed_count += 1
                         await send_progress(
                             project_id, "kg_extraction",
-                            f"鐭ヨ瘑鍥捐氨鎶藉彇涓?{completed_count}/{total}...",
+                            f"知识图谱抽取中 {completed_count}/{total}...",
                             progress=completed_count / total if total > 0 else 0,
                         )
 

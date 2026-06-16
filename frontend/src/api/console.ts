@@ -71,12 +71,12 @@ export const consoleApi = {
     return data
   },
 
-  async getUsageTrend(days?: number): Promise<ConsoleUsageTrend[]> {
-    const { data } = await apiClient.get('/console/usage/trend', { params: { days } })
+  async getUsageTrend(days?: number, granularity?: string): Promise<ConsoleUsageTrend[]> {
+    const { data } = await apiClient.get('/console/usage/trend', { params: { days, granularity } })
     return data.trend ?? data
   },
 
-  async getMyCalls(params?: { limit?: number; project_id?: string }): Promise<ConsoleLlmCall[]> {
+  async getMyCalls(params?: { limit?: number; project_id?: string; node_name?: string; status?: string; call_type?: string }): Promise<ConsoleLlmCall[]> {
     const { data } = await apiClient.get('/console/usage/calls', { params })
     return data.calls ?? data
   },
@@ -92,5 +92,9 @@ export const consoleApi = {
 
   async changePassword(payload: { current_password: string; new_password: string }): Promise<void> {
     await apiClient.post('/console/profile/password', payload)
+  },
+
+  async controlPipeline(projectId: string, action: 'pause' | 'resume'): Promise<void> {
+    await apiClient.post(`/pipeline/${projectId}/${action}`)
   },
 }

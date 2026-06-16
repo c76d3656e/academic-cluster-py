@@ -86,16 +86,21 @@ def _api_key_hint(llm) -> str | None:
 
 
 def _get_llm_queue_semaphore() -> asyncio.Semaphore:
-    """Build a process-local queue gate from enabled provider capacity."""
+    """Build a process-local queue gate from enabled provider capacity.
+    
+    容量 = 所有 provider 总 slots × 并发管道倍数（默认 3 倍），
+    避免跨 pipeline 竞争导致死锁。
+    """
     global _llm_queue_semaphore, _llm_queue_capacity
 
     from .provider_pool import get_llm_available_slots
 
-    capacity = get_llm_available_slots(default=10)
+    base = get_llm_available_slots(default=10)
+    capacity = max(10, base * 3)  # 总 slot × 3 倍余量，容纳多个 pipeline
     if _llm_queue_semaphore is None or capacity != _llm_queue_capacity:
         _llm_queue_capacity = capacity
         _llm_queue_semaphore = asyncio.Semaphore(capacity)
-        logger.info("LLM queue capacity resolved", capacity=capacity)
+        logger.info("LLM queue capacity resolved", capacity=capacity, base_slots=base)
     return _llm_queue_semaphore
 
 # 轮询计数器
@@ -172,11 +177,14 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     import asyncio
     import time as _time
 
-    from .observability import get_current_node, get_current_tracker
+    from .observability import get_current_node, get_current_tracker, get_resolved_run_id, get_current_project
 
     start_time = _time.monotonic()
     node_name = get_current_node() or "unknown"
     tracker = get_current_tracker()
+    run_id = get_resolved_run_id()
+    if not run_id:
+        logger.warning("ainvoke_with_callbacks no run_id", node=node_name, has_tracker=tracker is not None)
     provider_alias = getattr(llm, "_provider_alias", "") or "llm"
     requested_model = (
         getattr(llm, "_requested_model", None)
@@ -191,22 +199,23 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     call_id = None
     db = None
 
-    if tracker and tracker.run_id:
+    if run_id:
         try:
             from .database import get_database
             db = get_database()
-            exec_id = tracker._node_ids.get(node_name)
+            exec_id = tracker._node_ids.get(node_name) if tracker else None
             if not exec_id:
                 exec_id = await db.create_node_execution(
-                    tracker.run_id,
+                    run_id,
                     node_name,
                     "llm",
                 )
-                tracker._node_ids[node_name] = exec_id
+                if tracker:
+                    tracker._node_ids[node_name] = exec_id
             call_id = await db.create_llm_call(
-                pipeline_run_id=tracker.run_id,
+                pipeline_run_id=run_id,
                 node_execution_id=exec_id,
-                project_id=tracker.project_id,
+                project_id=get_current_project() or getattr(tracker, "project_id", None),
                 node_name=node_name,
                 call_type="llm",
                 provider_name=provider_alias,
@@ -215,6 +224,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                 upstream_model=upstream_model,
                 api_base_url=api_base_url,
                 api_key_hint=_api_key_hint(llm),
+                status="running",
                 input_preview=_preview_value(input),
                 request_metadata={
                     "node_name": node_name,
@@ -235,18 +245,34 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
             response = sanitize_llm_response(response)
     except asyncio.TimeoutError:
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
+        err_msg = f"LLM call timed out after {timeout}s"
         if db and call_id:
             try:
                 await db.finish_llm_call(
                     call_id=call_id,
                     status="error",
-                    error_message=f"LLM call timed out after {timeout}s",
+                    error_message=err_msg,
                     latency_ms=elapsed_ms,
                 )
             except Exception as e:
                 logger.warning("Failed to persist llm_call timeout", error=str(e), node=node_name)
-        logger.error("LLM call timed out", node=node_name, timeout_s=timeout)
-        raise TimeoutError(f"LLM call timed out after {timeout}s")
+        logger.error(err_msg, node=node_name, timeout_s=timeout)
+        raise TimeoutError(err_msg)
+    except asyncio.CancelledError:
+        elapsed_ms = int((_time.monotonic() - start_time) * 1000)
+        err_msg = "LLM call cancelled"
+        if db and call_id:
+            try:
+                await db.finish_llm_call(
+                    call_id=call_id,
+                    status="error",
+                    error_message=err_msg,
+                    latency_ms=elapsed_ms,
+                )
+            except Exception as e:
+                logger.warning("Failed to persist llm_call cancellation", error=str(e), node=node_name)
+        logger.warning(err_msg, node=node_name)
+        raise
     except Exception as e:
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
         if db and call_id:
@@ -276,7 +302,6 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     resp_meta = getattr(response, "response_metadata", None)
     if resp_meta:
         model_name = resp_meta.get("model_name", "unknown")
-        # OpenAI 格式 token_usage
         token_usage = resp_meta.get("token_usage", {})
         if token_usage and not prompt_tokens:
             prompt_tokens = token_usage.get("prompt_tokens", 0)
@@ -286,7 +311,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
         model_name = requested_model
     upstream_model = model_name
 
-    # 按当前定价计算 cost（使用真实的 provider 别名匹配数据库定价）
+    # 计算 cost
     cost = 0.0
     try:
         from .database import get_database
@@ -314,7 +339,6 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
         except Exception:
             pass
 
-    # 完成 DB 调用记录
     if db and call_id:
         try:
             await db.finish_llm_call(
@@ -329,7 +353,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                 upstream_model=upstream_model,
             )
         except Exception as e:
-            logger.warning("Failed to finish llm_call audit row", error=str(e))
+            logger.warning("Failed to finish llm_call audit row", error=str(e), node=node_name)
 
     return response
 

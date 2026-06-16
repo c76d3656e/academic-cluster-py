@@ -345,7 +345,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     upstream_model VARCHAR(200),
     api_base_url VARCHAR(500),
     api_key_hint VARCHAR(20),
-    status VARCHAR(20) NOT NULL DEFAULT 'success',
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
     error_message TEXT,
     http_status_code INTEGER,
     is_stream BOOLEAN DEFAULT FALSE,

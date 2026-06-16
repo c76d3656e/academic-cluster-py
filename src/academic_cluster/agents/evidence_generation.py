@@ -14,6 +14,7 @@ from langchain_openai import ChatOpenAI
 logger = structlog.get_logger()
 
 CORE_EVIDENCE_CARD_TARGET = 160
+DEFAULT_EVIDENCE_CARD_TIMEOUT_S = 120
 
 
 EVIDENCE_SYSTEM_PROMPT = """你是一个学术证据分析专家。你的任务是从学术论文中提取结构化的证据信息。
@@ -209,6 +210,7 @@ async def generate_evidence_cards_batch(
     papers: list[dict],
     cluster_topics: dict[str, list[str]] | None = None,
     concurrency: int | None = None,
+    timeout_s: int = DEFAULT_EVIDENCE_CARD_TIMEOUT_S,
 ) -> list[dict]:
     """
     批量生成证据卡片
@@ -230,9 +232,12 @@ async def generate_evidence_cards_batch(
 
     async def _bounded_generate(paper: dict):
         async with semaphore:
-            return await generate_evidence_card(
-                paper=paper,
-                cluster_topics=cluster_topics.get(paper.get("id")),
+            return await asyncio.wait_for(
+                generate_evidence_card(
+                    paper=paper,
+                    cluster_topics=cluster_topics.get(paper.get("id")),
+                ),
+                timeout=max(1, timeout_s),
             )
 
     tasks = [_bounded_generate(paper) for paper in papers]

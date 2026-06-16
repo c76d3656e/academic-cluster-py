@@ -7,6 +7,7 @@
 - 生成针对性搜索查询
 """
 
+import asyncio
 import traceback
 
 import structlog
@@ -15,6 +16,8 @@ from ...services.database import get_database
 from ...services.observability import get_current_tracker
 from ..state import PipelineState
 logger = structlog.get_logger()
+
+DEFAULT_GAP_ANALYSIS_TIMEOUT_S = 45
 
 
 def _analyze_community_gaps(
@@ -75,7 +78,18 @@ def _analyze_community_gaps(
     return gap_reports
 
 
-async def _refine_gaps_with_llm(topic: str, gap_reports: list[dict]) -> list[dict]:
+def _int_config(config: dict, key: str, default: int) -> int:
+    try:
+        return int(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+async def _refine_gaps_with_llm(
+    topic: str,
+    gap_reports: list[dict],
+    timeout_s: int = DEFAULT_GAP_ANALYSIS_TIMEOUT_S,
+) -> tuple[list[dict], bool]:
     from langchain_core.messages import HumanMessage, SystemMessage
 
     from ...services.llm_client import ainvoke_with_callbacks, create_llm
@@ -83,8 +97,9 @@ async def _refine_gaps_with_llm(topic: str, gap_reports: list[dict]) -> list[dic
 
     gap_communities = [r for r in gap_reports if r["status"] == "needs_refinement"]
     if not gap_communities:
-        return gap_reports
+        return gap_reports, True
 
+    judge_available = True
     user_prompt = "\n".join(
         f'{r["cluster_id"]}: gap={r["gap_type"]}, papers={r["paper_count"]}, '
         f'evidence={r["evidence_card_count"]}, entities={r["entity_count"]}'
@@ -92,13 +107,16 @@ async def _refine_gaps_with_llm(topic: str, gap_reports: list[dict]) -> list[dic
     )
     try:
         llm = create_llm(temperature=0.0, max_tokens=1024)
-        response = await ainvoke_with_callbacks(llm, [
-            SystemMessage(content="Return JSON only. Confirm or soften literature-review gap decisions."),
-            HumanMessage(content=(
-                f"Topic: {topic}\n\nCommunities:\n{user_prompt}\n\n"
-                'Return {"decisions":[{"community_id":"...","status":"enough_evidence|needs_refinement","reason":"..."}]}'
-            )),
-        ])
+        response = await asyncio.wait_for(
+            ainvoke_with_callbacks(llm, [
+                SystemMessage(content="Return JSON only. Confirm or soften literature-review gap decisions."),
+                HumanMessage(content=(
+                    f"Topic: {topic}\n\nCommunities:\n{user_prompt}\n\n"
+                    'Return {"decisions":[{"community_id":"...","status":"enough_evidence|needs_refinement","reason":"..."}]}'
+                )),
+            ]),
+            timeout=max(1, timeout_s),
+        )
         content = response.content
         if isinstance(content, list):
             content = "".join(
@@ -115,10 +133,17 @@ async def _refine_gaps_with_llm(topic: str, gap_reports: list[dict]) -> list[dic
                 if decision_map.get(str(report["cluster_id"])) == "enough_evidence":
                     report["status"] = "enough_evidence"
                     report["gap_type"] = None
+    except asyncio.TimeoutError:
+        judge_available = False
+        logger.warning(
+            "LLM gap judge timed out, keeping deterministic decisions",
+            timeout_s=timeout_s,
+        )
     except Exception as e:
+        judge_available = False
         logger.warning("LLM gap judge failed, keeping deterministic decisions", error=str(e))
 
-    return gap_reports
+    return gap_reports, judge_available
 
 
 async def gap_analysis_node(state: PipelineState) -> dict:
@@ -153,13 +178,23 @@ async def gap_analysis_node(state: PipelineState) -> dict:
 
         # 复用 community_detection 的 gap 分析逻辑
         gap_reports = _analyze_community_gaps(clusters, evidence_cards, kg_entities, papers)
-        gap_reports = await _refine_gaps_with_llm(state.query, gap_reports)
+        timeout_s = _int_config(state.config or {}, "gap_analysis_timeout_s", DEFAULT_GAP_ANALYSIS_TIMEOUT_S)
+        gap_reports, gap_judge_available = await _refine_gaps_with_llm(
+            state.query,
+            gap_reports,
+            timeout_s=timeout_s,
+        )
 
         needs_refinement = [r for r in gap_reports if r["status"] == "needs_refinement"]
         needs_refinement_flag = len(needs_refinement) > 0
 
         # 检查 refinement 尝试次数
         if state.refinement_attempt >= state.max_refinement_attempts:
+            needs_refinement_flag = False
+
+        # The LLM judge is advisory. If it cannot return quickly, do not trap the
+        # whole review pipeline in expensive refinement loops.
+        if not gap_judge_available:
             needs_refinement_flag = False
 
         # 如果上一轮 targeted_refine 没有找到新论文，不再触发（避免无意义循环）

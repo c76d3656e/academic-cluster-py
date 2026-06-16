@@ -145,7 +145,7 @@ async def sse_generator(
                 event = await asyncio.wait_for(queue.get(), timeout=30.0)
 
                 event_type = event.get("type", "message")
-                data = json.dumps(event.get("data", {}))
+                data = json.dumps(event.get("data", {}), ensure_ascii=False)
 
                 yield f"event: {event_type}\ndata: {data}\n\n"
 

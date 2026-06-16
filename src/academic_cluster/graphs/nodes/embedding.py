@@ -46,8 +46,10 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
     elapsed_ms = int((_time.monotonic() - start_time) * 1000)
 
     # 记录 embedding 调用到 tracker 和 DB
+    from ...services.observability import get_resolved_run_id
     tracker = get_current_tracker()
-    if tracker and tracker.run_id:
+    run_id = get_resolved_run_id()
+    if run_id:
         try:
             from ...services.database import get_database
             from ...api.admin.providers import get_provider_pricing
@@ -67,30 +69,26 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
                 cost = (prompt_tokens * input_price) / 1_000_000
 
             # 记录到 tracker
-            await tracker.token_tracker.record(
-                node_name=node_name,
-                provider_name=provider_alias,
-                model_name="bge-m3",
-                call_type="embedding",
-                prompt_tokens=prompt_tokens,
-                completion_tokens=0,
-                cost=cost,
-                latency_ms=elapsed_ms,
-            )
+            if tracker:
+                await tracker.token_tracker.record(
+                    node_name=node_name,
+                    provider_name=provider_alias,
+                    model_name="bge-m3",
+                    call_type="embedding",
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=0,
+                    cost=cost,
+                    latency_ms=elapsed_ms,
+                )
 
             # 持久化到 DB
-            exec_id = tracker._node_ids.get(node_name)
-            if not exec_id:
-                exec_id = await db.create_node_execution(
-                    tracker.run_id,
-                    node_name,
-                    "embedding",
-                )
-                tracker._node_ids[node_name] = exec_id
+            from ...services.observability import get_current_project
+            project_id_for_call = getattr(tracker, "project_id", None) or get_current_project()
+            exec_id = await db.create_node_execution(run_id, node_name, "embedding")
             call_id = await db.create_llm_call(
-                pipeline_run_id=tracker.run_id,
+                pipeline_run_id=run_id,
                 node_execution_id=exec_id,
-                project_id=tracker.project_id,
+                project_id=project_id_for_call,
                 node_name=node_name,
                 call_type="embedding",
                 provider_name=provider_alias,
@@ -151,8 +149,9 @@ async def embedding_node(state: PipelineState) -> dict:
 
         embedding_ids = []
         embeddings_data = []
+        embed_sem = asyncio.Semaphore(20)  # 并发上限，充分利用多 provider
 
-        for paper in papers:
+        async def _process_one(paper: dict) -> dict | None:
             paper_id = paper.get("id")
             title = paper.get("title", "")
             abstract = paper.get("abstract", "")
@@ -160,45 +159,43 @@ async def embedding_node(state: PipelineState) -> dict:
 
             if not text:
                 logger.warning("Skipping paper with no text", paper_id=paper_id)
-                continue
+                return None
 
-            # 检查缓存
-            cached_embedding = await cache.get_embedding(paper_id, "bge-m3")
-            if cached_embedding:
-                embedding = cached_embedding
-            else:
-                try:
-                    # 生成嵌入（通过 Provider Pool 自动负载均衡）
-                    embedding = await generate_embedding(text)
-                    # 缓存嵌入
-                    await cache.set_embedding(paper_id, "bge-m3", embedding)
-                except asyncio.TimeoutError:
-                    logger.error(
-                        "Embedding generation timed out",
-                        paper_id=paper_id,
-                        title_length=len(title),
-                        abstract_length=len(abstract),
-                        timeout_seconds=30,
-                    )
-                    continue
-                except Exception as e:
-                    logger.error(
-                        "Failed to generate embedding",
-                        paper_id=paper_id,
-                        title=title[:100],
-                        error=str(e),
-                        error_type=type(e).__name__,
-                    )
-                    continue
+            async with embed_sem:
+                cached_embedding = await cache.get_embedding(paper_id, "bge-m3")
+                if cached_embedding:
+                    embedding = cached_embedding
+                else:
+                    try:
+                        embedding = await generate_embedding(text)
+                        await cache.set_embedding(paper_id, "bge-m3", embedding)
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            "Embedding generation timed out",
+                            paper_id=paper_id, title_length=len(title),
+                            abstract_length=len(abstract), timeout_seconds=30,
+                        )
+                        return None
+                    except Exception as e:
+                        logger.error(
+                            "Failed to generate embedding",
+                            paper_id=paper_id, title=title[:100],
+                            error=str(e), error_type=type(e).__name__,
+                        )
+                        return None
 
-            embedding_id = f"emb_{paper_id}"
-            embedding_ids.append(embedding_id)
-            embeddings_data.append({
-                "id": embedding_id,
+            return {
+                "id": f"emb_{paper_id}",
                 "paper_id": paper_id,
                 "embedding": embedding,
-                "text": text[:500],  # 存储部分文本用于检索
-            })
+                "text": text[:500],
+            }
+
+        results = await asyncio.gather(*[_process_one(p) for p in papers])
+        for r in results:
+            if r is not None:
+                embedding_ids.append(r["id"])
+                embeddings_data.append(r)
 
         # 批量存储到向量数据库
         if embeddings_data:

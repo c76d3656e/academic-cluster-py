@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'vue-sonner'
+import { consoleApi, type ConsoleLlmCall } from '@/api/console'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +25,9 @@ const project = ref<Project | null>(null)
 const reviewData = ref<ReviewResponse | null>(null)
 const isLoading = ref(true)
 const isStarting = ref(false)
+const llmCalls = ref<ConsoleLlmCall[]>([])
+const isLoadingCalls = ref(false)
+const selectedLlmNode = ref('')
 
 // SSE progress
 const progressLogs = ref<Array<{ time: string; node: string; message: string }>>([])
@@ -34,6 +38,7 @@ const failedNodes = ref<Set<string>>(new Set())
 const nodeDetails = ref<Record<string, string>>({})
 let eventSource: EventSource | null = null
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let callsPollTimer: ReturnType<typeof setInterval> | null = null
 
 // Pipeline stages for visual progress
 const pipelineStages = [
@@ -67,6 +72,7 @@ const outline = computed<Outline | null>(() => reviewData.value?.outline ?? null
 const sections = computed<WrittenSection[]>(() => reviewData.value?.sections ?? [])
 const evidenceCards = computed<EvidenceCard[]>(() => reviewData.value?.evidence_cards ?? [])
 const references = computed(() => reviewData.value?.references ?? [])
+const recentNodeCalls = computed(() => llmCalls.value.slice(0, 200))
 
 /** Ordered outline section titles (indexed by position) */
 const outlineTitles = computed<string[]>(() => {
@@ -238,9 +244,12 @@ function startStatusPolling() {
       if (status.status?.startsWith('running:')) {
         const node = status.status.replace('running:', '')
         currentProgressNode.value = node
+        startCallsPolling()
       }
       if (status.status === 'completed' || status.status === 'failed') {
         stopStatusPolling()
+        stopCallsPolling()
+        loadLlmCalls()
         loadReview()
       }
     } catch { /* ignore */ }
@@ -249,6 +258,18 @@ function startStatusPolling() {
 
 function stopStatusPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
+
+function startCallsPolling() {
+  if (callsPollTimer) return
+  loadLlmCalls()
+  callsPollTimer = setInterval(() => {
+    loadLlmCalls()
+  }, 5000)
+}
+
+function stopCallsPolling() {
+  if (callsPollTimer) { clearInterval(callsPollTimer); callsPollTimer = null }
 }
 
 async function loadReview() {
@@ -264,6 +285,25 @@ async function loadReview() {
   }
 }
 
+async function loadLlmCalls() {
+  isLoadingCalls.value = true
+  try {
+    llmCalls.value = await consoleApi.getMyCalls({
+      project_id: projectId,
+      node_name: selectedLlmNode.value || undefined,
+      limit: 200,
+    })
+  } catch {
+    llmCalls.value = []
+  } finally {
+    isLoadingCalls.value = false
+  }
+}
+
+function onLlmNodeFilterChange() {
+  loadLlmCalls()
+}
+
 onMounted(async () => {
   document.addEventListener('click', onClickOutside)
   try {
@@ -271,8 +311,10 @@ onMounted(async () => {
     if (isRunning.value) {
       connectSSE()
       startStatusPolling()
+      startCallsPolling()
     }
     await loadReview()
+    await loadLlmCalls()
   } catch (e: unknown) {
     const err = e as { response?: { status?: number } }
     if (err.response?.status === 401 || err.response?.status === 403) {
@@ -294,6 +336,7 @@ onUnmounted(() => {
   document.removeEventListener('click', onClickOutside)
   disconnectSSE()
   stopStatusPolling()
+  stopCallsPolling()
   if (observer) { observer.disconnect(); observer = null }
 })
 
@@ -305,12 +348,22 @@ async function startPipeline() {
     toast.success('Pipeline started')
     connectSSE()
     startStatusPolling()
+    startCallsPolling()
   } catch (e: unknown) {
     const err = e as { response?: { data?: { detail?: string } } }
     toast.error(err.response?.data?.detail || 'Failed to start')
   } finally {
     isStarting.value = false
   }
+}
+
+function formatCallTime(value: string | null): string {
+  if (!value) return ''
+  return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function formatCost(value: number): string {
+  return `$${Number(value || 0).toFixed(6)}`
 }
 
 function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
@@ -522,6 +575,68 @@ function scrollToReferences() {
             </div>
             <div v-if="progressLogs.length === 0" class="text-center py-4 text-muted-foreground/50">
               等待日志...
+            </div>
+          </div>
+        </details>
+
+        <details class="mt-4 border border-border rounded-xl bg-card overflow-hidden" open>
+          <summary class="px-5 py-3 text-sm font-medium cursor-pointer hover:bg-muted/50 transition-colors">
+            LLM 调用明细 ({{ llmCalls.length }})
+          </summary>
+          <div class="px-5 pb-4">
+            <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
+              <span class="text-muted-foreground">节点</span>
+              <select
+                v-model="selectedLlmNode"
+                class="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                @change="onLlmNodeFilterChange"
+              >
+                <option value="">全部最近调用</option>
+                <option v-for="stage in pipelineStages" :key="stage.key" :value="stage.key">
+                  {{ stage.label }} / {{ stage.key }}
+                </option>
+              </select>
+              <span class="text-muted-foreground">
+                选择 evidence_cards 可查看证据卡片阶段的完整调用明细
+              </span>
+            </div>
+            <div v-if="isLoadingCalls && llmCalls.length === 0" class="text-center py-4 text-sm text-muted-foreground">
+              加载调用记录...
+            </div>
+            <div v-else-if="recentNodeCalls.length === 0" class="text-center py-4 text-sm text-muted-foreground">
+              暂无调用记录
+            </div>
+            <div v-else class="max-h-96 overflow-auto">
+              <table class="w-full text-xs">
+                <thead class="text-muted-foreground border-b border-border">
+                  <tr>
+                    <th class="py-2 pr-3 text-left font-medium">时间</th>
+                    <th class="py-2 pr-3 text-left font-medium">节点</th>
+                    <th class="py-2 pr-3 text-left font-medium">Provider</th>
+                    <th class="py-2 pr-3 text-left font-medium">模型</th>
+                    <th class="py-2 pr-3 text-left font-medium">状态</th>
+                    <th class="py-2 pr-3 text-right font-medium">Tokens</th>
+                    <th class="py-2 pr-3 text-right font-medium">耗时</th>
+                    <th class="py-2 text-right font-medium">费用</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="call in recentNodeCalls" :key="call.id" class="border-b border-border/50 last:border-0">
+                    <td class="py-2 pr-3 whitespace-nowrap text-muted-foreground">{{ formatCallTime(call.created_at) }}</td>
+                    <td class="py-2 pr-3 whitespace-nowrap">{{ call.node_name || '-' }}</td>
+                    <td class="py-2 pr-3 whitespace-nowrap">{{ call.provider_name || '-' }}</td>
+                    <td class="py-2 pr-3 whitespace-nowrap">{{ call.requested_model || call.model_name || '-' }}</td>
+                    <td class="py-2 pr-3 whitespace-nowrap">
+                      <Badge :variant="call.status === 'error' ? 'destructive' : 'secondary'" class="text-[10px]">
+                        {{ call.status }}
+                      </Badge>
+                    </td>
+                    <td class="py-2 pr-3 text-right tabular-nums">{{ call.total_tokens || 0 }}</td>
+                    <td class="py-2 pr-3 text-right tabular-nums">{{ call.latency_ms || 0 }}ms</td>
+                    <td class="py-2 text-right tabular-nums">{{ formatCost(call.cost) }}</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </details>

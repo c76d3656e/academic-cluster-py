@@ -55,6 +55,14 @@ def _summarize_output(output: Any, max_len: int = 500) -> dict:
 _current_run_id: ContextVar[str | None] = ContextVar("current_run_id", default=None)
 _current_node: ContextVar[str | None] = ContextVar("current_node", default=None)
 _current_tracker: ContextVar[Optional["PipelineTracker"]] = ContextVar("current_tracker", default=None)
+_current_project_id: ContextVar[str | None] = ContextVar("current_project_id", default=None)
+
+# LangGraph 执行上下文不传播 ContextVar。
+# 用线程级栈（list）做最后 fallback，run_pipeline push，结束时 pop。
+# 避免了多 pipeline 互相覆盖的问题（每层独立）。
+_run_id_stack: list[str] = []
+_project_id_stack: list[str] = []
+_node_stack: list[str] = []
 _current_llm_callback: ContextVar[Optional["LLMCallbackHandler"]] = ContextVar("current_llm_callback", default=None)
 
 
@@ -593,8 +601,18 @@ def get_current_run_id() -> Optional[str]:
 
 
 def get_current_node() -> Optional[str]:
-    """获取当前正在执行的 node 名称（从 ContextVar）"""
-    return _current_node.get()
+    """获取当前正在执行的 node 名称（ContextVar + 栈回退）"""
+    return _current_node.get() or (_node_stack[-1] if _node_stack else None)
+
+
+def push_node(node_name: Optional[str]) -> None:
+    if node_name:
+        _node_stack.append(node_name)
+
+
+def pop_node() -> None:
+    if _node_stack:
+        _node_stack.pop()
 
 
 def get_current_tracker() -> Optional["PipelineTracker"]:
@@ -615,3 +633,45 @@ def get_current_llm_callback() -> Optional["LLMCallbackHandler"]:
 def set_current_llm_callback(callback: Optional["LLMCallbackHandler"]) -> None:
     """设置当前 LLMCallbackHandler 实例（在 pipeline 启动时调用）"""
     _current_llm_callback.set(callback)
+
+
+def get_current_project() -> Optional[str]:
+    """获取当前项目 ID"""
+    return _current_project_id.get() or (_project_id_stack[-1] if _project_id_stack else None)
+
+
+def push_current_project(project_id: Optional[str]) -> None:
+    """压栈设置当前项目 ID"""
+    _current_project_id.set(project_id)
+    if project_id:
+        _project_id_stack.append(project_id)
+
+
+def pop_current_project() -> None:
+    if _project_id_stack:
+        _project_id_stack.pop()
+    _current_project_id.set(_project_id_stack[-1] if _project_id_stack else None)
+
+
+def get_resolved_run_id() -> str | None:
+    """三级回退获取 run_id：ContextVar → tracker → 栈"""
+    tracker = get_current_tracker()
+    trk_run_id = getattr(tracker, "run_id", None)
+    if trk_run_id:
+        return trk_run_id
+    ctx_run_id = _current_run_id.get()
+    if ctx_run_id:
+        return ctx_run_id
+    return _run_id_stack[-1] if _run_id_stack else None
+
+
+def push_run_id(run_id: str | None) -> None:
+    """压栈设置 run_id（run_pipeline 调用时 push，结束时 pop）"""
+    if run_id:
+        _run_id_stack.append(run_id)
+
+
+def pop_run_id() -> None:
+    if _run_id_stack:
+        _run_id_stack.pop()
+    _current_run_id.set(_run_id_stack[-1] if _run_id_stack else None)

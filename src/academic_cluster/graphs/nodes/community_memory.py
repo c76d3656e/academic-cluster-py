@@ -13,10 +13,15 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...services.database import get_database
 from ...services.llm_client import ainvoke_with_callbacks, create_llm
+from ...services.provider_pool import get_llm_available_slots
 from ..state import PipelineState
 from .progress import send_progress
 
 logger = structlog.get_logger()
+
+DEFAULT_COMMUNITY_MEMORY_CONCURRENCY_CAP = 8
+DEFAULT_COMMUNITY_MEMORY_TIMEOUT_S = 90
+DEFAULT_COMMUNITY_MEMORY_LLM_LIMIT = 16
 
 
 def _as_list(value: Any) -> list:
@@ -72,6 +77,16 @@ def _parse_json_object(content: Any) -> dict:
     if not isinstance(value, dict):
         raise ValueError("LLM response is not a JSON object")
     return value
+
+
+def _int_config(config: dict | None, key: str, default: int) -> int:
+    value = (config or {}).get(key, default)
+    if isinstance(value, str) and value.strip().lower() in {"auto", ""}:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _normalize_memory_enrichment(raw: dict, fallback: dict) -> dict:
@@ -381,6 +396,22 @@ async def community_memory_node(state: PipelineState) -> dict:
     kg_entities = await db.get_kg_entities_by_ids(state.kg_entity_ids)
     kg_relations = await db.get_kg_relations_by_ids(state.kg_relation_ids)
 
+    def _cluster_size(cluster: dict) -> int:
+        return len(cluster.get("paper_ids") or [])
+
+    llm_limit = max(
+        0,
+        _int_config(
+            state.config,
+            "community_memory_llm_limit",
+            DEFAULT_COMMUNITY_MEMORY_LLM_LIMIT,
+        ),
+    )
+    llm_cluster_ids = {
+        str(cluster.get("id"))
+        for cluster in sorted(clusters, key=_cluster_size, reverse=True)[:llm_limit]
+    }
+
     async def _build_memory(cluster: dict) -> dict:
         fallback = synthesize_community_memory(
             project_id=state.project_id,
@@ -390,16 +421,44 @@ async def community_memory_node(state: PipelineState) -> dict:
             kg_entities=kg_entities,
             kg_relations=kg_relations,
         )
+        if str(cluster.get("id")) not in llm_cluster_ids:
+            metadata = dict(fallback.get("metadata") or {})
+            metadata["synthesis_mode"] = "deterministic_fallback"
+            metadata["llm_skipped"] = "community_memory_llm_limit"
+            fallback["metadata"] = metadata
+            return fallback
         try:
-            return await enrich_community_memory_with_llm(
-                topic=state.query,
-                fallback_memory=fallback,
-                cluster=cluster,
-                papers=papers,
-                evidence_cards=evidence_cards,
-                kg_entities=kg_entities,
-                kg_relations=kg_relations,
+            timeout_s = max(
+                1,
+                _int_config(
+                    state.config,
+                    "community_memory_timeout_s",
+                    DEFAULT_COMMUNITY_MEMORY_TIMEOUT_S,
+                ),
             )
+            return await asyncio.wait_for(
+                enrich_community_memory_with_llm(
+                    topic=state.query,
+                    fallback_memory=fallback,
+                    cluster=cluster,
+                    papers=papers,
+                    evidence_cards=evidence_cards,
+                    kg_entities=kg_entities,
+                    kg_relations=kg_relations,
+                ),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError:
+            metadata = dict(fallback.get("metadata") or {})
+            metadata["synthesis_mode"] = "deterministic_fallback"
+            metadata["llm_error"] = f"community memory enrichment timed out"
+            fallback["metadata"] = metadata
+            logger.warning(
+                "Community LLM synthesis timed out, using deterministic fallback",
+                cluster_id=cluster.get("id"),
+                timeout_s=timeout_s,
+            )
+            return fallback
         except Exception as e:
             metadata = dict(fallback.get("metadata") or {})
             metadata["synthesis_mode"] = "deterministic_fallback"
@@ -412,11 +471,20 @@ async def community_memory_node(state: PipelineState) -> dict:
             )
             return fallback
 
-    from ...services.provider_pool import get_llm_available_slots
-
-    requested_concurrency = int((state.config or {}).get("community_memory_concurrency", -1))
+    requested_concurrency = _int_config(state.config, "community_memory_concurrency", -1)
     provider_slots = get_llm_available_slots(default=10)
-    concurrency = provider_slots if requested_concurrency <= 0 else min(requested_concurrency, provider_slots)
+    if requested_concurrency <= 0:
+        concurrency = min(provider_slots, DEFAULT_COMMUNITY_MEMORY_CONCURRENCY_CAP)
+    else:
+        concurrency = min(requested_concurrency, provider_slots)
+    logger.info(
+        "Community memory concurrency resolved",
+        requested=requested_concurrency,
+        provider_slots=provider_slots,
+        effective=concurrency,
+        llm_limit=llm_limit,
+        clusters=len(clusters),
+    )
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
     async def _bounded(cluster: dict) -> dict:

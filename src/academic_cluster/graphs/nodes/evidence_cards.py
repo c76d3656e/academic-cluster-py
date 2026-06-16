@@ -141,7 +141,15 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             mode="auto" if requested_concurrency <= 0 else "fixed",
         )
 
-        evidence_cards = await generate_evidence_cards_batch(remaining_papers, concurrency=concurrency)
+        try:
+            timeout_s = int((state.config or {}).get("evidence_timeout_s", 120))
+        except (TypeError, ValueError):
+            timeout_s = 120
+        evidence_cards = await generate_evidence_cards_batch(
+            remaining_papers,
+            concurrency=concurrency,
+            timeout_s=timeout_s,
+        )
 
         # 构建 paper_id → cluster_id 映射
         paper_cluster_map = {}

@@ -1,13 +1,25 @@
 ﻿"""
-LangGraph 鍥惧畾涔?
-瀹氫箟涓?Pipeline 鍥俱€佸瓙鍥撅紝浠ュ強鑺傜偣闂寸殑杈瑰拰鏉′欢璺敱銆?浣跨敤 AsyncPostgresSaver 瀹炵幇鎸佷箙鍖?checkpoint锛屾敮鎸佹柇鐐规仮澶嶃€?闆嗘垚 PipelineTracker 瀹炵幇鍙娴嬫€с€?"""
+LangGraph 图定义
+定义 Pipeline 图、子图，以及节点间的边和条件路由。
+使用 AsyncPostgresSaver 实现持久化 checkpoint，支持断点恢复。
+集成 PipelineTracker 实现可观测性。
+"""
 
 import structlog
 from langgraph.graph import END, StateGraph
 
 from .state import PipelineState
 from .checkpoint import with_audit
-from ..services.observability import PipelineTracker, LLMCallbackHandler, set_current_tracker, set_current_llm_callback
+from ..services.observability import (
+    PipelineTracker,
+    LLMCallbackHandler,
+    set_current_tracker,
+    set_current_llm_callback,
+    push_current_project,
+    pop_current_project,
+    push_run_id,
+    pop_run_id,
+)
 from .nodes import (
     search_node,
     deduplicate_node,
@@ -378,6 +390,8 @@ async def run_pipeline(
 
     # 閫氳繃 ContextVar 娉ㄥ叆 tracker锛堥伩鍏嶄笉鍙簭鍒楀寲瀵硅薄杩涘叆 checkpoint锛?    set_current_tracker(tracker)
     set_current_llm_callback(llm_callback)
+    push_current_project(project_id)
+    push_run_id(tracker.run_id)
 
     if resume:
         # LangGraph 鍘熺敓鎭㈠锛氫紶 None 浣滀负 input锛岃嚜鍔ㄤ粠鏈€鍚?checkpoint 缁х画
@@ -399,10 +413,10 @@ async def run_pipeline(
             stream_mode="updates",
         ):
             for node_name, node_output in event.items():
-                # 绔嬪嵆鏇存柊椤圭洰鐘舵€佷负褰撳墠鑺傜偣
+                # 立项目状态为当前节点
                 await db.update_project_status(project_id, f"running:{node_name}")
 
-                # 瀹夊叏澶勭悊 node_output
+                # 安全处理 node_output
                 if isinstance(node_output, dict):
                     result = {**(result or {}), **node_output}
                 elif isinstance(node_output, tuple) and len(node_output) > 0 and isinstance(node_output[0], dict):
@@ -411,7 +425,7 @@ async def run_pipeline(
                     logger.warning("Unexpected node output type", node=node_name, type=type(node_output).__name__)
                     continue
 
-                # 鍙戦€?SSE 杩涘害浜嬩欢
+                # 发送 SSE 进度事件
                 if sse_manager:
                     status = node_output.get("status", "processing") if isinstance(node_output, dict) else "processing"
                     detail_msg = _build_progress_message(node_name, result)
@@ -427,7 +441,6 @@ async def run_pipeline(
             db_finish_run=db.finish_pipeline_run,
         )
 
-        # 鏇存柊椤圭洰鐘舵€佷负 completed
         await db.update_project_status(project_id, "completed")
 
         if sse_manager and result:
@@ -450,6 +463,11 @@ async def run_pipeline(
         if sse_manager:
             await sse_manager.send_error(project_id, str(e))
         raise
+    finally:
+        pop_run_id()
+        pop_current_project()
+        set_current_tracker(None)
+        set_current_llm_callback(None)
 
     return result
 
@@ -458,41 +476,41 @@ async def run_pipeline(
 def _build_progress_message(node_name: str, state: dict) -> str:
     """Build a concise progress message for SSE clients."""
     if node_name == "search":
-        return f"??????? {len(state.get('paper_ids', []))} ???"
+        return f"搜索完成，共 {len(state.get('paper_ids', []))} 篇论文"
     if node_name == "deduplicate":
-        return f"??????? {len(state.get('paper_ids', []))} ???"
+        return f"去重完成，保留 {len(state.get('paper_ids', []))} 篇"
     if node_name == "filter":
-        return f"??????? {len(state.get('paper_ids', []))} ??????"
+        return f"筛选完成，保留 {len(state.get('paper_ids', []))} 篇高质量论文"
     if node_name == "bm25":
-        return "BM25 ?????????"
+        return "BM25 评分中..."
     if node_name == "embedding":
-        return f"???????? {len(state.get('embedding_ids', []))} ???"
+        return f"正在向量化 {len(state.get('embedding_ids', []))} 篇论文..."
     if node_name == "pgvector_knn":
-        return "pgvector KNN ?????"
+        return "pgvector KNN 检索中"
     if node_name == "rerank":
-        return f"??????{len(state.get('reranked_paper_ids', []))} ?????"
+        return f"重排序 {len(state.get('reranked_paper_ids', []))} 篇论文完成"
     if node_name == "community_detection":
-        return f"????????? {len(state.get('cluster_ids', []))} ?????"
+        return f"社区检测中，发现 {len(state.get('cluster_ids', []))} 个簇"
     if node_name == "visualize_community":
-        return "?????????"
+        return "社区可视化中"
     if node_name == "evidence_cards":
-        return f"?????????? {len(state.get('evidence_card_ids', []))} ?"
+        return f"正在生成 {len(state.get('evidence_card_ids', []))} 个证据卡片"
     if node_name == "kg_extraction":
-        return f"?????????{len(state.get('kg_entity_ids', []))} ????{len(state.get('kg_relation_ids', []))} ???"
+        return f"知识图谱抽取中，提取 {len(state.get('kg_entity_ids', []))} 个实体、{len(state.get('kg_relation_ids', []))} 条关系"
     if node_name == "community_memory":
-        return f"?????????? {len(state.get('community_memory_ids', []))} ?"
+        return f"社区记忆中，已生成 {len(state.get('community_memory_ids', []))} 条"
     if node_name == "gap_analysis":
-        return "????????"
+        return "差距分析中"
     if node_name == "targeted_refine":
-        return "????????"
+        return "定向改进中"
     if node_name == "outline_generation":
-        return "??????"
+        return "大纲生成中"
     if node_name == "write_review":
-        return "??????"
+        return "综述撰写中"
     if node_name == "coverage_audit":
-        return "???????"
+        return "覆盖率审计中"
     if node_name == "artifact_registration":
-        return "???????"
+        return "成果注册中"
     if node_name == "finalize":
-        return "????"
-    return f"{node_name} ??"
+        return "定稿中"
+    return f"{node_name} 运行中"

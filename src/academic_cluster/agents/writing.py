@@ -11,6 +11,7 @@
 """
 
 import json
+import os
 import re
 
 import structlog
@@ -29,6 +30,91 @@ from ..prompts.writing_rules import (
 )
 
 logger = structlog.get_logger()
+
+_WRITING_CONTEXT_CHAR_BUDGET = 52000
+_REFINE_SECTION_UNITS_ENV = "WRITING_REFINE_SECTION_UNITS"
+DEFAULT_WRITING_TIMEOUT_S = 120.0
+DEFAULT_OUTLINE_TIMEOUT_S = 120.0
+DEFAULT_SECTION_WRITE_TIMEOUT_S = 120.0
+DEFAULT_SECTION_REFINE_TIMEOUT_S = 90.0
+
+
+def _clip_text_block(text: str | None, max_chars: int) -> str:
+    """Keep prompt blocks within model context budget while preserving boundaries."""
+    if not text:
+        return ""
+    text = str(text)
+    if len(text) <= max_chars:
+        return text
+    clipped = text[:max_chars]
+    boundary = max(clipped.rfind("\n\n"), clipped.rfind("\n- "), clipped.rfind("\n["))
+    if boundary > max_chars * 0.65:
+        clipped = clipped[:boundary]
+    return clipped.rstrip() + "\n...[truncated for context budget]"
+
+
+def _compact_section_inputs(
+    cluster_data: str,
+    sample_papers: str,
+    references: str,
+    community_context: str | None,
+    evidence_limitations: str | None,
+    evidence_cards: list[dict] | None,
+) -> tuple[str, str, str, str | None, str | None, list[dict] | None]:
+    return (
+        _clip_text_block(cluster_data, 9000),
+        _clip_text_block(sample_papers, 12000),
+        _clip_text_block(references, 10000),
+        _clip_text_block(community_context, 7000) if community_context else None,
+        _clip_text_block(evidence_limitations, 5000) if evidence_limitations else None,
+        list(evidence_cards or [])[:8] if evidence_cards else evidence_cards,
+    )
+
+
+def _estimate_prompt_tokens(text: str) -> int:
+    # Conservative mixed Chinese/English estimate for OpenAI-compatible 32k models.
+    return max(1, len(text) // 2)
+
+
+def _writing_max_tokens_for_prompt(prompt: str, requested: int = 4096) -> int:
+    remaining = 32768 - _estimate_prompt_tokens(prompt) - 512
+    return max(1024, min(requested, remaining))
+
+
+def _should_refine_section_units() -> bool:
+    """Optional LLM paragraph polishing is expensive; keep it opt-in for E2E stability."""
+    value = os.getenv(_REFINE_SECTION_UNITS_ENV, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _fallback_section_text(
+    section_plan: dict,
+    references: str,
+    evidence_cards: list[dict] | None = None,
+) -> str:
+    """Build a grounded fallback paragraph when the writing LLM cannot finish."""
+    title = str(section_plan.get("title") or "本节").strip()
+    description = str(section_plan.get("description") or "").strip()
+    citation_numbers = re.findall(r"\[(\d+)\]", references or "")
+    citation = f"[{citation_numbers[0]}]" if citation_numbers else ""
+
+    evidence_bits = []
+    for card in list(evidence_cards or [])[:3]:
+        claim = str(card.get("claim") or "").strip()
+        method = str(card.get("method") or "").strip()
+        if claim:
+            evidence_bits.append(claim)
+        elif method:
+            evidence_bits.append(method)
+
+    body = description or f"{title}围绕该研究方向中的代表性问题展开。"
+    if evidence_bits:
+        body += " 现有证据显示，" + "；".join(evidence_bits[:2]) + "。"
+    if citation:
+        body += f" 这一判断需要结合候选文献{citation}继续细化。"
+    else:
+        body += " 由于当前写作调用未返回可用正文，本段保留为降级草稿，后续应结合证据卡片继续扩展。"
+    return body
 
 
 # =============================================================================
@@ -95,7 +181,12 @@ def detect_paper_stacking(text: str) -> list[str]:
     return warnings
 
 
-async def _ainvoke_with_retry(agent, messages, max_retries=3):
+async def _ainvoke_with_retry(
+    agent,
+    messages,
+    max_retries=2,
+    timeout_s: float = DEFAULT_WRITING_TIMEOUT_S,
+):
     """带重试的 LLM 调用"""
     from ..services.llm_client import ainvoke_with_callbacks
 
@@ -105,7 +196,7 @@ async def _ainvoke_with_retry(agent, messages, max_retries=3):
         reraise=True,
     )
     async def _call():
-        return await ainvoke_with_callbacks(agent, messages)
+        return await ainvoke_with_callbacks(agent, messages, timeout=timeout_s)
 
     return await _call()
 
@@ -117,6 +208,7 @@ async def _ainvoke_with_retry(agent, messages, max_retries=3):
 def create_writing_agent(
     model: str | None = None,
     temperature: float = 0.7,
+    max_tokens: int = 4096,
 ) -> ChatOpenAI:
     """
     创建写作 Agent
@@ -130,7 +222,7 @@ def create_writing_agent(
     """
     from ..services.llm_client import create_llm
 
-    llm = create_llm(temperature=temperature, max_tokens=8192)
+    llm = create_llm(temperature=temperature, max_tokens=max_tokens)
     logger.info("Writing agent created")
     return llm
 
@@ -359,7 +451,11 @@ async def generate_outline(
         HumanMessage(content=prompt),
     ]
 
-    response = await _ainvoke_with_retry(agent, messages)
+    response = await _ainvoke_with_retry(
+        agent,
+        messages,
+        timeout_s=DEFAULT_OUTLINE_TIMEOUT_S,
+    )
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
     raw_content = response.content
@@ -505,6 +601,21 @@ async def write_section(
     Returns:
         章节内容
     """
+    (
+        cluster_data,
+        sample_papers,
+        references,
+        community_context,
+        evidence_limitations,
+        evidence_cards,
+    ) = _compact_section_inputs(
+        cluster_data=cluster_data,
+        sample_papers=sample_papers,
+        references=references,
+        community_context=community_context,
+        evidence_limitations=evidence_limitations,
+        evidence_cards=evidence_cards,
+    )
     agent = create_writing_agent(temperature=0.7)
 
     # 注入 community context 和 evidence limitations 到 cluster_data
@@ -787,12 +898,31 @@ A literature review is NOT a collection of individual paper summaries. Each para
                 f"## 后文预告\n下一节：{next_title} — {next_desc}\n请在结尾为此做铺垫。\n\n## 写作要求",
             )
 
+    if len(prompt) > _WRITING_CONTEXT_CHAR_BUDGET:
+        prompt = _clip_text_block(prompt, _WRITING_CONTEXT_CHAR_BUDGET)
+    agent = create_writing_agent(
+        temperature=0.7,
+        max_tokens=_writing_max_tokens_for_prompt(prompt),
+    )
+
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=prompt),
     ]
 
-    response = await _ainvoke_with_retry(agent, messages)
+    try:
+        response = await _ainvoke_with_retry(
+            agent,
+            messages,
+            timeout_s=DEFAULT_SECTION_WRITE_TIMEOUT_S,
+        )
+    except Exception as e:
+        logger.error(
+            "Section writing failed, using fallback text",
+            section_title=section_plan.get("title", ""),
+            error=str(e),
+        )
+        return _fallback_section_text(section_plan, references, evidence_cards)
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
     content = response.content
@@ -906,6 +1036,7 @@ NEXT paragraph:
                 HumanMessage(content=prompt),
             ],
             max_retries=2,
+            timeout_s=DEFAULT_SECTION_REFINE_TIMEOUT_S,
         )
         candidate = _as_single_unit(_coerce_llm_text(response.content))
         if candidate:
@@ -952,6 +1083,22 @@ async def write_section_units(
             next_outline=next_outline,
         )
 
+    (
+        compact_cluster_data,
+        compact_sample_papers,
+        compact_references,
+        compact_community_context,
+        compact_evidence_limitations,
+        compact_evidence_cards,
+    ) = _compact_section_inputs(
+        cluster_data=cluster_data,
+        sample_papers=sample_papers,
+        references=references,
+        community_context=community_context,
+        evidence_limitations=evidence_limitations,
+        evidence_cards=evidence_cards,
+    )
+
     units: list[str] = []
     for idx, paragraph in enumerate(paragraphs):
         unit_plan = dict(section_plan)
@@ -973,26 +1120,42 @@ async def write_section_units(
         if units:
             unit_prev = f"{prev_summary}\n\nPrevious paragraph in this section:\n{units[-1]}"
 
-        raw_unit = await write_section(
-            topic=topic,
-            review_title=review_title,
-            section_plan=unit_plan,
-            cluster_data=cluster_data,
-            sample_papers=sample_papers,
-            references=references,
-            evidence_cards=evidence_cards,
-            community_context=community_context,
-            evidence_limitations=evidence_limitations,
-            section_outline=_unit_outline(section_outline or {}, paragraph),
-            prev_summary=unit_prev,
-            next_outline=_next_unit_hint(paragraphs, idx, next_outline),
-        )
+        try:
+            raw_unit = await write_section(
+                topic=topic,
+                review_title=review_title,
+                section_plan=unit_plan,
+                cluster_data=compact_cluster_data,
+                sample_papers=compact_sample_papers,
+                references=compact_references,
+                evidence_cards=compact_evidence_cards,
+                community_context=compact_community_context,
+                evidence_limitations=compact_evidence_limitations,
+                section_outline=_unit_outline(section_outline or {}, paragraph),
+                prev_summary=unit_prev,
+                next_outline=_next_unit_hint(paragraphs, idx, next_outline),
+            )
+        except Exception as e:
+            logger.error(
+                "Paragraph unit writing failed, using fallback text",
+                section_title=section_plan.get("title", ""),
+                paragraph_index=idx + 1,
+                error=str(e),
+            )
+            raw_unit = _fallback_section_text(unit_plan, compact_references, compact_evidence_cards)
         unit_text = _as_single_unit(_coerce_llm_text(raw_unit))
         if not unit_text:
             raise ValueError(f"Paragraph unit {idx + 1} produced empty content")
         units.append(unit_text)
 
-    units = await refine_section_units_local_coherence(units, section_outline or {}, references)
+    if _should_refine_section_units():
+        units = await refine_section_units_local_coherence(units, section_outline or {}, references)
+    else:
+        logger.info(
+            "Skipped optional section unit coherence refinement",
+            unit_count=len(units),
+            env=_REFINE_SECTION_UNITS_ENV,
+        )
     return "\n\n".join(unit for unit in units if unit.strip())
 
 
@@ -1032,7 +1195,11 @@ async def revise_section(
         HumanMessage(content=prompt),
     ]
 
-    response = await _ainvoke_with_retry(agent, messages)
+    try:
+        response = await _ainvoke_with_retry(agent, messages, timeout_s=DEFAULT_WRITING_TIMEOUT_S)
+    except Exception as e:
+        logger.error("Legacy section revision failed, returning original content", error=str(e))
+        return section_content
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
     content = response.content

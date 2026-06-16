@@ -12,7 +12,7 @@ import httpx
 import structlog
 
 from ...services.database import get_database
-from ...services.observability import get_current_tracker
+from ...services.observability import get_current_tracker, get_current_run_id
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -105,65 +105,88 @@ async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) 
     使用 Rerank 模型对论文进行重排序
 
     通过 Provider Pool 自动选择可用的 Rerank 端点。
+    分批发送避免 API 文档数上限（Gitee 等通常限制 100~200）。
     超时保护：整体调用超过 timeout 秒则抛出 TimeoutError。
     """
     from ...services.provider_pool import get_rerank_pool
 
     pool = get_rerank_pool()
+    BATCH_SIZE = 100  # 每批最多 100 篇，避免超长上下文导致 400
 
-    # 构建文档列表
-    documents = []
-    for paper in papers:
-        title = paper.get("title", "")
-        abstract = paper.get("abstract", "")
-        documents.append(f"{title} {abstract}".strip())
+    async def _rerank_batch(batch_papers: list[dict], batch_idx: int) -> list[dict]:
+        # 构建文档列表
+        documents = []
+        for paper in batch_papers:
+            title = paper.get("title", "")
+            abstract = paper.get("abstract", "")
+            documents.append(f"{title} {abstract}".strip())
 
-    async def _do_rerank(provider) -> list[dict]:
-        base = provider.api_url.rstrip("/")
-        if not base.endswith("/v1"):
-            url = f"{base}/v1/rerank"
-        else:
-            url = f"{base}/rerank"
-        headers = {
-            "Authorization": f"Bearer {provider.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": provider.model,
-            "query": query,
-            "documents": documents,
-            "top_n": len(documents),
-        }
+        async def _do_rerank(provider) -> list[dict]:
+            base = provider.api_url.rstrip("/")
+            if not base.endswith("/v1"):
+                url = f"{base}/v1/rerank"
+            else:
+                url = f"{base}/rerank"
+            headers = {
+                "Authorization": f"Bearer {provider.api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": provider.model,
+                "query": query,
+                "documents": documents,
+                "top_n": len(documents),
+            }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, headers=headers, timeout=60)
-            response.raise_for_status()
-            data = response.json()
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, headers=headers, timeout=60)
+                response.raise_for_status()
+                data = response.json()
 
-        # 整理结果
-        results = data.get("results", [])
-        reranked = []
-        for result in results:
-            idx = result.get("index", 0)
-            score = float(result.get("relevance_score", 0.0))
-            if idx < len(papers):
-                paper = papers[idx].copy()
-                paper["rerank_score"] = score
-                reranked.append(paper)
+            results = data.get("results", [])
+            reranked = []
+            for result in results:
+                idx = result.get("index", 0)
+                score = float(result.get("relevance_score", 0.0))
+                if idx < len(batch_papers):
+                    paper = batch_papers[idx].copy()
+                    paper["rerank_score"] = score
+                    reranked.append(paper)
+            return reranked
 
-        # 应用质量评分（对齐 Rust 版 score_and_tier_papers）
-        for paper in reranked:
-            paper["quality_score"] = _compute_quality_score(paper)
-            paper["quality_tier"] = _quality_tier(paper["quality_score"])
+        try:
+            return await asyncio.wait_for(pool.execute(_do_rerank), timeout=timeout)
+        except Exception as exc:
+            logger.warning(
+                "Rerank batch failed; falling back to local ordering for this batch",
+                batch=batch_idx,
+                batch_size=len(batch_papers),
+                error=str(exc)[:300],
+            )
+            fallback = []
+            for paper in batch_papers:
+                item = paper.copy()
+                item["rerank_score"] = 0.0
+                fallback.append(item)
+            return fallback
 
-        # 按质量分数排序
-        reranked.sort(key=lambda x: x.get("quality_score", 0), reverse=True)
-        return reranked
+    logger.info("Reranking papers", total=len(papers), batch_size=BATCH_SIZE)
 
-    return await asyncio.wait_for(
-        pool.execute(_do_rerank),
-        timeout=timeout,
-    )
+    all_reranked = []
+    for i in range(0, len(papers), BATCH_SIZE):
+        batch = papers[i:i + BATCH_SIZE]
+        batch_results = await _rerank_batch(batch, i // BATCH_SIZE)
+        all_reranked.extend(batch_results)
+        logger.info("Rerank batch complete", batch=i // BATCH_SIZE, batch_size=len(batch), results=len(batch_results))
+
+    # 应用质量评分（对齐 Rust 版 score_and_tier_papers）
+    for paper in all_reranked:
+        paper["quality_score"] = _compute_quality_score(paper)
+        paper["quality_tier"] = _quality_tier(paper["quality_score"])
+
+    # 按质量分数排序
+    all_reranked.sort(key=lambda x: x.get("quality_score", 0), reverse=True)
+    return all_reranked
 
 
 async def rerank_node(state: PipelineState) -> dict:
@@ -206,7 +229,9 @@ async def rerank_node(state: PipelineState) -> dict:
         _rerank_elapsed = int((_time.monotonic() - _rerank_start) * 1000)
 
         # 记录 rerank 调用到 tracker 和 DB
-        if tracker and tracker.run_id:
+        from ...services.observability import get_resolved_run_id
+        run_id = get_resolved_run_id()
+        if run_id:
             try:
                 from ...api.admin.providers import get_provider_pricing
                 from ...services.provider_pool import get_rerank_pool
@@ -227,29 +252,25 @@ async def rerank_node(state: PipelineState) -> dict:
                 if input_price:
                     cost = (prompt_tokens * input_price) / 1_000_000
 
-                await tracker.token_tracker.record(
-                    node_name="rerank",
-                    provider_name=provider_name,
-                    model_name=rerank_model,
-                    call_type="rerank",
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=0,
-                    cost=cost,
-                    latency_ms=_rerank_elapsed,
-                )
-
-                exec_id = tracker._node_ids.get("rerank")
-                if not exec_id:
-                    exec_id = await db.create_node_execution(
-                        tracker.run_id,
-                        "rerank",
-                        "rerank",
+                if tracker:
+                    await tracker.token_tracker.record(
+                        node_name="rerank",
+                        provider_name=provider_name,
+                        model_name=rerank_model,
+                        call_type="rerank",
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=0,
+                        cost=cost,
+                        latency_ms=_rerank_elapsed,
                     )
-                    tracker._node_ids["rerank"] = exec_id
+
+                from ...services.observability import get_current_project
+                project_id_for_call = getattr(tracker, "project_id", None) or get_current_project()
+                exec_id = await db.create_node_execution(run_id, "rerank", "rerank")
                 call_id = await db.create_llm_call(
-                    pipeline_run_id=tracker.run_id,
+                    pipeline_run_id=run_id,
                     node_execution_id=exec_id,
-                    project_id=tracker.project_id,
+                    project_id=project_id_for_call,
                     node_name="rerank",
                     call_type="rerank",
                     provider_name=provider_name,

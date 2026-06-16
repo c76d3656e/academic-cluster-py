@@ -273,6 +273,9 @@ async def _ensure_observability_schema(db):
                 upstream_model = COALESCE(upstream_model, model_name)
             WHERE requested_model IS NULL OR upstream_model IS NULL
         """))
+        await session.execute(text(
+            "ALTER TABLE llm_calls ALTER COLUMN status SET DEFAULT 'running'"
+        ))
 
         for index_sql in [
             "CREATE INDEX IF NOT EXISTS idx_llm_calls_project ON llm_calls(project_id)",
@@ -285,10 +288,14 @@ async def _ensure_observability_schema(db):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    settings = get_settings()
+
+    from ..services.observability import setup_structlog
+    setup_structlog(settings.log_level)
+
     logger.info("Starting application")
 
     # 安全校验: 生产环境检查配置是否安全
-    settings = get_settings()
     settings.validate_security()
 
     # 初始化服务

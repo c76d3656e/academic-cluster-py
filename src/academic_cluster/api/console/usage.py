@@ -88,18 +88,24 @@ class LLMCallListResponse(BaseModel):
 @router.get("/usage/trend", response_model=UsageTrendResponse)
 async def get_usage_trend(
     days: int = Query(7, ge=1, le=90),
+    granularity: str = Query("day", pattern="^(day|hour)$"),
     current_user: dict = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
 ):
-    """获取用户每日用量趋势"""
+    """获取用户用量趋势，支持 day/hour 粒度"""
     user_id = current_user["id"]
+
+    time_group = "DATE(lc.created_at)" if granularity == "day" else "date_trunc('hour', lc.created_at)"
+    run_time_group = "DATE(pr.created_at)" if granularity == "day" else "date_trunc('hour', pr.created_at)"
+    time_filter = f"lc.created_at >= NOW() - (:days * INTERVAL '1 day')"
+    run_time_filter = f"pr.created_at >= NOW() - (:days * INTERVAL '1 day')"
 
     async with db.session() as session:
         result = await session.execute(
-            text("""
+            text(f"""
                 WITH call_daily AS (
                     SELECT
-                        DATE(lc.created_at) AS date,
+                        {time_group} AS date,
                         COUNT(*) AS call_count,
                         COALESCE(SUM(lc.total_tokens), 0) AS total_tokens,
                         COALESCE(SUM(lc.cost), 0) AS total_cost,
@@ -112,16 +118,15 @@ async def get_usage_trend(
                         COALESCE(SUM(lc.prompt_tokens), 0) AS prompt_tokens,
                         COALESCE(SUM(lc.completion_tokens), 0) AS completion_tokens
                     FROM llm_calls lc
-                    JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
-                    WHERE pr.project_id IN (
-                        SELECT id FROM projects WHERE user_id = :user_id
-                    )
-                    AND lc.created_at >= NOW() - (:days * INTERVAL '1 day')
-                    GROUP BY DATE(lc.created_at)
+                    LEFT JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
+                    LEFT JOIN projects p ON COALESCE(lc.project_id, pr.project_id) = p.id
+                    WHERE (p.user_id = :user_id OR lc.project_id IN (SELECT id FROM projects WHERE user_id = :user_id))
+                    AND {time_filter}
+                    GROUP BY {time_group}
                 ),
                 run_daily AS (
                     SELECT
-                        DATE(pr.created_at) AS date,
+                        {run_time_group} AS date,
                         COALESCE(SUM(pr.total_llm_calls), 0) AS call_count,
                         COALESCE(SUM(pr.total_tokens), 0) AS total_tokens,
                         COALESCE(SUM(pr.total_cost), 0) AS total_cost,
@@ -137,12 +142,12 @@ async def get_usage_trend(
                     WHERE pr.project_id IN (
                         SELECT id FROM projects WHERE user_id = :user_id
                     )
-                    AND pr.created_at >= NOW() - (:days * INTERVAL '1 day')
+                    AND {run_time_filter}
                     AND pr.total_llm_calls > 0
                     AND NOT EXISTS (
                         SELECT 1 FROM llm_calls lc WHERE lc.pipeline_run_id = pr.id
                     )
-                    GROUP BY DATE(pr.created_at)
+                    GROUP BY {run_time_group}
                 ),
                 usage_daily AS (
                     SELECT * FROM call_daily
@@ -170,23 +175,42 @@ async def get_usage_trend(
         )
         rows = result.fetchall()
 
-    trend = [
-        DailyTrendItem(
-            date=str(row[0]),
-            call_count=int(row[1]),
-            total_tokens=int(row[2]),
-            total_cost=float(row[3]),
-            llm_tokens=int(row[4]),
-            embedding_tokens=int(row[5]),
-            rerank_tokens=int(row[6]),
-            llm_cost=float(row[7]),
-            embedding_cost=float(row[8]),
-            rerank_cost=float(row[9]),
-            prompt_tokens=int(row[10]),
-            completion_tokens=int(row[11]),
-        )
-        for row in rows
-    ]
+    if granularity == "hour":
+        trend = [
+            DailyTrendItem(
+                date=str(row[0]),
+                call_count=int(row[1]),
+                total_tokens=int(row[2]),
+                total_cost=float(row[3]),
+                llm_tokens=int(row[4]),
+                embedding_tokens=int(row[5]),
+                rerank_tokens=int(row[6]),
+                llm_cost=float(row[7]),
+                embedding_cost=float(row[8]),
+                rerank_cost=float(row[9]),
+                prompt_tokens=int(row[10]),
+                completion_tokens=int(row[11]),
+            )
+            for row in rows
+        ]
+    else:
+        trend = [
+            DailyTrendItem(
+                date=str(row[0]),
+                call_count=int(row[1]),
+                total_tokens=int(row[2]),
+                total_cost=float(row[3]),
+                llm_tokens=int(row[4]),
+                embedding_tokens=int(row[5]),
+                rerank_tokens=int(row[6]),
+                llm_cost=float(row[7]),
+                embedding_cost=float(row[8]),
+                rerank_cost=float(row[9]),
+                prompt_tokens=int(row[10]),
+                completion_tokens=int(row[11]),
+            )
+            for row in rows
+        ]
 
     return UsageTrendResponse(days=days, trend=trend)
 
@@ -205,10 +229,16 @@ async def get_usage_calls(
     user_id = current_user["id"]
 
     # 构建查询条件
+    is_admin = current_user.get("role") == "admin"
+    owner_filter = (
+        "TRUE"
+        if is_admin
+        else "(p.user_id = :user_id OR lc.project_id IN (SELECT id FROM projects WHERE user_id = :user_id))"
+    )
     params: dict = {"user_id": user_id, "limit": limit}
     project_filter = ""
     if project_id:
-        project_filter = "AND pr.project_id = :project_id"
+        project_filter = "AND COALESCE(lc.project_id, pr.project_id) = :project_id"
         params["project_id"] = project_id
     node_filter = ""
     if node_name:
@@ -229,11 +259,10 @@ async def get_usage_calls(
             text(f"""
                 SELECT COUNT(*)
                 FROM llm_calls lc
-                JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
+                LEFT JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
+                LEFT JOIN projects p ON COALESCE(lc.project_id, pr.project_id) = p.id
                 LEFT JOIN node_executions ne ON lc.node_execution_id = ne.id
-                WHERE pr.project_id IN (
-                    SELECT id FROM projects WHERE user_id = :user_id
-                )
+                WHERE {owner_filter}
                 {project_filter}
                 {node_filter}
                 {status_filter}
@@ -272,12 +301,10 @@ async def get_usage_calls(
                     lc.request_metadata,
                     lc.created_at
                 FROM llm_calls lc
-                JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
-                JOIN projects p ON pr.project_id = p.id
+                LEFT JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
+                LEFT JOIN projects p ON COALESCE(lc.project_id, pr.project_id) = p.id
                 LEFT JOIN node_executions ne ON lc.node_execution_id = ne.id
-                WHERE pr.project_id IN (
-                    SELECT id FROM projects WHERE user_id = :user_id
-                )
+                WHERE {owner_filter}
                 {project_filter}
                 {node_filter}
                 {status_filter}

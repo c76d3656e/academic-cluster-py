@@ -1393,6 +1393,40 @@ class DatabaseService:
                 params,
             )
 
+    async def refresh_pipeline_run_usage_from_calls(self, run_id: str) -> None:
+        """Recompute run usage from persisted call rows.
+
+        Request-level audit rows are the source of truth while the pipeline is
+        running. Keeping the run summary in sync makes usage pages useful before
+        the final tracker summary is written.
+        """
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    UPDATE pipeline_runs pr
+                    SET total_prompt_tokens = COALESCE(stats.prompt_tokens, 0),
+                        total_completion_tokens = COALESCE(stats.completion_tokens, 0),
+                        total_tokens = COALESCE(stats.total_tokens, 0),
+                        total_cost = COALESCE(stats.total_cost, 0),
+                        total_llm_calls = COALESCE(stats.call_count, 0)
+                    FROM (
+                        SELECT
+                            pipeline_run_id,
+                            COUNT(*) AS call_count,
+                            COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                            COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                            COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                            COALESCE(SUM(cost), 0) AS total_cost
+                        FROM llm_calls
+                        WHERE pipeline_run_id = :run_id
+                        GROUP BY pipeline_run_id
+                    ) stats
+                    WHERE pr.id = stats.pipeline_run_id
+                      AND pr.id = :run_id
+                """),
+                {"run_id": run_id},
+            )
+
     async def create_node_execution(
         self,
         pipeline_run_id: str,
@@ -1497,6 +1531,7 @@ class DatabaseService:
         output_preview: str | None = None,
         request_metadata: dict | None = None,
         retry_of: str | None = None,
+        status: str = "running",
     ) -> str:
         """创建 LLM 调用记录（先插入骨架，完成时更新统计）"""
         call_id = str(uuid.uuid4())
@@ -1507,13 +1542,13 @@ class DatabaseService:
                     INSERT INTO llm_calls (
                         id, project_id, pipeline_run_id, node_execution_id, node_name,
                         call_type, provider_name, model_name, requested_model, upstream_model,
-                        api_base_url, api_key_hint,
+                        api_base_url, api_key_hint, status,
                         is_stream, latency_ms, first_token_ms,
                         input_preview, output_preview, request_metadata, retry_of
                     ) VALUES (
                         :id, :project_id, :pipeline_run_id, :node_execution_id, :node_name,
                         :call_type, :provider_name, :model_name, :requested_model, :upstream_model,
-                        :api_base_url, :api_key_hint,
+                        :api_base_url, :api_key_hint, :status,
                         :is_stream, :latency_ms, :first_token_ms,
                         :input_preview, :output_preview, :request_metadata, :retry_of
                     )
@@ -1531,6 +1566,7 @@ class DatabaseService:
                     "upstream_model": upstream_model or model_name,
                     "api_base_url": api_base_url,
                     "api_key_hint": api_key_hint,
+                    "status": status,
                     "is_stream": is_stream,
                     "latency_ms": latency_ms,
                     "first_token_ms": first_token_ms,
@@ -1589,6 +1625,23 @@ class DatabaseService:
                     "upstream_model": upstream_model,
                 }
             )
+
+        async with self.session() as session:
+            result = await session.execute(
+                text("SELECT pipeline_run_id FROM llm_calls WHERE id = :id"),
+                {"id": call_id},
+            )
+            row = result.fetchone()
+
+        if row and row[0]:
+            try:
+                await self.refresh_pipeline_run_usage_from_calls(str(row[0]))
+            except Exception as e:
+                logger.warning(
+                    "Failed to refresh pipeline run usage from llm_calls",
+                    run_id=str(row[0]),
+                    error=str(e),
+                )
 
     async def get_pipeline_run_stats(self, run_id: str) -> dict | None:
         """获取 Pipeline 运行的汇总统计"""
@@ -1665,7 +1718,7 @@ class DatabaseService:
             conditions.append("lc.pipeline_run_id = :run_id")
             params["run_id"] = run_id
         if project_id:
-            conditions.append("pr.project_id = :project_id")
+            conditions.append("COALESCE(lc.project_id, pr.project_id) = :project_id")
             params["project_id"] = project_id
 
         where_clause = " AND ".join(conditions)
@@ -1673,7 +1726,7 @@ class DatabaseService:
         # 构建 JOIN 子句 - 来源固定，不来自用户输入
         join_clause = ""
         if project_id:
-            join_clause = "JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id"
+            join_clause = "LEFT JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id"
 
         query = f"""
             SELECT

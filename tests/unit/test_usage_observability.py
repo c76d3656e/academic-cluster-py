@@ -1,4 +1,4 @@
-from academic_cluster.api.console.usage import get_usage_trend
+from academic_cluster.api.console.usage import get_usage_calls, get_usage_trend
 from academic_cluster.services.llm_client import ainvoke_with_callbacks
 from academic_cluster.services.observability import PipelineTracker, set_current_tracker
 
@@ -80,6 +80,7 @@ async def test_ainvoke_persists_llm_call_without_node_execution(monkeypatch):
     assert db.created_calls[0]["node_name"] == "unknown"
     assert db.created_calls[0]["requested_model"] == "test-model"
     assert db.created_calls[0]["upstream_model"] == "test-model"
+    assert db.created_calls[0]["status"] == "running"
     assert db.finished_calls[0]["prompt_tokens"] == 11
     assert db.finished_calls[0]["completion_tokens"] == 7
 
@@ -142,11 +143,13 @@ class _FakeResult:
 
 class _FakeSession:
     def __init__(self):
+        self.statements = []
         self.statement = None
         self.params = None
 
     async def execute(self, statement, params):
         self.statement = str(statement)
+        self.statements.append(str(statement))
         self.params = params
         return _FakeResult()
 
@@ -183,3 +186,67 @@ async def test_usage_trend_falls_back_to_pipeline_run_summaries():
     assert response.trend[0].total_tokens == 2018871
     assert "run_daily" in db.fake_session.statement
     assert "NOT EXISTS" in db.fake_session.statement
+
+
+class _FakeCallsCountResult:
+    def scalar(self):
+        return 0
+
+
+class _FakeCallsRowsResult:
+    def fetchall(self):
+        return []
+
+
+class _FakeCallsSession(_FakeSession):
+    def __init__(self):
+        super().__init__()
+        self._index = 0
+
+    async def execute(self, statement, params):
+        self.statement = str(statement)
+        self.statements.append(str(statement))
+        self.params = params
+        self._index += 1
+        if self._index == 1:
+            return _FakeCallsCountResult()
+        return _FakeCallsRowsResult()
+
+
+class _FakeCallsDb:
+    def __init__(self):
+        self.fake_session = _FakeCallsSession()
+
+    def session(self):
+        return _FakeSessionContext(self.fake_session)
+
+
+async def test_usage_calls_filters_by_call_project_or_run_project():
+    db = _FakeCallsDb()
+
+    response = await get_usage_calls(
+        project_id="project-1",
+        current_user={"id": "user-1"},
+        db=db,
+    )
+
+    assert response.total == 0
+    assert db.fake_session.params["project_id"] == "project-1"
+    assert all(
+        "COALESCE(lc.project_id, pr.project_id) = :project_id" in statement
+        for statement in db.fake_session.statements
+    )
+
+
+async def test_usage_calls_allows_admin_project_lookup():
+    db = _FakeCallsDb()
+
+    response = await get_usage_calls(
+        project_id="project-1",
+        current_user={"id": "admin-1", "role": "admin"},
+        db=db,
+    )
+
+    assert response.total == 0
+    assert db.fake_session.params["project_id"] == "project-1"
+    assert all("WHERE TRUE" in statement for statement in db.fake_session.statements)

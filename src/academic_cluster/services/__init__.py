@@ -14,6 +14,12 @@ from .observability import (
     create_pipeline_tracker,
     get_current_node,
     get_current_run_id,
+    get_current_project,
+    push_current_project,
+    pop_current_project,
+    get_resolved_run_id,
+    push_run_id,
+    pop_run_id,
     setup_structlog,
 )
 
@@ -34,6 +40,13 @@ __all__ = [
     "create_llm_callback_handler",
     "create_pipeline_tracker",
     "get_current_node",
+    "set_global_node",
     "get_current_run_id",
+    "get_current_project",
+    "push_current_project",
+    "pop_current_project",
+    "get_resolved_run_id",
+    "push_run_id",
+    "pop_run_id",
     "setup_structlog",
 ]

@@ -14,7 +14,7 @@ from typing import Callable
 import structlog
 
 from ..services.database import get_database
-from ..services.observability import _summarize_output, get_current_tracker
+from ..services.observability import _summarize_output, get_current_tracker, pop_node, push_node
 
 logger = structlog.get_logger()
 
@@ -39,6 +39,7 @@ def with_audit(node_name: str):
             db = get_database()
             project_id = state.project_id if hasattr(state, 'project_id') else None
             start_time = time.time()
+            push_node(node_name)
 
             # 获取 tracker（从 ContextVar）
             tracker = get_current_tracker()
@@ -195,6 +196,8 @@ def with_audit(node_name: str):
                 )
 
                 raise
+            finally:
+                pop_node()
 
         return wrapper
     return decorator

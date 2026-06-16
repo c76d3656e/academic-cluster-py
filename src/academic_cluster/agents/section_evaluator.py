@@ -19,6 +19,7 @@ from ..services.llm_client import create_llm, ainvoke_with_callbacks
 from ..tools.json_repair import try_parse_json
 
 logger = structlog.get_logger()
+DEFAULT_SECTION_EVALUATION_TIMEOUT_S = 90.0
 
 # 评估失败时的默认返回值
 _DEFAULT_EVALUATION = {
@@ -612,7 +613,11 @@ async def evaluate_section_blind(
     ]
 
     try:
-        response = await ainvoke_with_callbacks(llm, messages)
+        response = await ainvoke_with_callbacks(
+            llm,
+            messages,
+            timeout=DEFAULT_SECTION_EVALUATION_TIMEOUT_S,
+        )
         raw_content = _extract_text_content(response)
     except Exception as e:
         logger.error("LLM call failed during blind evaluation", error=str(e))
@@ -728,7 +733,11 @@ async def evaluate_section_visible(
     ]
 
     try:
-        response = await ainvoke_with_callbacks(llm, messages)
+        response = await ainvoke_with_callbacks(
+            llm,
+            messages,
+            timeout=DEFAULT_SECTION_EVALUATION_TIMEOUT_S,
+        )
         raw_content = _extract_text_content(response)
     except Exception as e:
         logger.error("LLM call failed during section evaluation", error=str(e))
@@ -975,7 +984,11 @@ async def revise_section(
     ]
 
     try:
-        response = await ainvoke_with_callbacks(llm, messages)
+        response = await ainvoke_with_callbacks(
+            llm,
+            messages,
+            timeout=DEFAULT_SECTION_EVALUATION_TIMEOUT_S,
+        )
         content = _extract_text_content(response)
     except Exception as e:
         logger.error("LLM call failed during section revision", error=str(e))

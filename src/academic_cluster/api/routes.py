@@ -2,6 +2,7 @@
 API 路由定义
 """
 
+import asyncio
 import uuid
 
 import structlog
@@ -15,6 +16,9 @@ from .dependencies import get_current_user, require_admin
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+# 正在运行的 pipeline task 映射（project_id → asyncio.Task），用于暂停
+_running_pipelines: dict[str, asyncio.Task] = {}
 
 
 # =============================================================================
@@ -158,6 +162,27 @@ async def get_project_detail(
     return project
 
 
+@router.delete("/projects/{project_id}")
+async def delete_project(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseService = Depends(get_database),
+):
+    """删除项目及关联的调用记录"""
+    project = await db.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from sqlalchemy import text
+    async with db.session() as session:
+        await session.execute(text("DELETE FROM projects WHERE id = :pid"), {"pid": project_id})
+
+    return {"message": "Project deleted"}
+
+
 @router.get("/projects/{project_id}/status", response_model=PipelineStatusResponse)
 async def get_project_status(
     project_id: str,
@@ -199,7 +224,6 @@ async def start_pipeline(
 
     logger.info("Starting pipeline", project_id=project_id)
 
-    import asyncio
     from ..graphs.graph import run_pipeline
     from .sse import get_sse_manager
 
@@ -207,11 +231,9 @@ async def start_pipeline(
 
     async def run_in_background():
         try:
-            # 加载 pipeline 配置（DB 中的可调参数 + 项目自定义配置）
             from .admin.pipeline_config import get_pipeline_config_dict, build_node_config
             raw_config = await get_pipeline_config_dict()
             pipeline_config = build_node_config(raw_config)
-            # 项目自定义配置覆盖 DB 配置
             project_config = project.get("config") or {}
             pipeline_config.update(project_config)
 
@@ -221,10 +243,16 @@ async def start_pipeline(
                 config=pipeline_config,
                 sse_manager=sse_manager,
             )
+        except asyncio.CancelledError:
+            logger.info("Pipeline cancelled", project_id=project_id)
+            await db.update_project_status(project_id, "interrupted")
         except Exception as e:
             logger.error("Pipeline failed", error=str(e))
+        finally:
+            _running_pipelines.pop(project_id, None)
 
-    asyncio.create_task(run_in_background())
+    task = asyncio.create_task(run_in_background())
+    _running_pipelines[project_id] = task
 
     return {"message": "Pipeline started", "project_id": project_id}
 
@@ -233,9 +261,17 @@ async def start_pipeline(
 async def pause_pipeline(
     project_id: str,
     current_user: dict = Depends(get_current_user),
+    db: DatabaseService = Depends(get_database),
 ):
-    """暂停 Pipeline"""
+    """暂停 Pipeline（取消正在运行的 asyncio task，标记为 interrupted）"""
+    task = _running_pipelines.get(project_id)
+    if not task:
+        raise HTTPException(status_code=400, detail="Pipeline not running")
+
     logger.info("Pausing pipeline", project_id=project_id)
+    task.cancel()
+    _running_pipelines.pop(project_id, None)
+    await db.update_project_status(project_id, "interrupted")
     return {"message": "Pipeline paused", "project_id": project_id}
 
 
@@ -255,7 +291,6 @@ async def resume_pipeline(
 
     logger.info("Resuming pipeline from checkpoint", project_id=project_id)
 
-    import asyncio
     from ..graphs.graph import run_pipeline
     from .sse import get_sse_manager
 

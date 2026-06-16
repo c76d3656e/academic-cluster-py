@@ -142,4 +142,8 @@ export const projectsApi = {
     const response = await apiClient.get(`/projects/${projectId}/visualization`)
     return response.data
   },
+
+  async deleteProject(projectId: string): Promise<void> {
+    await apiClient.delete(`/projects/${projectId}`)
+  },
 }

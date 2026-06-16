@@ -389,7 +389,7 @@ async def write_review_node(state: PipelineState) -> dict:
             support_matrix = section_evidence_plan.get("support_matrix") or []
             if support_matrix:
                 matrix_lines = ["section_evidence_support_matrix:"]
-                for item in support_matrix[:18]:
+                for item in support_matrix[:10]:
                     matrix_lines.append(
                         f"- paper_id={item.get('paper_id')}; score={item.get('relevance_score')}; "
                         f"source={item.get('candidate_source')}; claim={item.get('claim', '')[:180]}"
@@ -398,7 +398,7 @@ async def write_review_node(state: PipelineState) -> dict:
 
             # 全局聚类统计
             paper_to_cluster = {}
-            for c in clusters:
+            for c in clusters[:24]:
                 for pid in c.get("paper_ids") or []:
                     paper_to_cluster[pid] = c.get("id")
             entity_by_paper_cluster: dict[str, list[str]] = {}
@@ -424,7 +424,7 @@ async def write_review_node(state: PipelineState) -> dict:
 
             # 构建论文样本上下文
             sample_parts = []
-            for idx, pid in enumerate(plan.candidate_paper_ids[:30], 1):
+            for idx, pid in enumerate(plan.candidate_paper_ids[:16], 1):
                 p = paper_map.get(pid)
                 if not p:
                     continue
