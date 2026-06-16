@@ -27,6 +27,7 @@ class SourceDefinition:
     label: str
     description: str
     secret: bool = True
+    supports_multiple: bool = False
 
 
 SOURCE_DEFINITIONS: tuple[SourceDefinition, ...] = (
@@ -35,6 +36,7 @@ SOURCE_DEFINITIONS: tuple[SourceDefinition, ...] = (
         label="Semantic Scholar API Key",
         description="Comma-separated keys are supported; each key has an independent rate slot.",
         secret=True,
+        supports_multiple=True,
     ),
     SourceDefinition(
         key="pubmed_email",
@@ -73,6 +75,12 @@ def _mask_source_value(definition: SourceDefinition, value: str | None) -> str |
     if definition.key == "semantic_scholar_api_key" and "," in value:
         return ", ".join(mask_key(part.strip()) for part in value.split(",") if part.strip())
     return mask_key(value)
+
+
+def _split_source_values(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 async def ensure_source_registry_schema(db: DatabaseService | None = None) -> None:
@@ -164,9 +172,11 @@ async def list_source_configs(db: DatabaseService | None = None) -> list[dict[st
             "description": definition.description,
             "value": _mask_source_value(definition, plain_value),
             "is_set": bool(plain_value),
+            "key_count": len(_split_source_values(plain_value)) if definition.supports_multiple else (1 if plain_value else 0),
             "is_enabled": is_enabled,
             "value_source": value_source,
             "is_secret": definition.secret,
+            "supports_multiple": definition.supports_multiple,
             "updated_at": str(updated_at) if updated_at else None,
         })
 
@@ -210,6 +220,44 @@ async def upsert_source_config(
         })
 
     return (await list_source_configs(db))[list(SOURCE_DEFINITION_BY_KEY).index(key)]
+
+
+async def append_source_config_value(
+    key: str,
+    value: str,
+    *,
+    created_by: str | None = None,
+    db: DatabaseService | None = None,
+) -> dict[str, Any]:
+    """Append a value to a multi-value source without requiring manual copying."""
+    definition = SOURCE_DEFINITION_BY_KEY.get(key)
+    if definition is None:
+        raise KeyError(key)
+    if not definition.supports_multiple:
+        raise ValueError(f"{key} does not support append")
+
+    normalized_new = value.strip()
+    if not normalized_new:
+        raise ValueError("value cannot be empty")
+
+    db = db or get_database()
+    current_values = _split_source_values(await get_effective_source_value(key, db=db))
+    new_values = _split_source_values(normalized_new)
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in [*current_values, *new_values]:
+        if item in seen:
+            continue
+        seen.add(item)
+        merged.append(item)
+
+    return await upsert_source_config(
+        key,
+        ",".join(merged),
+        is_enabled=True,
+        created_by=created_by,
+        db=db,
+    )
 
 
 async def clear_source_config(
@@ -271,6 +319,4 @@ async def get_effective_source_value(
 
 async def get_semantic_scholar_api_keys(db: DatabaseService | None = None) -> list[str]:
     value = await get_effective_source_value("semantic_scholar_api_key", db=db)
-    if not value:
-        return []
-    return [part.strip() for part in value.split(",") if part.strip()]
+    return _split_source_values(value)

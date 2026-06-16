@@ -21,6 +21,8 @@ class _FakeSession:
         if "SELECT key, label, value_enc" in sql:
             keys = params.get("keys") or []
             return _FakeResult([self.db.rows[key] for key in keys if key in self.db.rows])
+        if "INSERT INTO source_registry" in sql:
+            self.db.upserts.append(params)
         return _FakeResult()
 
 
@@ -38,6 +40,7 @@ class _FakeSessionContext:
 class _FakeDb:
     def __init__(self, rows=None):
         self.rows = rows or {}
+        self.upserts = []
 
     def session(self):
         return _FakeSessionContext(_FakeSession(self))
@@ -85,3 +88,21 @@ async def test_disabled_db_row_suppresses_env_fallback(monkeypatch):
     )
 
     assert value is None
+
+
+async def test_append_source_config_value_merges_existing_effective_keys(monkeypatch):
+    class _MultiSettings(_FakeSettings):
+        semantic_scholar_api_key = "env-a,env-b"
+
+    monkeypatch.setattr(source_config, "get_settings", lambda: _MultiSettings())
+    monkeypatch.setattr(source_config, "encrypt_key", lambda value: value)
+    monkeypatch.setattr(source_config, "decrypt_key", lambda value: value)
+    db = _FakeDb()
+
+    await source_config.append_source_config_value(
+        "semantic_scholar_api_key",
+        "env-b,new-c",
+        db=db,
+    )
+
+    assert db.upserts[-1]["value_enc"] == "env-a,env-b,new-c"

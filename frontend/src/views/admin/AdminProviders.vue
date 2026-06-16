@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { adminApi, type ProviderInfo, type SourceConfigItem } from '@/api/admin'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,7 @@ const form = ref({
 })
 
 const showSourceDialog = ref(false)
+const sourceDialogMode = ref<'replace' | 'append'>('replace')
 const isSourceSaving = ref(false)
 const sourceForm = ref({
   key: '',
@@ -87,6 +88,19 @@ function openEdit(p: ProviderInfo) {
 }
 
 function openSourceEdit(source: SourceConfigItem) {
+  sourceDialogMode.value = 'replace'
+  sourceForm.value = {
+    key: source.key,
+    label: source.label,
+    value: '',
+    is_secret: source.is_secret,
+    description: source.description,
+  }
+  showSourceDialog.value = true
+}
+
+function openSourceAppend(source: SourceConfigItem) {
+  sourceDialogMode.value = 'append'
   sourceForm.value = {
     key: source.key,
     label: source.label,
@@ -145,7 +159,7 @@ async function handleTest(p: ProviderInfo) {
 }
 
 async function handleDelete(p: ProviderInfo) {
-  if (!confirm(`确定删除 Provider "${p.display_name}"？`)) return
+  if (!confirm(`Delete Provider "${p.display_name}"?`)) return
   try {
     await adminApi.deleteProvider(p.id)
     providers.value = providers.value.filter(x => x.id !== p.id)
@@ -204,10 +218,16 @@ async function handleSave() {
 async function handleSourceSave() {
   isSourceSaving.value = true
   try {
-    await adminApi.updateSourceConfig(sourceForm.value.key, {
-      value: sourceForm.value.value,
-      is_enabled: true,
-    })
+    if (sourceDialogMode.value === 'append') {
+      await adminApi.appendSourceConfig(sourceForm.value.key, {
+        value: sourceForm.value.value,
+      })
+    } else {
+      await adminApi.updateSourceConfig(sourceForm.value.key, {
+        value: sourceForm.value.value,
+        is_enabled: true,
+      })
+    }
     showSourceDialog.value = false
     await loadSources()
   } catch {
@@ -218,7 +238,7 @@ async function handleSourceSave() {
 }
 
 async function handleSourceClear(source: SourceConfigItem) {
-  if (!confirm(`确定清空 ${source.label}？清空后不会回退到 .env。`)) return
+  if (!confirm(`Clear ${source.label}? This will not fall back to .env.`)) return
   try {
     await adminApi.deleteSourceConfig(source.key)
     await loadSources()
@@ -250,6 +270,19 @@ function sourceStatus(source: SourceConfigItem): string {
   return 'Unset'
 }
 
+function sourceDialogTitle(): string {
+  return sourceDialogMode.value === 'append'
+    ? `Append ${sourceForm.value.label}`
+    : `Edit ${sourceForm.value.label}`
+}
+
+function sourceDialogHelp(): string {
+  if (sourceDialogMode.value === 'append') {
+    return 'The new value will be appended to the current effective config and deduplicated.'
+  }
+  return 'Saving replaces the DB value. Empty value clears the source.'
+}
+
 onMounted(loadData)
 </script>
 
@@ -262,9 +295,9 @@ onMounted(loadData)
       </div>
       <div v-if="isProviderTab" class="flex gap-2">
         <Button variant="outline" size="sm" :disabled="isReloading" @click="handleReload">
-          {{ isReloading ? '重载中...' : '热重载' }}
+          {{ isReloading ? 'Reloading...' : 'Reload' }}
         </Button>
-        <Button size="sm" @click="openCreate">新增 Provider</Button>
+        <Button size="sm" @click="openCreate">New Provider</Button>
       </div>
     </div>
 
@@ -282,27 +315,27 @@ onMounted(loadData)
       </button>
     </div>
 
-    <div v-if="isLoading" class="text-center py-12 text-muted-foreground text-sm">加载中...</div>
+    <div v-if="isLoading" class="text-center py-12 text-muted-foreground text-sm">鍔犺浇涓?..</div>
 
     <Card v-else-if="isProviderTab" class="border border-border shadow-[var(--shadow-sm)]">
       <CardContent class="p-0">
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-border">
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">名称</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">模型</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Name</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Model</th>
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">API Key</th>
-              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">输入 $/M</th>
-              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">输出 $/M</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">状态</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">健康</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">操作</th>
+              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">Input $/M</th>
+              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">Output $/M</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Status</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Health</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="filteredProviders.length === 0">
               <td colspan="8" class="text-center py-12 text-muted-foreground">
-                暂无 {{ providerTabLabel(activeTab) }} Provider
+                No {{ providerTabLabel(activeTab) }} Provider
               </td>
             </tr>
             <tr
@@ -318,7 +351,7 @@ onMounted(loadData)
               <td class="py-3 px-4">
                 <button @click="handleToggle(p)" class="cursor-pointer">
                   <Badge :variant="p.is_enabled ? 'default' : 'outline'" class="text-[0.65rem]">
-                    {{ p.is_enabled ? '启用' : '禁用' }}
+                    {{ p.is_enabled ? 'Enabled' : 'Disabled' }}
                   </Badge>
                 </button>
               </td>
@@ -329,7 +362,7 @@ onMounted(loadData)
               </td>
               <td class="py-3 px-4">
                 <div class="flex gap-1">
-                  <Button variant="ghost" size="sm" class="text-xs" @click="openEdit(p)">编辑</Button>
+                  <Button variant="ghost" size="sm" class="text-xs" @click="openEdit(p)">缂栬緫</Button>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -337,10 +370,10 @@ onMounted(loadData)
                     :disabled="testingId === p.id"
                     @click="handleTest(p)"
                   >
-                    {{ testingId === p.id ? '测试中...' : '测试' }}
+                    {{ testingId === p.id ? '娴嬭瘯涓?..' : '娴嬭瘯' }}
                   </Button>
                   <Button variant="ghost" size="sm" class="text-xs text-destructive" @click="handleDelete(p)">
-                    删除
+                    鍒犻櫎
                   </Button>
                 </div>
               </td>
@@ -355,12 +388,12 @@ onMounted(loadData)
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-border">
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">数据源</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">当前值</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">来源</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">状态</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">更新时间</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">操作</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Source</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Current Value</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Origin</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Status</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Updated</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -373,7 +406,12 @@ onMounted(loadData)
                 <div class="font-medium">{{ source.label }}</div>
                 <div class="text-xs text-muted-foreground mt-1 max-w-[36rem]">{{ source.description }}</div>
               </td>
-              <td class="py-3 px-4 text-muted-foreground font-mono text-xs">{{ source.value || '-' }}</td>
+              <td class="py-3 px-4">
+                <div class="text-muted-foreground font-mono text-xs">{{ source.value || '-' }}</div>
+                <div v-if="source.key_count > 0" class="text-[0.65rem] text-muted-foreground mt-1">
+                  {{ source.key_count }} {{ source.supports_multiple ? 'keys' : 'item' }}
+                </div>
+              </td>
               <td class="py-3 px-4">
                 <Badge variant="outline" class="text-[0.65rem]">{{ source.value_source }}</Badge>
               </td>
@@ -387,9 +425,18 @@ onMounted(loadData)
               </td>
               <td class="py-3 px-4">
                 <div class="flex gap-1">
-                  <Button variant="ghost" size="sm" class="text-xs" @click="openSourceEdit(source)">编辑</Button>
+                  <Button
+                    v-if="source.supports_multiple"
+                    variant="ghost"
+                    size="sm"
+                    class="text-xs"
+                    @click="openSourceAppend(source)"
+                  >
+                    Add Key
+                  </Button>
+                  <Button variant="ghost" size="sm" class="text-xs" @click="openSourceEdit(source)">缂栬緫</Button>
                   <Button variant="ghost" size="sm" class="text-xs text-destructive" @click="handleSourceClear(source)">
-                    清空
+                    娓呯┖
                   </Button>
                 </div>
               </td>
@@ -401,15 +448,15 @@ onMounted(loadData)
 
     <div v-if="showDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showDialog = false">
       <div class="bg-background rounded-lg shadow-lg w-full max-w-lg p-6 border border-border">
-        <h3 class="text-lg font-medium mb-4">{{ editingId ? '编辑 Provider' : '新增 Provider' }}</h3>
+        <h3 class="text-lg font-medium mb-4">{{ editingId ? '缂栬緫 Provider' : '鏂板 Provider' }}</h3>
         <div class="space-y-4">
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <Label class="text-sm">名称</Label>
-              <Input v-model="form.display_name" placeholder="如 SiliconFlow" class="mt-1" />
+              <Label class="text-sm">鍚嶇О</Label>
+              <Input v-model="form.display_name" placeholder="濡?SiliconFlow" class="mt-1" />
             </div>
             <div>
-              <Label class="text-sm">模型</Label>
+              <Label class="text-sm">妯″瀷</Label>
               <Input v-model="form.model" placeholder="Qwen3-8B" class="mt-1" />
             </div>
           </div>
@@ -418,38 +465,38 @@ onMounted(loadData)
             <Input v-model="form.base_url" placeholder="https://api.siliconflow.cn/v1" class="mt-1" />
           </div>
           <div>
-            <Label class="text-sm">API Key {{ editingId ? '(留空不修改)' : '' }}</Label>
+            <Label class="text-sm">API Key {{ editingId ? '(leave empty to keep)' : '' }}</Label>
             <Input v-model="form.api_key" type="password" placeholder="sk-..." class="mt-1" />
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <Label class="text-sm">优先级</Label>
+              <Label class="text-sm">Priority</Label>
               <Input v-model.number="form.priority" type="number" class="mt-1" />
             </div>
             <div>
-              <Label class="text-sm">RPM 限制</Label>
+              <Label class="text-sm">RPM Limit</Label>
               <Input v-model.number="form.rpm_limit" type="number" class="mt-1" />
             </div>
           </div>
           <div class="border-t border-border pt-4">
-            <Label class="text-sm font-medium">模型定价 ($/M tokens)</Label>
-            <p class="text-[0.65rem] text-muted-foreground mb-3">修改后新调用立即按新价格计费，历史记录不改变。</p>
+            <Label class="text-sm font-medium">Model pricing ($/M tokens)</Label>
+            <p class="text-[0.65rem] text-muted-foreground mb-3">New calls use the latest price. Historical records are unchanged.</p>
             <div class="grid grid-cols-2 gap-3">
               <div>
-                <Label class="text-xs text-muted-foreground">输入价格</Label>
+                <Label class="text-xs text-muted-foreground">Input price</Label>
                 <Input v-model.number="form.input_price_per_m" type="number" step="0.01" min="0" placeholder="0.00" class="mt-1" />
               </div>
               <div>
-                <Label class="text-xs text-muted-foreground">输出价格</Label>
+                <Label class="text-xs text-muted-foreground">Output price</Label>
                 <Input v-model.number="form.output_price_per_m" type="number" step="0.01" min="0" placeholder="0.00" class="mt-1" />
               </div>
             </div>
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-6">
-          <Button variant="outline" size="sm" @click="showDialog = false">取消</Button>
+          <Button variant="outline" size="sm" @click="showDialog = false">鍙栨秷</Button>
           <Button size="sm" :disabled="isSaving || !form.display_name || !form.base_url" @click="handleSave">
-            {{ isSaving ? '保存中...' : (editingId ? '保存' : '创建') }}
+            {{ isSaving ? '淇濆瓨涓?..' : (editingId ? '淇濆瓨' : '鍒涘缓') }}
           </Button>
         </div>
       </div>
@@ -457,22 +504,22 @@ onMounted(loadData)
 
     <div v-if="showSourceDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showSourceDialog = false">
       <div class="bg-background rounded-lg shadow-lg w-full max-w-lg p-6 border border-border">
-        <h3 class="text-lg font-medium mb-1">编辑 {{ sourceForm.label }}</h3>
+        <h3 class="text-lg font-medium mb-1">{{ sourceDialogTitle() }}</h3>
         <p class="text-sm text-muted-foreground mb-4">{{ sourceForm.description }}</p>
         <div>
-          <Label class="text-sm">配置值</Label>
+          <Label class="text-sm">Value</Label>
           <Input
             v-model="sourceForm.value"
             :type="sourceForm.is_secret ? 'password' : 'text'"
-            :placeholder="sourceForm.is_secret ? '输入新的 API Key' : '输入邮箱地址'"
+            :placeholder="sourceDialogMode === 'append' ? 'New API key to append' : (sourceForm.is_secret ? 'New API key' : 'Email address')"
             class="mt-1"
           />
-          <p class="text-xs text-muted-foreground mt-2">保存后将写入数据库并优先生效；留空保存等同清空。</p>
+          <p class="text-xs text-muted-foreground mt-2">{{ sourceDialogHelp() }}</p>
         </div>
         <div class="flex justify-end gap-2 mt-6">
-          <Button variant="outline" size="sm" @click="showSourceDialog = false">取消</Button>
+          <Button variant="outline" size="sm" @click="showSourceDialog = false">Cancel</Button>
           <Button size="sm" :disabled="isSourceSaving" @click="handleSourceSave">
-            {{ isSourceSaving ? '保存中...' : '保存' }}
+            {{ isSourceSaving ? 'Saving...' : 'Save' }}
           </Button>
         </div>
       </div>

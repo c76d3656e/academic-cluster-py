@@ -28,9 +28,11 @@ export interface SourceConfigItem {
   label: string
   value: string | null
   is_set: boolean
+  key_count: number
   is_enabled: boolean
   value_source: string
   is_secret: boolean
+  supports_multiple: boolean
   description: string
   updated_at: string | null
 }
@@ -290,6 +292,11 @@ export const adminApi = {
 
   async updateSourceConfig(key: string, payload: { value: string; is_enabled?: boolean }): Promise<SourceConfigItem> {
     const { data } = await apiClient.put(`/admin/sources/${key}`, payload)
+    return data
+  },
+
+  async appendSourceConfig(key: string, payload: { value: string }): Promise<SourceConfigItem> {
+    const { data } = await apiClient.post(`/admin/sources/${key}/append`, payload)
     return data
   },
 
