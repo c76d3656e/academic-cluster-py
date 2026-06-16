@@ -315,7 +315,7 @@ onMounted(loadData)
       </button>
     </div>
 
-    <div v-if="isLoading" class="text-center py-12 text-muted-foreground text-sm">鍔犺浇涓?..</div>
+    <div v-if="isLoading" class="text-center py-12 text-muted-foreground text-sm">加载中...</div>
 
     <Card v-else-if="isProviderTab" class="border border-border shadow-[var(--shadow-sm)]">
       <CardContent class="p-0">
@@ -362,7 +362,7 @@ onMounted(loadData)
               </td>
               <td class="py-3 px-4">
                 <div class="flex gap-1">
-                  <Button variant="ghost" size="sm" class="text-xs" @click="openEdit(p)">缂栬緫</Button>
+                  <Button variant="ghost" size="sm" class="text-xs" @click="openEdit(p)">编辑</Button>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -370,10 +370,10 @@ onMounted(loadData)
                     :disabled="testingId === p.id"
                     @click="handleTest(p)"
                   >
-                    {{ testingId === p.id ? '娴嬭瘯涓?..' : '娴嬭瘯' }}
+                    {{ testingId === p.id ? '测试中...' : '测试' }}
                   </Button>
                   <Button variant="ghost" size="sm" class="text-xs text-destructive" @click="handleDelete(p)">
-                    鍒犻櫎
+                    删除
                   </Button>
                 </div>
               </td>
@@ -434,9 +434,9 @@ onMounted(loadData)
                   >
                     Add Key
                   </Button>
-                  <Button variant="ghost" size="sm" class="text-xs" @click="openSourceEdit(source)">缂栬緫</Button>
+                  <Button variant="ghost" size="sm" class="text-xs" @click="openSourceEdit(source)">编辑</Button>
                   <Button variant="ghost" size="sm" class="text-xs text-destructive" @click="handleSourceClear(source)">
-                    娓呯┖
+                    清空
                   </Button>
                 </div>
               </td>
@@ -448,15 +448,15 @@ onMounted(loadData)
 
     <div v-if="showDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showDialog = false">
       <div class="bg-background rounded-lg shadow-lg w-full max-w-lg p-6 border border-border">
-        <h3 class="text-lg font-medium mb-4">{{ editingId ? '缂栬緫 Provider' : '鏂板 Provider' }}</h3>
+        <h3 class="text-lg font-medium mb-4">{{ editingId ? '编辑 Provider' : '新增 Provider' }}</h3>
         <div class="space-y-4">
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <Label class="text-sm">鍚嶇О</Label>
-              <Input v-model="form.display_name" placeholder="濡?SiliconFlow" class="mt-1" />
+              <Label class="text-sm">名称</Label>
+              <Input v-model="form.display_name" placeholder="如 SiliconFlow" class="mt-1" />
             </div>
             <div>
-              <Label class="text-sm">妯″瀷</Label>
+              <Label class="text-sm">模型</Label>
               <Input v-model="form.model" placeholder="Qwen3-8B" class="mt-1" />
             </div>
           </div>
@@ -494,9 +494,9 @@ onMounted(loadData)
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-6">
-          <Button variant="outline" size="sm" @click="showDialog = false">鍙栨秷</Button>
+          <Button variant="outline" size="sm" @click="showDialog = false">取消</Button>
           <Button size="sm" :disabled="isSaving || !form.display_name || !form.base_url" @click="handleSave">
-            {{ isSaving ? '淇濆瓨涓?..' : (editingId ? '淇濆瓨' : '鍒涘缓') }}
+            {{ isSaving ? '保存中...' : (editingId ? '保存' : '创建') }}
           </Button>
         </div>
       </div>
