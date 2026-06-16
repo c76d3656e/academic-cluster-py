@@ -1531,6 +1531,8 @@ class DatabaseService:
         output_preview: str | None = None,
         request_metadata: dict | None = None,
         retry_of: str | None = None,
+        input_price_per_m: float | None = None,
+        output_price_per_m: float | None = None,
         status: str = "running",
     ) -> str:
         """创建 LLM 调用记录（先插入骨架，完成时更新统计）"""
@@ -1544,13 +1546,15 @@ class DatabaseService:
                         call_type, provider_name, model_name, requested_model, upstream_model,
                         api_base_url, api_key_hint, status,
                         is_stream, latency_ms, first_token_ms,
-                        input_preview, output_preview, request_metadata, retry_of
+                        input_preview, output_preview, request_metadata, retry_of,
+                        input_price_per_m, output_price_per_m
                     ) VALUES (
                         :id, :project_id, :pipeline_run_id, :node_execution_id, :node_name,
                         :call_type, :provider_name, :model_name, :requested_model, :upstream_model,
                         :api_base_url, :api_key_hint, :status,
                         :is_stream, :latency_ms, :first_token_ms,
-                        :input_preview, :output_preview, :request_metadata, :retry_of
+                        :input_preview, :output_preview, :request_metadata, :retry_of,
+                        :input_price_per_m, :output_price_per_m
                     )
                 """),
                 {
@@ -1574,6 +1578,8 @@ class DatabaseService:
                     "output_preview": output_preview,
                     "request_metadata": json.dumps(request_metadata) if request_metadata else None,
                     "retry_of": retry_of,
+                    "input_price_per_m": input_price_per_m,
+                    "output_price_per_m": output_price_per_m,
                 }
             )
 
@@ -1592,6 +1598,8 @@ class DatabaseService:
         output_preview: str | None = None,
         model_name: str | None = None,
         upstream_model: str | None = None,
+        input_price_per_m: float | None = None,
+        output_price_per_m: float | None = None,
     ) -> None:
         """完成 LLM 调用，更新 token 统计和状态"""
         async with self.session() as session:
@@ -1608,7 +1616,9 @@ class DatabaseService:
                         latency_ms = COALESCE(:latency_ms, latency_ms),
                         output_preview = COALESCE(:output_preview, output_preview),
                         model_name = COALESCE(:model_name, model_name),
-                        upstream_model = COALESCE(:upstream_model, upstream_model)
+                        upstream_model = COALESCE(:upstream_model, upstream_model),
+                        input_price_per_m = COALESCE(:input_price_per_m, input_price_per_m),
+                        output_price_per_m = COALESCE(:output_price_per_m, output_price_per_m)
                     WHERE id = :id
                 """),
                 {
@@ -1623,6 +1633,8 @@ class DatabaseService:
                     "output_preview": output_preview,
                     "model_name": model_name,
                     "upstream_model": upstream_model,
+                    "input_price_per_m": input_price_per_m,
+                    "output_price_per_m": output_price_per_m,
                 }
             )
 

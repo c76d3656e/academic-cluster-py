@@ -342,6 +342,15 @@ async def run_pipeline(
                     call_type,
                 )
                 tracker._node_ids[node_name] = exec_id
+            input_price_per_m = 0.0
+            output_price_per_m = 0.0
+            cost = 0.0
+            try:
+                from ..api.admin.providers import get_provider_pricing
+                input_price_per_m, output_price_per_m = await get_provider_pricing(db, provider_name, model_name)
+                cost = (prompt_tokens * input_price_per_m + completion_tokens * output_price_per_m) / 1_000_000
+            except Exception:
+                pass
             call_id = await db.create_llm_call(
                 pipeline_run_id=tracker.run_id,
                 node_execution_id=exec_id,
@@ -353,13 +362,18 @@ async def run_pipeline(
                 requested_model=model_name,
                 upstream_model=model_name,
                 latency_ms=latency_ms,
+                input_price_per_m=input_price_per_m,
+                output_price_per_m=output_price_per_m,
             )
             await db.finish_llm_call(
                 call_id=call_id,
                 status="success",
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
+                cost=cost,
                 latency_ms=latency_ms,
+                input_price_per_m=input_price_per_m,
+                output_price_per_m=output_price_per_m,
             )
         except Exception as e:
             logger.warning("Failed to persist llm_call", error=str(e))

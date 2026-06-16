@@ -1,4 +1,5 @@
 from academic_cluster.api.console.usage import get_usage_calls, get_usage_trend
+from academic_cluster.api.admin.providers import get_provider_pricing
 from academic_cluster.services.llm_client import ainvoke_with_callbacks
 from academic_cluster.services.observability import PipelineTracker, set_current_tracker
 
@@ -50,7 +51,7 @@ async def test_ainvoke_persists_llm_call_without_node_execution(monkeypatch):
         return db
 
     async def fake_get_provider_pricing(db, provider_alias, model_name):
-        return (0.0, 0.0)
+        return (0.2, 0.4)
 
     monkeypatch.setattr("academic_cluster.services.database.get_database", fake_get_database)
     monkeypatch.setattr(
@@ -83,6 +84,9 @@ async def test_ainvoke_persists_llm_call_without_node_execution(monkeypatch):
     assert db.created_calls[0]["status"] == "running"
     assert db.finished_calls[0]["prompt_tokens"] == 11
     assert db.finished_calls[0]["completion_tokens"] == 7
+    assert db.finished_calls[0]["cost"] == 0.000005
+    assert db.finished_calls[0]["input_price_per_m"] == 0.2
+    assert db.finished_calls[0]["output_price_per_m"] == 0.4
 
 
 async def test_ainvoke_records_error_call(monkeypatch):
@@ -173,6 +177,39 @@ class _FakeTrendDb:
         return _FakeSessionContext(self.fake_session)
 
 
+class _PricingSession:
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, statement, params):
+        self.calls.append((str(statement), params))
+        if "display_name" in str(statement):
+            class _Row:
+                def fetchone(self_inner):
+                    return None
+
+            return _Row()
+        if "WHERE model = :model" in str(statement):
+            class _Row:
+                def fetchone(self_inner):
+                    return None
+
+            return _Row()
+        class _Row:
+            def fetchone(self_inner):
+                return (0.2, 0.4)
+
+        return _Row()
+
+
+class _PricingDb:
+    def __init__(self):
+        self.fake_session = _PricingSession()
+
+    def session(self):
+        return _FakeSessionContext(self.fake_session)
+
+
 async def test_usage_trend_falls_back_to_pipeline_run_summaries():
     db = _FakeTrendDb()
 
@@ -250,3 +287,10 @@ async def test_usage_calls_allows_admin_project_lookup():
     assert response.total == 0
     assert db.fake_session.params["project_id"] == "project-1"
     assert all("WHERE TRUE" in statement for statement in db.fake_session.statements)
+
+
+async def test_get_provider_pricing_handles_namespace_model_alias():
+    db = _PricingDb()
+    input_price, output_price = await get_provider_pricing(db, "gitee-1", "Qwen/Qwen3-8B")
+    assert input_price == 0.2
+    assert output_price == 0.4

@@ -108,6 +108,8 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
                 completion_tokens=0,
                 cost=cost,
                 latency_ms=elapsed_ms,
+                input_price_per_m=input_price,
+                output_price_per_m=output_price,
             )
         except Exception:
             pass  # 追踪失败不影响主流程

@@ -60,6 +60,8 @@ class RecentCallItem(BaseModel):
     pipeline_run_id: str | None = None
     project_id: str | None = None
     project_name: str | None = None
+    user_id: str | None = None
+    user_email: str | None = None
     node_execution_id: str | None = None
     node_name: str | None = None
     provider_name: str | None = None
@@ -75,6 +77,8 @@ class RecentCallItem(BaseModel):
     completion_tokens: int | None = None
     total_tokens: int | None = None
     cost: float | None = None
+    input_price_per_m: float | None = None
+    output_price_per_m: float | None = None
     latency_ms: float | None = None
     input_preview: str | None = None
     output_preview: str | None = None
@@ -181,7 +185,8 @@ async def get_recent_calls(
     async with db.session() as session:
         result = await session.execute(
             text("""
-                SELECT lc.id, lc.pipeline_run_id, pr.project_id, p.name AS project_name,
+                SELECT lc.id, lc.pipeline_run_id, COALESCE(lc.project_id, pr.project_id) AS project_id, p.name AS project_name,
+                       p.user_id, u.email AS user_email,
                        lc.node_execution_id, COALESCE(lc.node_name, ne.node_name) AS node_name,
                        lc.provider_name, lc.model_name,
                        COALESCE(lc.requested_model, lc.model_name) AS requested_model,
@@ -189,11 +194,12 @@ async def get_recent_calls(
                        lc.call_type, lc.status, pr.status AS run_status,
                        lc.error_message, lc.http_status_code,
                        lc.prompt_tokens, lc.completion_tokens,
-                       lc.total_tokens, lc.cost, lc.latency_ms,
+                       lc.total_tokens, lc.cost, lc.input_price_per_m, lc.output_price_per_m, lc.latency_ms,
                        lc.input_preview, lc.output_preview, lc.request_metadata, lc.created_at
                 FROM llm_calls lc
-                JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
-                JOIN projects p ON pr.project_id = p.id
+                LEFT JOIN pipeline_runs pr ON lc.pipeline_run_id = pr.id
+                LEFT JOIN projects p ON COALESCE(lc.project_id, pr.project_id) = p.id
+                LEFT JOIN users u ON p.user_id = u.id
                 LEFT JOIN node_executions ne ON lc.node_execution_id = ne.id
                 ORDER BY lc.created_at DESC
                 LIMIT :limit
@@ -208,26 +214,30 @@ async def get_recent_calls(
             pipeline_run_id=str(row[1]) if row[1] else None,
             project_id=str(row[2]) if row[2] else None,
             project_name=row[3],
-            node_execution_id=str(row[4]) if row[4] else None,
-            node_name=row[5],
-            provider_name=row[6],
-            model_name=row[7],
-            requested_model=row[8],
-            upstream_model=row[9],
-            call_type=row[10],
-            status=row[11],
-            run_status=row[12],
-            error_message=row[13],
-            http_status_code=row[14],
-            prompt_tokens=row[15],
-            completion_tokens=row[16],
-            total_tokens=row[17],
-            cost=float(row[18]) if row[18] is not None else None,
-            latency_ms=float(row[19]) if row[19] is not None else None,
-            input_preview=row[20],
-            output_preview=row[21],
-            request_metadata=row[22],
-            created_at=str(row[23]) if row[23] else None,
+            user_id=str(row[4]) if row[4] else None,
+            user_email=row[5],
+            node_execution_id=str(row[6]) if row[6] else None,
+            node_name=row[7],
+            provider_name=row[8],
+            model_name=row[9],
+            requested_model=row[10],
+            upstream_model=row[11],
+            call_type=row[12],
+            status=row[13],
+            run_status=row[14],
+            error_message=row[15],
+            http_status_code=row[16],
+            prompt_tokens=row[17],
+            completion_tokens=row[18],
+            total_tokens=row[19],
+            cost=float(row[20]) if row[20] is not None else None,
+            input_price_per_m=float(row[21]) if row[21] is not None else None,
+            output_price_per_m=float(row[22]) if row[22] is not None else None,
+            latency_ms=float(row[23]) if row[23] is not None else None,
+            input_preview=row[24],
+            output_preview=row[25],
+            request_metadata=row[26],
+            created_at=str(row[27]) if row[27] else None,
         )
         for row in rows
     ]

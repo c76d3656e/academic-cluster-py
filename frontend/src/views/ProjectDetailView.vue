@@ -633,7 +633,12 @@ function scrollToReferences() {
                     </td>
                     <td class="py-2 pr-3 text-right tabular-nums">{{ call.total_tokens || 0 }}</td>
                     <td class="py-2 pr-3 text-right tabular-nums">{{ call.latency_ms || 0 }}ms</td>
-                    <td class="py-2 text-right tabular-nums">{{ formatCost(call.cost) }}</td>
+                    <td class="py-2 text-right tabular-nums">
+                      <div>{{ formatCost(call.cost) }}</div>
+                      <div class="text-[10px] text-muted-foreground">
+                        {{ call.input_price_per_m != null || call.output_price_per_m != null ? `${formatCost(call.input_price_per_m || 0)}/${formatCost(call.output_price_per_m || 0)}` : '-' }}
+                      </div>
+                    </td>
                   </tr>
                 </tbody>
               </table>

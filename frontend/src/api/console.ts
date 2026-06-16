@@ -56,6 +56,8 @@ export interface ConsoleLlmCall {
   completion_tokens: number
   total_tokens: number
   cost: number
+  input_price_per_m: number | null
+  output_price_per_m: number | null
   latency_ms: number
   input_preview: string | null
   output_preview: string | null

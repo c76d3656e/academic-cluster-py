@@ -3,6 +3,8 @@ import { ref, watch, onMounted, computed } from 'vue'
 import { consoleApi, type ConsoleUsageTrend, type ConsoleLlmCall } from '@/api/console'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import UsageTrendChart from '@/components/usage/UsageTrendChart.vue'
+import { callTypeBadgeClass, callTypeLabel } from '@/lib/usage-display'
 
 const days = ref(7)
 const granularity = ref<'day' | 'hour'>('day')
@@ -10,7 +12,6 @@ const trend = ref<ConsoleUsageTrend[]>([])
 const calls = ref<ConsoleLlmCall[]>([])
 const isLoadingTrend = ref(true)
 const isLoadingCalls = ref(true)
-const trendMode = ref<'tokens' | 'cost'>('tokens')
 
 async function loadTrend() {
   isLoadingTrend.value = true
@@ -23,8 +24,6 @@ async function loadTrend() {
   }
 }
 
-watch(granularity, loadTrend)
-
 async function loadCalls() {
   isLoadingCalls.value = true
   try {
@@ -36,6 +35,7 @@ async function loadCalls() {
   }
 }
 
+watch(granularity, loadTrend)
 watch(days, loadTrend)
 
 onMounted(() => {
@@ -55,7 +55,6 @@ function formatCost(n: number): string {
   return '$' + n.toFixed(6)
 }
 
-// 汇总统计
 const totalPromptTokens = computed(() => trend.value.reduce((s, d) => s + d.prompt_tokens, 0))
 const totalCompletionTokens = computed(() => trend.value.reduce((s, d) => s + d.completion_tokens, 0))
 const totalTokens = computed(() => trend.value.reduce((s, d) => s + d.total_tokens, 0))
@@ -64,27 +63,6 @@ const totalCalls = computed(() => trend.value.reduce((s, d) => s + d.call_count,
 const totalLlmTokens = computed(() => trend.value.reduce((s, d) => s + d.llm_tokens, 0))
 const totalEmbeddingTokens = computed(() => trend.value.reduce((s, d) => s + d.embedding_tokens, 0))
 const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rerank_tokens, 0))
-
-// 堆叠柱状图计算
-const maxBarValue = computed(() => {
-  if (trendMode.value === 'tokens') {
-    return Math.max(...trend.value.map(d => d.llm_tokens + d.embedding_tokens + d.rerank_tokens), 1)
-  }
-  return Math.max(...trend.value.map(d => d.llm_cost + d.embedding_cost + d.rerank_cost), 0.0001)
-})
-
-function barHeight(value: number): string {
-  const h = Math.max((value / maxBarValue.value) * 160, 0)
-  return h + 'px'
-}
-
-const callTypeLabel: Record<string, string> = {
-  llm: 'LLM',
-  embedding: 'Embedding',
-  rerank: 'Rerank',
-}
-
-
 </script>
 
 <template>
@@ -164,82 +142,10 @@ const callTypeLabel: Record<string, string> = {
       </Card>
     </div>
 
-    <!-- Trend chart with stacked bars -->
-    <Card class="border border-border shadow-[var(--shadow-sm)] mb-6">
-      <CardHeader class="flex flex-row items-center justify-between">
-        <CardTitle class="text-sm font-medium">消耗趋势</CardTitle>
-        <div class="flex gap-1">
-          <button
-            v-for="mode in ([['tokens', 'Token'], ['cost', '费用']] as const)"
-            :key="mode[0]"
-            @click="trendMode = mode[0] as any"
-            class="px-2 py-1 text-[0.65rem] rounded transition-colors"
-            :class="trendMode === mode[0]
-              ? 'bg-foreground text-background'
-              : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
-          >
-            {{ mode[1] }}
-          </button>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div v-if="isLoadingTrend" class="h-52 flex items-center justify-center text-muted-foreground text-sm">
-          加载中...
-        </div>
-        <div v-else-if="trend.length === 0" class="h-52 flex items-center justify-center text-muted-foreground text-sm">
-          暂无数据
-        </div>
-        <div v-else>
-          <!-- Legend -->
-          <div class="flex gap-4 mb-3 text-[0.65rem] text-muted-foreground">
-            <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-foreground/80"></span>LLM</span>
-            <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-400/80"></span>Embedding</span>
-            <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-amber-400/80"></span>Rerank</span>
-          </div>
-          <!-- Stacked bars -->
-          <div class="h-44 flex items-end gap-1">
-            <div
-              v-for="d in trend"
-              :key="d.date"
-              class="flex-1 flex flex-col items-center justify-end h-full group relative"
-            >
-              <!-- Tooltip -->
-              <div class="absolute bottom-full mb-2 hidden group-hover:block z-10 bg-popover border border-border rounded-md px-2.5 py-1.5 text-[0.6rem] whitespace-nowrap shadow-md">
-                <div class="font-medium mb-0.5">{{ d.date }}</div>
-                <div v-if="trendMode === 'tokens'">
-                  <div>LLM: {{ formatTokens(d.llm_tokens) }}</div>
-                  <div>Embedding: {{ formatTokens(d.embedding_tokens) }}</div>
-                  <div>Rerank: {{ formatTokens(d.rerank_tokens) }}</div>
-                  <div class="font-medium mt-0.5">总计: {{ formatTokens(d.llm_tokens + d.embedding_tokens + d.rerank_tokens) }}</div>
-                </div>
-                <div v-else>
-                  <div>LLM: {{ formatCost(d.llm_cost) }}</div>
-                  <div>Embedding: {{ formatCost(d.embedding_cost) }}</div>
-                  <div>Rerank: {{ formatCost(d.rerank_cost) }}</div>
-                  <div class="font-medium mt-0.5">总计: {{ formatCost(d.llm_cost + d.embedding_cost + d.rerank_cost) }}</div>
-                </div>
-              </div>
-              <!-- Stacked segments -->
-              <div class="w-full max-w-[40px] flex flex-col-reverse">
-                <div
-                  class="w-full rounded-b-sm bg-foreground/80 transition-all"
-                  :style="{ height: barHeight(trendMode === 'tokens' ? d.llm_tokens : d.llm_cost) }"
-                />
-                <div
-                  class="w-full bg-blue-400/80 transition-all"
-                  :style="{ height: barHeight(trendMode === 'tokens' ? d.embedding_tokens : d.embedding_cost) }"
-                />
-                <div
-                  class="w-full rounded-t-sm bg-amber-400/80 transition-all"
-                  :style="{ height: barHeight(trendMode === 'tokens' ? d.rerank_tokens : d.rerank_cost) }"
-                />
-              </div>
-              <span class="text-[0.55rem] text-muted-foreground mt-1">{{ d.date.slice(5) }}</span>
-            </div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <UsageTrendChart
+      :trend="trend"
+      :loading="isLoadingTrend"
+    />
 
     <!-- Recent calls table -->
     <Card class="border border-border shadow-[var(--shadow-sm)]">
@@ -254,11 +160,7 @@ const callTypeLabel: Record<string, string> = {
             <tr class="border-b border-border">
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">时间</th>
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">项目</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">节点</th>
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">类型</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Provider</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">模型</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">请求模型</th>
               <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">输入</th>
               <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">输出</th>
               <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">费用</th>
@@ -281,26 +183,22 @@ const callTypeLabel: Record<string, string> = {
                   <span class="text-[0.65rem]">{{ c.project_id || '' }}</span>
                 </div>
               </td>
-              <td class="py-3 px-4 text-muted-foreground text-xs">
-                <div class="flex flex-col">
-                  <span class="font-medium text-foreground">{{ c.node_name || '-' }}</span>
-                  <span class="text-[0.65rem]">{{ c.node_execution_id || '' }}</span>
-                </div>
-              </td>
               <td class="py-3 px-4">
-                <Badge
-                  :variant="c.call_type === 'llm' ? 'default' : 'secondary'"
-                  class="text-[0.6rem]"
+                <span
+                  class="inline-flex h-5 items-center rounded-full border px-2 text-[0.65rem] font-medium"
+                  :class="callTypeBadgeClass[c.call_type] || 'border-border bg-muted text-muted-foreground'"
                 >
                   {{ callTypeLabel[c.call_type] || c.call_type }}
-                </Badge>
+                </span>
               </td>
-              <td class="py-3 px-4 text-muted-foreground text-xs">{{ c.provider_name }}</td>
-              <td class="py-3 px-4 text-muted-foreground font-mono text-xs">{{ c.model_name }}</td>
-              <td class="py-3 px-4 text-muted-foreground font-mono text-xs">{{ c.requested_model || '-' }}</td>
               <td class="py-3 px-4 text-right font-mono text-xs">{{ formatTokens(c.prompt_tokens) }}</td>
               <td class="py-3 px-4 text-right font-mono text-xs">{{ formatTokens(c.completion_tokens) }}</td>
-              <td class="py-3 px-4 text-right font-mono text-xs">{{ formatCost(c.cost) }}</td>
+              <td class="py-3 px-4 text-right font-mono text-xs">
+                <div>{{ formatCost(c.cost) }}</div>
+                <div class="text-[0.65rem] text-muted-foreground">
+                  {{ c.input_price_per_m != null || c.output_price_per_m != null ? `${formatCost(c.input_price_per_m || 0)}/${formatCost(c.output_price_per_m || 0)}` : '-' }}
+                </div>
+              </td>
               <td class="py-3 px-4 text-right text-xs text-muted-foreground">{{ c.latency_ms }}ms</td>
               <td class="py-3 px-4">
                 <div class="flex flex-col gap-1">
@@ -318,4 +216,5 @@ const callTypeLabel: Record<string, string> = {
       </CardContent>
     </Card>
   </div>
+
 </template>

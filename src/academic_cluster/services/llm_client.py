@@ -313,6 +313,8 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
 
     # 计算 cost
     cost = 0.0
+    input_price = 0.0
+    output_price = 0.0
     try:
         from .database import get_database
         _db = get_database()
@@ -351,6 +353,8 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                 output_preview=_preview_value(getattr(response, "content", "")),
                 model_name=model_name,
                 upstream_model=upstream_model,
+                input_price_per_m=input_price,
+                output_price_per_m=output_price,
             )
         except Exception as e:
             logger.warning("Failed to finish llm_call audit row", error=str(e), node=node_name)

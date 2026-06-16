@@ -28,6 +28,22 @@ async def _reload_runtime_pools() -> int:
         return 0
 
 
+def _pricing_model_candidates(model_name: str | None) -> list[str]:
+    """Return model variants commonly seen from OpenAI-compatible providers."""
+    if not model_name:
+        return []
+    raw = str(model_name).strip()
+    candidates: list[str] = []
+    for value in (raw, raw.removeprefix("openai/")):
+        if value and value not in candidates:
+            candidates.append(value)
+        if "/" in value:
+            short = value.rsplit("/", 1)[-1]
+            if short and short not in candidates:
+                candidates.append(short)
+    return candidates
+
+
 # =============================================================================
 # 请求/响应模型
 # =============================================================================
@@ -582,49 +598,53 @@ async def get_provider_pricing(
     按 display_name + model 精确匹配，找不到则按 model 名模糊匹配。
     调用时使用当前定价落库，修改后新调用立即生效。
     """
+    candidates = _pricing_model_candidates(model_name)
+
     async with db.session() as session:
-        # 优先精确匹配 display_name + model
-        result = await session.execute(
-            text("""
-                SELECT input_price_per_m, output_price_per_m
-                FROM provider_registry
-                WHERE display_name = :name AND model = :model AND is_enabled = true
-                LIMIT 1
-            """),
-            {"name": provider_name, "model": model_name},
-        )
-        row = result.fetchone()
+        for candidate in candidates:
+            result = await session.execute(
+                text("""
+                    SELECT input_price_per_m, output_price_per_m
+                    FROM provider_registry
+                    WHERE display_name = :name AND model = :model AND is_enabled = true
+                    LIMIT 1
+                """),
+                {"name": provider_name, "model": candidate},
+            )
+            row = result.fetchone()
+            if row:
+                return (float(row[0] or 0), float(row[1] or 0))
 
-        if row:
-            return (float(row[0] or 0), float(row[1] or 0))
+        for candidate in candidates:
+            result = await session.execute(
+                text("""
+                    SELECT input_price_per_m, output_price_per_m
+                    FROM provider_registry
+                    WHERE model = :model AND is_enabled = true
+                    LIMIT 1
+                """),
+                {"model": candidate},
+            )
+            row = result.fetchone()
+            if row:
+                return (float(row[0] or 0), float(row[1] or 0))
 
-        # 回退：按 model 名精确匹配
-        result = await session.execute(
-            text("""
-                SELECT input_price_per_m, output_price_per_m
-                FROM provider_registry
-                WHERE model = :model AND is_enabled = true
-                LIMIT 1
-            """),
-            {"model": model_name},
-        )
-        row = result.fetchone()
-
-        if row:
-            return (float(row[0] or 0), float(row[1] or 0))
-
-        # 再回退：按 model 名前缀匹配（处理 API 返回短名如 "internlm3" vs DB "internlm3-8b-instruct"）
-        result = await session.execute(
-            text("""
-                SELECT input_price_per_m, output_price_per_m
-                FROM provider_registry
-                WHERE model LIKE :model_prefix AND is_enabled = true
-                ORDER BY LENGTH(model) ASC
-                LIMIT 1
-            """),
-            {"model_prefix": model_name + "%"},
-        )
-        row = result.fetchone()
+        row = None
+        for candidate in candidates:
+            result = await session.execute(
+                text("""
+                    SELECT input_price_per_m, output_price_per_m
+                    FROM provider_registry
+                    WHERE (model LIKE :model_prefix OR :model LIKE model || '%')
+                      AND is_enabled = true
+                    ORDER BY LENGTH(model) ASC
+                    LIMIT 1
+                """),
+                {"model": candidate, "model_prefix": candidate + "%"},
+            )
+            row = result.fetchone()
+            if row:
+                break
 
     if row:
         return (float(row[0] or 0), float(row[1] or 0))

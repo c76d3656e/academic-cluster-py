@@ -130,6 +130,8 @@ export interface LlmCallRecord {
   pipeline_run_id?: string
   project_id?: string | null
   project_name?: string | null
+  user_id?: string | null
+  user_email?: string | null
   node_execution_id?: string | null
   node_name?: string | null
   provider_name: string
@@ -145,6 +147,8 @@ export interface LlmCallRecord {
   completion_tokens?: number
   total_tokens: number
   cost: number
+  input_price_per_m?: number | null
+  output_price_per_m?: number | null
   latency_ms: number
   input_preview?: string | null
   output_preview?: string | null

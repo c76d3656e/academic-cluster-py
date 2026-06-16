@@ -290,6 +290,8 @@ async def rerank_node(state: PipelineState) -> dict:
                     completion_tokens=0,
                     cost=cost,
                     latency_ms=_rerank_elapsed,
+                    input_price_per_m=input_price,
+                    output_price_per_m=output_price,
                 )
             except Exception:
                 pass  # 追踪失败不影响主流程

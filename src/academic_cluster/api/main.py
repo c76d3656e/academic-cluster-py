@@ -250,6 +250,8 @@ async def _ensure_observability_schema(db):
             "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS output_preview TEXT",
             "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS request_metadata JSONB",
             "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS retry_of UUID",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS input_price_per_m DOUBLE PRECISION",
+            "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS output_price_per_m DOUBLE PRECISION",
         ]:
             await session.execute(text(column_sql))
 

@@ -353,6 +353,8 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     completion_tokens INTEGER DEFAULT 0,
     total_tokens INTEGER DEFAULT 0,
     cost NUMERIC(12,8) DEFAULT 0,
+    input_price_per_m DOUBLE PRECISION,
+    output_price_per_m DOUBLE PRECISION,
     latency_ms BIGINT NOT NULL,
     first_token_ms BIGINT,
     input_preview TEXT,

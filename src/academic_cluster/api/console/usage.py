@@ -68,6 +68,8 @@ class LLMCallRecord(BaseModel):
     completion_tokens: int = 0
     total_tokens: int = 0
     cost: float = 0.0
+    input_price_per_m: float | None = None
+    output_price_per_m: float | None = None
     latency_ms: int = 0
     input_preview: str | None = None
     output_preview: str | None = None
@@ -295,6 +297,8 @@ async def get_usage_calls(
                     lc.completion_tokens,
                     lc.total_tokens,
                     lc.cost,
+                    lc.input_price_per_m,
+                    lc.output_price_per_m,
                     lc.latency_ms,
                     lc.input_preview,
                     lc.output_preview,
@@ -337,11 +341,13 @@ async def get_usage_calls(
             completion_tokens=int(row[16]) if row[16] else 0,
             total_tokens=int(row[17]) if row[17] else 0,
             cost=float(row[18]) if row[18] else 0.0,
-            latency_ms=int(row[19]) if row[19] else 0,
-            input_preview=row[20],
-            output_preview=row[21],
-            request_metadata=row[22],
-            created_at=row[23],
+            input_price_per_m=float(row[19]) if row[19] is not None else None,
+            output_price_per_m=float(row[20]) if row[20] is not None else None,
+            latency_ms=int(row[21]) if row[21] else 0,
+            input_preview=row[22],
+            output_preview=row[23],
+            request_metadata=row[24],
+            created_at=row[25],
         )
         for row in rows
     ]
