@@ -287,6 +287,13 @@ async def _ensure_observability_schema(db):
             await session.execute(text(index_sql))
 
 
+async def _ensure_source_registry_schema(db):
+    """Create source_registry for existing databases."""
+    from ..services.source_config import ensure_source_registry_schema
+
+    await ensure_source_registry_schema(db)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
@@ -323,6 +330,7 @@ async def lifespan(app: FastAPI):
         await _ensure_observability_schema(db)
         await _ensure_evidence_card_schema(db)
         await _ensure_community_memory_schema(db)
+        await _ensure_source_registry_schema(db)
         await _seed_providers(db, settings)
     except Exception as e:
         logger.warning("Failed to initialize runtime schemas or seed providers", error=str(e))

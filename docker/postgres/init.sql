@@ -411,6 +411,28 @@ CREATE TRIGGER update_provider_registry_updated_at
     BEFORE UPDATE ON provider_registry
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+-- ============================================================================
+-- Source Registry: academic search source credentials
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS source_registry (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    key             VARCHAR(100) NOT NULL UNIQUE,
+    label           VARCHAR(100) NOT NULL,
+    value_enc       TEXT,
+    is_enabled      BOOLEAN DEFAULT true,
+    metadata        JSONB DEFAULT '{}',
+    created_by      UUID REFERENCES users(id),
+    created_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_source_registry_key ON source_registry(key);
+CREATE INDEX IF NOT EXISTS idx_source_registry_enabled ON source_registry(is_enabled);
+
+CREATE TRIGGER update_source_registry_updated_at
+    BEFORE UPDATE ON source_registry
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- Function for KNN vector search
 CREATE OR REPLACE FUNCTION search_similar_papers(
     query_embedding vector(1024),

@@ -28,7 +28,11 @@ export interface SourceConfigItem {
   label: string
   value: string | null
   is_set: boolean
+  is_enabled: boolean
+  value_source: string
+  is_secret: boolean
   description: string
+  updated_at: string | null
 }
 
 export interface ProviderInfo {
@@ -282,6 +286,16 @@ export const adminApi = {
   async getSourceConfigs(): Promise<SourceConfigItem[]> {
     const { data } = await apiClient.get('/admin/sources')
     return data.configs
+  },
+
+  async updateSourceConfig(key: string, payload: { value: string; is_enabled?: boolean }): Promise<SourceConfigItem> {
+    const { data } = await apiClient.put(`/admin/sources/${key}`, payload)
+    return data
+  },
+
+  async deleteSourceConfig(key: string): Promise<SourceConfigItem> {
+    const { data } = await apiClient.delete(`/admin/sources/${key}`)
+    return data
   },
 
   // Pipeline Config

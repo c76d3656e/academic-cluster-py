@@ -23,7 +23,10 @@ from typing import Optional
 import httpx
 import structlog
 
-from ..config import get_settings
+from ..services.source_config import (
+    get_effective_source_value,
+    get_semantic_scholar_api_keys,
+)
 from .doi import normalize_doi, is_valid_doi, extract_doi
 
 logger = structlog.get_logger()
@@ -37,17 +40,17 @@ logger = structlog.get_logger()
 _RATE_LIMITS: dict[str, float] | None = None
 
 
-def _get_rate_limits() -> dict[str, float]:
+async def _get_rate_limits() -> dict[str, float]:
     """根据实际配置动态生成各源的最小请求间隔"""
     global _RATE_LIMITS
     if _RATE_LIMITS is not None:
         return _RATE_LIMITS
 
-    settings = get_settings()
+    pubmed_api_key = await get_effective_source_value("pubmed_api_key")
     _RATE_LIMITS = {
         "arxiv": 3.0,                                           # 1 req / 3s（无认证）
         "semantic_scholar": 1.0,                                 # 1 req / s / key
-        "pubmed": 0.1 if settings.pubmed_api_key else 0.34,      # 有 key: 10 rps, 无 key: 3 rps
+        "pubmed": 0.1 if pubmed_api_key else 0.34,               # 有 key: 10 rps, 无 key: 3 rps
         "openalex": 0.1,                                         # polite pool
         "crossref": 0.2,                                         # 5 req / s（polite pool）
     }
@@ -70,7 +73,7 @@ async def _enforce_rate_limit(source: str) -> None:
     lock = _get_rate_lock(source)
     async with lock:
         now = time.monotonic()
-        min_interval = _get_rate_limits().get(source, 1.0)
+        min_interval = (await _get_rate_limits()).get(source, 1.0)
         last = _last_request_time.get(source, 0.0)
         wait = min_interval - (now - last)
         if wait > 0:
@@ -134,14 +137,20 @@ class SemanticScholarKeyPool:
 _s2_key_pool: SemanticScholarKeyPool | None = None
 
 
-def _get_s2_key_pool() -> SemanticScholarKeyPool | None:
+def reset_source_config_runtime_cache() -> None:
+    """Reset source-derived runtime caches after admin source updates."""
+    global _RATE_LIMITS, _s2_key_pool
+    _RATE_LIMITS = None
+    _s2_key_pool = None
+
+
+async def _get_s2_key_pool() -> SemanticScholarKeyPool | None:
     """获取或创建 Semantic Scholar key pool"""
     global _s2_key_pool
     if _s2_key_pool is not None:
         return _s2_key_pool
 
-    settings = get_settings()
-    keys = settings.semantic_scholar_api_keys
+    keys = await get_semantic_scholar_api_keys()
     if not keys:
         return None
 
@@ -225,7 +234,7 @@ async def search_semantic_scholar(
     API 文档: https://api.semanticscholar.org/api-docs/
     支持多 key 池化：每个 key 独立 1 rps 限流，N key = N rps。
     """
-    pool = _get_s2_key_pool()
+    pool = await _get_s2_key_pool()
 
     url = "https://api.semanticscholar.org/graph/v1/paper/search"
     params = {
@@ -253,10 +262,10 @@ async def search_semantic_scholar(
                 )
             else:
                 # 无 key 模式：使用全局单 key 限流
-                settings = get_settings()
                 headers = {}
-                if settings.semantic_scholar_api_key:
-                    headers["x-api-key"] = settings.semantic_scholar_api_key
+                semantic_scholar_api_key = await get_effective_source_value("semantic_scholar_api_key")
+                if semantic_scholar_api_key:
+                    headers["x-api-key"] = semantic_scholar_api_key
                 response = await _request_with_retry(
                     client, "GET", url, "semantic_scholar",
                     params=params, headers=headers, timeout=30,
@@ -337,10 +346,9 @@ async def search_pubmed(
 
     使用 NCBI E-utilities API
     """
-    settings = get_settings()
-    email = settings.pubmed_email
+    email = await get_effective_source_value("pubmed_email") or "user@example.com"
     tool = "academic-cluster"
-    api_key = settings.pubmed_api_key
+    api_key = await get_effective_source_value("pubmed_api_key")
 
     # Step 1: 搜索获取 ID 列表
     search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
@@ -602,7 +610,7 @@ async def search_openalex(
     params = {
         "search": query,
         "per_page": min(limit, 200),
-        "mailto": get_settings().pubmed_email,
+        "mailto": await get_effective_source_value("pubmed_email") or "user@example.com",
     }
 
     if from_year:
@@ -710,10 +718,10 @@ async def search_crossref(
         if to_year:
             params["filter"] += f",until-pub-date:{to_year}"
 
-    settings = get_settings()
+    pubmed_email = await get_effective_source_value("pubmed_email")
     headers = {}
-    if settings.pubmed_email:
-        headers["User-Agent"] = f"academic-cluster/1.0 (mailto:{settings.pubmed_email})"
+    if pubmed_email:
+        headers["User-Agent"] = f"academic-cluster/1.0 (mailto:{pubmed_email})"
 
     async with httpx.AsyncClient() as client:
         try:
