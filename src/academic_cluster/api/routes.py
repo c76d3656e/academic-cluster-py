@@ -204,6 +204,44 @@ async def get_project_status(
     )
 
 
+@router.get("/projects/{project_id}/progress")
+async def get_project_progress(
+    project_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseService = Depends(get_database),
+):
+    """获取项目历史执行日志"""
+    from sqlalchemy import text
+
+    project = await db.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    async with db.session() as session:
+        rows = await session.execute(
+            text("""
+                SELECT ne.node_name, ne.status, ne.started_at, ne.finished_at,
+                       ne.elapsed_ms, ne.error_message
+                FROM node_executions ne
+                JOIN pipeline_runs pr ON ne.pipeline_run_id = pr.id
+                WHERE pr.project_id = :project_id
+                ORDER BY COALESCE(ne.index, 0), ne.started_at
+            """),
+            {"project_id": project_id},
+        )
+        nodes = []
+        for r in rows.fetchall():
+            d = dict(r._mapping)
+            for k in ("started_at", "finished_at"):
+                if d.get(k):
+                    d[k] = d[k].isoformat()
+            nodes.append(d)
+
+    return {"nodes": nodes}
+
+
 # =============================================================================
 # Pipeline 路由
 # =============================================================================

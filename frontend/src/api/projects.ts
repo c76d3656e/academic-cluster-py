@@ -120,6 +120,10 @@ export const projectsApi = {
     await apiClient.post(`/pipeline/${projectId}/start`)
   },
 
+  async resumePipeline(projectId: string): Promise<void> {
+    await apiClient.post(`/pipeline/${projectId}/resume`)
+  },
+
   async getOutline(projectId: string): Promise<unknown> {
     const response = await apiClient.get(`/projects/${projectId}/outline`)
     return response.data
@@ -145,5 +149,10 @@ export const projectsApi = {
 
   async deleteProject(projectId: string): Promise<void> {
     await apiClient.delete(`/projects/${projectId}`)
+  },
+
+  async getProjectProgress(projectId: string): Promise<{ nodes: Array<{ node_name: string; status: string; started_at: string | null; finished_at: string | null; elapsed_ms: number | null; error_message: string | null }> }> {
+    const response = await apiClient.get(`/projects/${projectId}/progress`)
+    return response.data
   },
 }

@@ -203,6 +203,7 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
               <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">费用</th>
               <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">延迟</th>
               <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">状态</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">日志</th>
             </tr>
           </thead>
           <tbody>
@@ -250,6 +251,17 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
                 <Badge :variant="c.status === 'success' ? 'default' : 'destructive'" class="text-[0.65rem]">
                   {{ c.status }}
                 </Badge>
+              </td>
+              <td class="py-3 px-4 text-xs max-w-[240px] break-words whitespace-pre-wrap" :title="c.error_message || ''">
+                <template v-if="c.status === 'error' && c.error_message">
+                  <span class="text-destructive">{{ c.error_message }}</span>
+                </template>
+                <template v-else-if="c.status === 'running'">
+                  <span class="text-muted-foreground">等待中...</span>
+                </template>
+                <template v-else>
+                  <span class="text-muted-foreground">-</span>
+                </template>
               </td>
             </tr>
           </tbody>

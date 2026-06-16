@@ -350,6 +350,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Failed to init pipeline config table", error=str(e))
 
+    # 清理中断残留：容器重启前正在运行的 pipeline 标记为 interrupted
+    try:
+        from sqlalchemy import text
+        async with db.session() as session:
+            result = await session.execute(
+                text("UPDATE projects SET status = 'interrupted' WHERE status LIKE 'running%' RETURNING id")
+            )
+            stale = result.fetchall()
+            if stale:
+                pids = [str(r[0]) for r in stale]
+                logger.info("Marked stale running projects as interrupted", count=len(pids), project_ids=pids)
+                await session.execute(
+                    text("UPDATE pipeline_runs SET status = 'interrupted' WHERE project_id = ANY(:pids) AND status = 'running'"),
+                    {"pids": pids},
+                )
+            await session.commit()
+    except Exception as e:
+        logger.warning("Failed to clean up stale running projects", error=str(e))
+
     yield
 
     # 清理资源

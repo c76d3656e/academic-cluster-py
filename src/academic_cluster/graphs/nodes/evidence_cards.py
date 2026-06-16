@@ -4,6 +4,7 @@
 支持幂等恢复：跳过已有证据卡片的论文。
 """
 
+import asyncio
 import traceback
 
 import structlog
@@ -145,10 +146,19 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             timeout_s = int((state.config or {}).get("evidence_timeout_s", 120))
         except (TypeError, ValueError):
             timeout_s = 120
+
+        def _progress(completed: int, total: int):
+            asyncio.ensure_future(send_progress(
+                state.project_id, "evidence_cards",
+                f"证据卡片生成中 {completed}/{total}...",
+                progress=completed / total if total > 0 else 0,
+            ))
+
         evidence_cards = await generate_evidence_cards_batch(
             remaining_papers,
             concurrency=concurrency,
             timeout_s=timeout_s,
+            progress_callback=_progress,
         )
 
         # 构建 paper_id → cluster_id 映射

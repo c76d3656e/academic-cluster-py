@@ -70,6 +70,41 @@ DEFAULT_CONFIG = {
         "group": "搜索",
         "type": "string",
     },
+    "search.source_limit.semantic_scholar": {
+        "value": "200",
+        "label": "Semantic Scholar 每源限制",
+        "description": "每轮搜索 Semantic Scholar 的最大结果数",
+        "group": "搜索",
+        "type": "int",
+    },
+    "search.source_limit.openalex": {
+        "value": "200",
+        "label": "OpenAlex 每源限制",
+        "description": "每轮搜索 OpenAlex 的最大结果数",
+        "group": "搜索",
+        "type": "int",
+    },
+    "search.source_limit.crossref": {
+        "value": "200",
+        "label": "Crossref 每源限制",
+        "description": "每轮搜索 Crossref 的最大结果数",
+        "group": "搜索",
+        "type": "int",
+    },
+    "search.source_limit.arxiv": {
+        "value": "200",
+        "label": "arXiv 每源限制",
+        "description": "每轮搜索 arXiv 的最大结果数",
+        "group": "搜索",
+        "type": "int",
+    },
+    "search.source_limit.pubmed": {
+        "value": "200",
+        "label": "PubMed 每源限制",
+        "description": "每轮搜索 PubMed 的最大结果数",
+        "group": "搜索",
+        "type": "int",
+    },
 
     # 过滤阶段
     "filter.min_citation_count": {
@@ -159,14 +194,14 @@ DEFAULT_CONFIG = {
         "type": "int",
     },
     "evidence.timeout_s": {
-        "value": "120",
+        "value": "300",
         "label": "Evidence card timeout",
         "description": "Maximum seconds for one evidence-card LLM call. Timed-out papers get a deterministic fallback card so the batch can finish and persist.",
         "group": "Evidence cards",
         "type": "int",
     },
     "community_memory.timeout_s": {
-        "value": "90",
+        "value": "180",
         "label": "\u793e\u533a\u8bb0\u5fc6\u5355\u9879\u8d85\u65f6",
         "description": "\u5355\u4e2a\u793e\u533a LLM \u589e\u5f3a\u7684\u6700\u957f\u7b49\u5f85\u79d2\u6570\uff0c\u8d85\u65f6\u540e\u4f7f\u7528 deterministic fallback\u3002",
         "group": "\u793e\u533a\u8bb0\u5fc6",
@@ -299,6 +334,18 @@ async def _ensure_defaults():
             SET value = '160', updated_at = NOW()
             WHERE key = 'rerank.core_count' AND value = '80'
         """))
+        # 迁移：更新旧的超时默认值
+        timeout_migrations = {
+            "gap_analysis.timeout_s": ("45", "180"),
+            "evidence.timeout_s": ("120", "300"),
+            "community_memory.timeout_s": ("90", "180"),
+        }
+        for key, (old_val, new_val) in timeout_migrations.items():
+            await session.execute(text("""
+                UPDATE pipeline_config
+                SET value = :new_val, updated_at = NOW()
+                WHERE key = :key AND value = :old_val
+            """), {"key": key, "old_val": old_val, "new_val": new_val})
         await session.commit()
 
 
@@ -386,11 +433,11 @@ def build_node_config(raw: dict[str, str]) -> dict:
         # kg
         "kg_concurrency": _int("kg.concurrency", -1),
         "evidence_concurrency": _int("evidence.concurrency", -1),
-        "evidence_timeout_s": _int("evidence.timeout_s", 120),
+        "evidence_timeout_s": _int("evidence.timeout_s", 300),
         "community_memory_concurrency": _int("community_memory.concurrency", -1),
-        "community_memory_timeout_s": _int("community_memory.timeout_s", 90),
+        "community_memory_timeout_s": _int("community_memory.timeout_s", 180),
         "community_memory_llm_limit": _int("community_memory.llm_limit", 16),
-        "gap_analysis_timeout_s": _int("gap_analysis.timeout_s", 45),
+        "gap_analysis_timeout_s": _int("gap_analysis.timeout_s", 180),
 
         # clustering
         "clustering_algorithm": raw.get("clustering.algorithm", "leiden"),

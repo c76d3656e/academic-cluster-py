@@ -47,8 +47,8 @@ class LiteLLMPool:
             model_list=self._model_list,
             routing_strategy="simple-shuffle",
             num_retries=2,
-            timeout=120,
-            enable_pre_call_checks=True,
+            timeout=180,
+            enable_pre_call_checks=False,
             allowed_fails=3,
             cooldown_time=60,
             **self._router_kwargs,
@@ -229,9 +229,13 @@ def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict]:
                 base = base[:-3]
             litellm_params["api_base"] = base + "/v1"
 
+        # model_name 使用实际模型名（如 "Qwen3-8B"），同一模型的 provider 组成一个路由组
+        # 原始别名（如 "gitee-1"）存入 model_info，供 create_llm 追踪使用
+        group_name = model.replace("openai/", "", 1)
         model_list.append({
-            "model_name": name,  # 别名，调用时用这个名字
+            "model_name": group_name,
             "litellm_params": litellm_params,
+            "model_info": {"provider_alias": name},
         })
 
     return model_list
@@ -381,13 +385,14 @@ async def init_pools():
             base = base[:-3]
 
         llm_model_list = [{
-            "model_name": settings.llm_provider,
+            "model_name": settings.llm_model,
             "litellm_params": {
                 "model": f"openai/{settings.llm_model}",
                 "api_key": settings.llm_api_key,
                 "api_base": base + "/v1",
                 "rpm": 10,
             },
+            "model_info": {"provider_alias": settings.llm_provider},
         }]
     if llm_model_list:
         _llm_pool = LiteLLMPool("llm", llm_model_list)
@@ -402,13 +407,14 @@ async def init_pools():
             base = base[:-3]
 
         emb_model_list = [{
-            "model_name": settings.embedding_provider,
+            "model_name": settings.embedding_model,
             "litellm_params": {
                 "model": f"openai/{settings.embedding_model}",
                 "api_key": settings.embedding_api_key,
                 "api_base": base + "/v1",
                 "rpm": 10,
             },
+            "model_info": {"provider_alias": settings.embedding_provider},
         }]
     if emb_model_list:
         _embedding_pool = LiteLLMPool("embedding", emb_model_list)

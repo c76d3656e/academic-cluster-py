@@ -825,6 +825,7 @@ async def search_all_sources(
     limit_per_source: int = 200,
     sources: Optional[list[str]] = None,
     timeout: float = 120.0,
+    per_source_limits: Optional[dict[str, int]] = None,
 ) -> list[dict]:
     """
     并行搜索所有数据源
@@ -833,9 +834,10 @@ async def search_all_sources(
 
     Args:
         query: 搜索查询
-        limit_per_source: 每个源的最大结果数（默认 200）
+        limit_per_source: 每个源的默认最大结果数
         sources: 要搜索的源列表，默认全部 5 个源
-        timeout: 总体超时时间（秒），默认 120 秒
+        timeout: 总体超时时间（秒）
+        per_source_limits: 各源独立限制，如 {"arxiv": 50, "semantic_scholar": 300}，覆盖 limit_per_source
 
     Returns:
         合并的论文列表
@@ -855,7 +857,8 @@ async def search_all_sources(
     active_sources = []
     for source in sources:
         if source in search_functions:
-            tasks.append(search_functions[source](query, limit=limit_per_source))
+            limit = per_source_limits.get(source, limit_per_source) if per_source_limits else limit_per_source
+            tasks.append(search_functions[source](query, limit=limit))
             active_sources.append(source)
 
     # 使用 wait_for 添加总体超时，避免某个源卡住阻塞整个搜索

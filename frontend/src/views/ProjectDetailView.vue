@@ -25,6 +25,7 @@ const project = ref<Project | null>(null)
 const reviewData = ref<ReviewResponse | null>(null)
 const isLoading = ref(true)
 const isStarting = ref(false)
+const isResuming = ref(false)
 const llmCalls = ref<ConsoleLlmCall[]>([])
 const isLoadingCalls = ref(false)
 const selectedLlmNode = ref('')
@@ -50,6 +51,7 @@ const pipelineStages = [
   { key: 'pgvector_knn', label: 'KNN', icon: '🕸️' },
   { key: 'rerank', label: '重排序', icon: '📈' },
   { key: 'kg_extraction', label: '实体抽取', icon: '🏷️' },
+  { key: 'community_memory', label: '社区记忆', icon: '🧠' },
   { key: 'community_detection', label: '聚类', icon: '🧩' },
   { key: 'visualize_community', label: '可视化', icon: '🎨' },
   { key: 'evidence_cards', label: '证据卡片', icon: '📋' },
@@ -251,6 +253,10 @@ function startStatusPolling() {
         stopCallsPolling()
         loadLlmCalls()
         loadReview()
+      } else if (status.status === 'interrupted') {
+        stopStatusPolling()
+        loadLlmCalls()
+        loadReview()
       }
     } catch { /* ignore */ }
   }, 5000)
@@ -304,10 +310,39 @@ function onLlmNodeFilterChange() {
   loadLlmCalls()
 }
 
+function loadHistoricalProgress() {
+  projectsApi.getProjectProgress(projectId).then(res => {
+    const stageLabels: Record<string, string> = {
+      search: '搜索', deduplicate: '去重', filter: '过滤', bm25: 'BM25',
+      embedding: '嵌入', pgvector_knn: 'KNN', rerank: '重排序',
+      kg_extraction: '实体抽取', community_memory: '社区记忆', community_detection: '聚类',
+      visualize_community: '可视化', evidence_cards: '证据卡片',
+      outline_generation: '大纲', gap_analysis: '缺口分析',
+      write_review: '写作', finalize: '完成',
+    }
+    for (const node of res.nodes) {
+      const label = stageLabels[node.node_name] || node.node_name
+      const time = node.finished_at
+        ? new Date(node.finished_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : new Date(node.started_at || '').toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      if (node.status === 'succeeded') {
+        progressLogs.value.push({ time, node: node.node_name, message: `${label} 完成` })
+        completedNodes.value.add(node.node_name)
+      } else if (node.status === 'failed') {
+        const err = node.error_message ? `: ${node.error_message}` : ''
+        progressLogs.value.push({ time, node: node.node_name, message: `${label} 失败${err}` })
+        failedNodes.value.add(node.node_name)
+      }
+    }
+  }).catch(() => { /* ignore */ })
+}
+
 onMounted(async () => {
   document.addEventListener('click', onClickOutside)
   try {
     project.value = await projectsApi.getProject(projectId)
+    // 加载历史执行日志
+    loadHistoricalProgress()
     if (isRunning.value) {
       connectSSE()
       startStatusPolling()
@@ -357,6 +392,23 @@ async function startPipeline() {
   }
 }
 
+async function resumePipeline() {
+  isResuming.value = true
+  try {
+    await projectsApi.resumePipeline(projectId)
+    if (project.value) project.value.status = 'running'
+    toast.success('Pipeline resumed')
+    connectSSE()
+    startStatusPolling()
+    startCallsPolling()
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { detail?: string } } }
+    toast.error(err.response?.data?.detail || 'Failed to resume')
+  } finally {
+    isResuming.value = false
+  }
+}
+
 function formatCallTime(value: string | null): string {
   if (!value) return ''
   return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -369,13 +421,14 @@ function formatCost(value: number): string {
 function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status === 'completed') return 'default'
   if (status.startsWith('running')) return 'secondary'
-  if (status === 'failed') return 'destructive'
+  if (status === 'failed' || status === 'interrupted') return 'outline'
   return 'outline'
 }
 
 function getStatusLabel(status: string): string {
   if (status === 'completed') return 'Completed'
   if (status === 'failed') return 'Failed'
+  if (status === 'interrupted') return 'Interrupted'
   if (status === 'created') return 'Ready'
   if (status.startsWith('running:')) {
     const node = status.replace('running:', '')
@@ -388,6 +441,7 @@ function getStatusLabel(status: string): string {
       pgvector_knn: 'Building KNN',
       rerank: 'Reranking',
       kg_extraction: 'Extracting KG',
+      community_memory: 'Synthesizing memory',
       community_detection: 'Detecting communities',
       visualize_community: 'Generating visualization',
       evidence_cards: 'Generating evidence cards',
@@ -612,9 +666,9 @@ function scrollToReferences() {
                   <tr>
                     <th class="py-2 pr-3 text-left font-medium">时间</th>
                     <th class="py-2 pr-3 text-left font-medium">节点</th>
-                    <th class="py-2 pr-3 text-left font-medium">Provider</th>
                     <th class="py-2 pr-3 text-left font-medium">模型</th>
                     <th class="py-2 pr-3 text-left font-medium">状态</th>
+                    <th class="py-2 pr-3 text-left font-medium">日志</th>
                     <th class="py-2 pr-3 text-right font-medium">Tokens</th>
                     <th class="py-2 pr-3 text-right font-medium">耗时</th>
                     <th class="py-2 text-right font-medium">费用</th>
@@ -624,12 +678,16 @@ function scrollToReferences() {
                   <tr v-for="call in recentNodeCalls" :key="call.id" class="border-b border-border/50 last:border-0">
                     <td class="py-2 pr-3 whitespace-nowrap text-muted-foreground">{{ formatCallTime(call.created_at) }}</td>
                     <td class="py-2 pr-3 whitespace-nowrap">{{ call.node_name || '-' }}</td>
-                    <td class="py-2 pr-3 whitespace-nowrap">{{ call.provider_name || '-' }}</td>
                     <td class="py-2 pr-3 whitespace-nowrap">{{ call.requested_model || call.model_name || '-' }}</td>
                     <td class="py-2 pr-3 whitespace-nowrap">
-                      <Badge :variant="call.status === 'error' ? 'destructive' : 'secondary'" class="text-[10px]">
+                      <Badge :variant="call.status === 'error' ? 'destructive' : call.status === 'running' ? 'outline' : 'secondary'" class="text-[10px]">
                         {{ call.status }}
                       </Badge>
+                    </td>
+                    <td class="py-2 pr-3 text-left text-muted-foreground max-w-[200px] truncate" :title="call.error_message || ''">
+                      <span v-if="call.status === 'error' && call.error_message" class="text-destructive">{{ call.error_message }}</span>
+                      <span v-else-if="call.status === 'running'" class="text-muted-foreground">等待中...</span>
+                      <span v-else>-</span>
                     </td>
                     <td class="py-2 pr-3 text-right tabular-nums">{{ call.total_tokens || 0 }}</td>
                     <td class="py-2 pr-3 text-right tabular-nums">{{ call.latency_ms || 0 }}ms</td>
@@ -783,6 +841,18 @@ function scrollToReferences() {
         </div>
         <p class="text-foreground font-medium">No review content yet</p>
         <p class="text-sm text-muted-foreground mt-1">The pipeline completed but no sections were generated.</p>
+      </div>
+
+      <!-- Interrupted state — show what we have -->
+      <div v-else-if="project.status === 'interrupted' && !hasReview" class="text-center py-16">
+        <div class="text-muted-foreground/60 mb-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="mx-auto"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <p class="text-foreground font-medium">任务已中断</p>
+        <p class="text-sm text-muted-foreground mt-1">Pipeline 被手动终止，已完成的阶段数据显示在上方日志中</p>
+        <Button size="sm" class="mt-4" :disabled="isResuming" @click="resumePipeline">
+          {{ isResuming ? '恢复中...' : '恢复 Pipeline' }}
+        </Button>
       </div>
     </main>
   </div>

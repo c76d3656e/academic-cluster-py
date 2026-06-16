@@ -42,10 +42,6 @@ _INLINE_REVISION_SENTENCE_RE = re.compile(
     re.IGNORECASE,
 )
 _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL)
-_CHANNEL_BLOCK_RE = re.compile(
-    r"^\s*(?:analysis|reasoning|thought|思考|推理)\s*[:：].*?(?=\n\n|$)",
-    re.IGNORECASE | re.DOTALL | re.MULTILINE,
-)
 
 
 def _looks_like_revision_commentary(block: str) -> bool:
@@ -60,7 +56,6 @@ def strip_revision_commentary(content: str) -> str:
         return ""
 
     content = _THINK_BLOCK_RE.sub("", content)
-    content = _CHANNEL_BLOCK_RE.sub("", content)
 
     def _drop_meta_block(match: re.Match) -> str:
         block = match.group(0)
@@ -149,9 +144,14 @@ def strip_unsupported_precise_metrics(
             if metric and metric not in evidence_text and metric.replace("％", "%") not in evidence_text
         ]
         if unsupported:
-            dropped = True
-            continue
-        kept.append(sentence + punctuation)
+            # 如果句子有引用标记 [N]，说明指标来自被引文献，保留
+            if re.search(r"\[\d+\]", sentence):
+                kept.append(sentence + punctuation)
+            else:
+                dropped = True
+                continue
+        else:
+            kept.append(sentence + punctuation)
 
     cleaned = "".join(kept)
     if dropped:
@@ -785,15 +785,10 @@ _PROMPT_LEAKAGE_LIST_RE = re.compile(
     r"\n\s*\d+\.\s*(?:全文采用|每处引用|技术比较|争议性问题|实验数据|禁止出现).*$",
     re.DOTALL,
 )
-# Matches "（文献[N][M]...）" format (should be inline [N] not parenthesized)
-_PAREN_CITATION_RE = re.compile(r"（文献(\[\d+(?:\]\[?\d+)*\])）")
-
-
 def strip_prompt_leakage(content: str) -> str:
     """Strip LLM prompt leakage like '（注：本节严格遵循以下规范...）'."""
     content = _PROMPT_LEAKAGE_RE.sub("", content)
     content = _PROMPT_LEAKAGE_LIST_RE.sub("", content)
-    content = _PAREN_CITATION_RE.sub(r"\1", content)
     return content.strip()
 
 

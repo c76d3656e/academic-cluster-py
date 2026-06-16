@@ -17,7 +17,7 @@ from ...services.observability import get_current_tracker
 from ..state import PipelineState
 logger = structlog.get_logger()
 
-DEFAULT_GAP_ANALYSIS_TIMEOUT_S = 45
+DEFAULT_GAP_ANALYSIS_TIMEOUT_S = 180
 
 
 def _analyze_community_gaps(

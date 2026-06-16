@@ -5,7 +5,7 @@
 """
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -14,7 +14,7 @@ from langchain_openai import ChatOpenAI
 logger = structlog.get_logger()
 
 CORE_EVIDENCE_CARD_TARGET = 160
-DEFAULT_EVIDENCE_CARD_TIMEOUT_S = 120
+DEFAULT_EVIDENCE_CARD_TIMEOUT_S = 300
 
 
 EVIDENCE_SYSTEM_PROMPT = """你是一个学术证据分析专家。你的任务是从学术论文中提取结构化的证据信息。
@@ -211,6 +211,7 @@ async def generate_evidence_cards_batch(
     cluster_topics: dict[str, list[str]] | None = None,
     concurrency: int | None = None,
     timeout_s: int = DEFAULT_EVIDENCE_CARD_TIMEOUT_S,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[dict]:
     """
     批量生成证据卡片
@@ -218,6 +219,7 @@ async def generate_evidence_cards_batch(
     Args:
         papers: 论文列表
         cluster_topics: 论文 ID 到社区主题的映射
+        progress_callback: 进度回调 (completed, total)
 
     Returns:
         证据卡片列表
@@ -230,34 +232,44 @@ async def generate_evidence_cards_batch(
     max_concurrency = max(1, int(concurrency or len(papers) or 1))
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    async def _bounded_generate(paper: dict):
+    async def _bounded_generate(idx: int, paper: dict):
         async with semaphore:
-            return await asyncio.wait_for(
-                generate_evidence_card(
-                    paper=paper,
-                    cluster_topics=cluster_topics.get(paper.get("id")),
-                ),
-                timeout=max(1, timeout_s),
-            )
+            try:
+                card = await asyncio.wait_for(
+                    generate_evidence_card(
+                        paper=paper,
+                        cluster_topics=cluster_topics.get(paper.get("id")),
+                    ),
+                    timeout=max(1, timeout_s),
+                )
+                return idx, card, None
+            except Exception as e:
+                return idx, None, e
 
-    tasks = [_bounded_generate(paper) for paper in papers]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    tasks = [_bounded_generate(i, paper) for i, paper in enumerate(papers)]
+    evidence_cards = [None] * len(papers)
+    total = len(papers)
 
-    evidence_cards = []
-    for paper, result in zip(papers, results):
-        if isinstance(result, Exception):
+    for completed, future in enumerate(asyncio.as_completed(tasks), 1):
+        idx, card, error = await future
+        if error:
             logger.error(
                 "Evidence generation failed, using fallback card",
-                paper_id=paper.get("id"),
-                error=str(result),
+                paper_id=papers[idx].get("id"),
+                error=str(error),
             )
-            evidence_cards.append(fallback_missing_card(paper))
+            evidence_cards[idx] = fallback_missing_card(papers[idx])
         else:
-            evidence_cards.append(normalize_evidence_card(result, paper))
+            evidence_cards[idx] = normalize_evidence_card(card, papers[idx])
+
+        if progress_callback:
+            progress_callback(completed, total)
+
+    evidence_cards = [c for c in evidence_cards if c is not None]
 
     logger.info(
         "Evidence cards generated",
-        total=len(papers),
+        total=total,
         successful=len(evidence_cards),
         concurrency=max_concurrency,
     )

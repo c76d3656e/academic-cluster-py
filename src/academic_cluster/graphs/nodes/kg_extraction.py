@@ -214,6 +214,11 @@ async def kg_extraction_node(state: PipelineState) -> dict:
                     logger.error("KG extraction failed for paper", paper_idx=idx, error=str(e))
                     async with completed_lock:
                         completed_count += 1
+                        await send_progress(
+                            project_id, "kg_extraction",
+                            f"知识图谱抽取中 {completed_count}/{total}...",
+                            progress=completed_count / total if total > 0 else 0,
+                        )
 
         tasks = [extract_and_save(i, paper) for i, paper in enumerate(remaining_papers)]
         await asyncio.gather(*tasks)

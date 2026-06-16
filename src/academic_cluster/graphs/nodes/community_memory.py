@@ -390,6 +390,37 @@ async def community_memory_node(state: PipelineState) -> dict:
     logger.info("Starting community memory synthesis", clusters=len(state.cluster_ids))
 
     clusters = await db.get_clusters_by_ids(state.cluster_ids)
+
+    # === 幂等恢复：查询已有社区记忆，跳过已处理的 cluster ===
+    existing_memory_ids: list[str] = []
+    already_done_cluster_ids: set[str] = set()
+    try:
+        existing_memories = await db.get_community_memories_by_project(state.project_id)
+        existing_memory_ids = [str(m["id"]) for m in existing_memories if m.get("id")]
+        cluster_id_set = {str(c.get("id")) for c in clusters if c.get("id")}
+        already_done_cluster_ids = {
+            str(m["cluster_id"]) for m in existing_memories
+            if m.get("cluster_id") and str(m["cluster_id"]) in cluster_id_set
+        }
+        if already_done_cluster_ids:
+            logger.info(
+                "Resuming community memory, skipping already processed clusters",
+                already_done=len(already_done_cluster_ids),
+                total=len(clusters),
+            )
+    except Exception as e:
+        logger.warning("Failed to check existing community memories, processing all", error=str(e))
+        already_done_cluster_ids = set()
+
+    # 过滤掉已处理的 cluster
+    remaining_clusters = [c for c in clusters if str(c.get("id")) not in already_done_cluster_ids]
+    if not remaining_clusters:
+        logger.info("All clusters already have community memories, skipping")
+        return {
+            "community_memory_ids": existing_memory_ids,
+            "status": "community_memory_synthesized",
+        }
+
     all_paper_ids = list(dict.fromkeys((state.core_paper_ids or []) + (state.auxiliary_paper_ids or [])))
     papers = await db.get_papers_by_ids(all_paper_ids)
     evidence_cards = await db.get_evidence_cards_by_ids(state.evidence_card_ids)
@@ -483,29 +514,50 @@ async def community_memory_node(state: PipelineState) -> dict:
         provider_slots=provider_slots,
         effective=concurrency,
         llm_limit=llm_limit,
-        clusters=len(clusters),
+        clusters=len(remaining_clusters),
+        skipped=len(already_done_cluster_ids),
     )
     semaphore = asyncio.Semaphore(max(1, concurrency))
+    completed_count = 0
+    total_to_process = len(remaining_clusters)
+    completed_lock = asyncio.Lock()
 
-    async def _bounded(cluster: dict) -> dict:
+    async def _bounded(idx: int, cluster: dict) -> dict:
+        nonlocal completed_count
         async with semaphore:
-            return await _build_memory(cluster)
+            result = await _build_memory(cluster)
+        async with completed_lock:
+            completed_count += 1
+            await send_progress(
+                state.project_id, "community_memory",
+                f"社区记忆聚合中 {completed_count}/{total_to_process}...",
+                progress=completed_count / total_to_process if total_to_process > 0 else 0,
+            )
+        return result
 
-    memories = await asyncio.gather(*[_bounded(cluster) for cluster in clusters])
+    memories = await asyncio.gather(*[_bounded(i, cluster) for i, cluster in enumerate(remaining_clusters)])
 
-    memory_ids: list[str] = []
+    new_memory_ids: list[str] = []
     for memory in memories:
-        memory_ids.append(await db.save_community_memory(memory))
+        new_memory_ids.append(await db.save_community_memory(memory))
+
+    # 合并已有 + 新生成的
+    all_memory_ids = existing_memory_ids + new_memory_ids
 
     await send_progress(
         state.project_id,
         "community_memory",
-        f"社区记忆生成完成，共 {len(memory_ids)} 个",
-        detail={"community_memory_count": len(memory_ids)},
+        f"社区记忆生成完成，共 {len(all_memory_ids)} 个",
+        detail={"community_memory_count": len(all_memory_ids)},
     )
 
-    logger.info("Community memory synthesis completed", memories=len(memory_ids))
+    logger.info(
+        "Community memory synthesis completed",
+        new=len(new_memory_ids),
+        total=len(all_memory_ids),
+        skipped=len(already_done_cluster_ids),
+    )
     return {
-        "community_memory_ids": memory_ids,
+        "community_memory_ids": all_memory_ids,
         "status": "community_memory_synthesized",
     }

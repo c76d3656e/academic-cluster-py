@@ -33,7 +33,11 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
 
     pool = get_embedding_pool()
     start_time = _time.monotonic()
-    provider_alias = pool.get_model_name()
+    first_deployment = pool.get_first_deployment()
+    provider_alias = (
+        first_deployment.get("model_info", {}).get("provider_alias", "")
+        or pool.get_model_name()
+    )
 
     response = await asyncio.wait_for(
         pool.router.aembedding(

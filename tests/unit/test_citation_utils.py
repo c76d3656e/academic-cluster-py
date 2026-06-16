@@ -62,6 +62,18 @@ def test_strip_unsupported_precise_metrics_keeps_metrics_present_in_evidence():
     cleaned = strip_unsupported_precise_metrics(content, cards)
 
     assert "87.3%" in cleaned
+    # 有引用标记 [N] 的句子即使指标不在 evidence card 中也保留（指标来自被引文献）
+    assert "63.2%" in cleaned
+
+
+def test_strip_unsupported_precise_metrics_removes_metric_without_citation():
+    content = "该系统在测试集中达到87.3%的偏好匹配率。另一个未证实指标为63.2%。"
+    cards = [{"metric": "87.3%", "evidence_span": "test preference rate reaches 87.3%"}]
+
+    cleaned = strip_unsupported_precise_metrics(content, cards)
+
+    # 无引用标记时，unsupported metric 仍然应该被删除
+    assert "87.3%" in cleaned
     assert "63.2%" not in cleaned
 
 

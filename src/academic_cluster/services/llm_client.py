@@ -1,7 +1,9 @@
 """
 统一 LLM 客户端工厂
 
-通过 Provider Pool 创建 ChatOpenAI 实例，支持多端点负载均衡。
+通过 LiteLLM Router 发出所有 LLM 请求，由 Router 处理路由、重试、
+故障转移、RPM 限速和 cooldown。
+
 所有 agent 和 node 应通过此模块获取 LLM 客户端。
 """
 
@@ -11,6 +13,7 @@ from hashlib import sha256
 from typing import Optional
 
 import structlog
+from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 
 logger = structlog.get_logger()
@@ -20,17 +23,51 @@ _llm_queue_semaphore: asyncio.Semaphore | None = None
 _llm_queue_capacity = 0
 
 _THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL)
-_REASONING_BLOCK_RE = re.compile(
-    r"^\s*(?:analysis|reasoning|thought|思考|推理)\s*[:：].*?(?=\n\n|$)",
-    re.IGNORECASE | re.DOTALL | re.MULTILINE,
-)
+
+
+def _messages_to_openai(input) -> list[dict]:
+    """将 LangChain 消息或字符串转为 OpenAI 消息 dict 列表（供 Router 使用）。"""
+    from langchain_core.messages.utils import convert_to_openai_messages
+    if isinstance(input, str):
+        return [{"role": "user", "content": input}]
+    if isinstance(input, list):
+        return convert_to_openai_messages(input)
+    return [{"role": "user", "content": str(input)}]
+
+
+def _router_response_to_aimessage(response, provider_alias: str = "") -> AIMessage:
+    """将 LiteLLM Router 的响应 dict 转为 LangChain AIMessage。"""
+    choices = getattr(response, "choices", None) or response.get("choices", [])
+    choice = choices[0] if choices else {}
+    msg_dict = choice.get("message", {}) if isinstance(choice, dict) else getattr(choice, "message", {})
+    content = msg_dict.get("content", "") if isinstance(msg_dict, dict) else getattr(msg_dict, "content", "")
+    finish_reason = choice.get("finish_reason", "") if isinstance(choice, dict) else getattr(choice, "finish_reason", "")
+
+    usage = getattr(response, "usage", None) or response.get("usage", {}) or {}
+
+    hidden = getattr(response, "_hidden_params", None) or response.get("_hidden_params", {}) or {}
+    actual_provider = str(hidden.get("model_id", "") or hidden.get("api_base", "") or provider_alias)
+
+    return AIMessage(
+        content=content or "",
+        usage_metadata={
+            "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
+            "output_tokens": int(usage.get("completion_tokens", 0) or 0),
+            "total_tokens": int(usage.get("total_tokens", 0) or 0),
+        },
+        response_metadata={
+            "model_name": getattr(response, "model", None) or response.get("model", ""),
+            "token_usage": dict(usage) if not isinstance(usage, dict) else usage,
+            "provider": actual_provider,
+            "finish_reason": finish_reason,
+        },
+    )
 
 
 def strip_llm_reasoning_content(content):
-    """Strip provider-visible reasoning blocks while preserving normal content."""
+    """Strip <think> tags while preserving normal content."""
     if isinstance(content, str):
         cleaned = _THINK_BLOCK_RE.sub("", content)
-        cleaned = _REASONING_BLOCK_RE.sub("", cleaned)
         return cleaned.strip()
     if isinstance(content, list):
         cleaned_blocks = []
@@ -149,10 +186,12 @@ def create_llm(
         api_key=params["api_key"],
         base_url=params.get("api_base"),
         max_tokens=max_tokens,
-        timeout=180,  # 单次 HTTP 请求超时 3 分钟
+        timeout=240,  # 单次 HTTP 请求超时 4 分钟
     )
-    # 在 llm 对象上附加 provider 别名，供 ainvoke_with_callbacks 读取
-    llm._provider_alias = deployment.get("model_name", "")
+    # 在 llm 对象上附加 provider 别名和路由分组名，供 ainvoke_with_callbacks 读取
+    model_info = deployment.get("model_info", {}) or {}
+    llm._litellm_model = deployment.get("model_name", actual_model)  # 路由分组名（如 "Qwen3-8B"），传给 Router
+    llm._provider_alias = model_info.get("provider_alias", "") or deployment.get("model_name", "")
     llm._provider_rpm_limit = int(params.get("rpm") or 10)
     llm._requested_model = actual_model
     llm._upstream_model = actual_model
@@ -165,7 +204,13 @@ def create_llm(
 
 async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0, **kwargs):
     """
-    包装 LLM ainvoke 调用，手动追踪 token 用量和持久化到 DB。
+    包装 LLM 调用，手动追踪 token 用量和持久化到 DB。
+
+    通过 LiteLLM Router 发出实际 HTTP 请求，由 Router 处理：
+    - 多端点加权路由（simple-shuffle）
+    - 失败自动重试 + 故障转移（num_retries=2）
+    - RPM/TPM 限速
+    - 不健康端点 cooldown（allowed_fails=3, cooldown_time=60s）
 
     LangChain 的 callback 系统对 ChatOpenAI 的 on_llm_end 不可靠，
     因此在此处直接追踪。
@@ -185,6 +230,10 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     run_id = get_resolved_run_id()
     if not run_id:
         logger.warning("ainvoke_with_callbacks no run_id", node=node_name, has_tracker=tracker is not None)
+
+    _temperature = getattr(llm, "_temperature", 0.7)
+    _max_tokens = getattr(llm, "_max_tokens", None)
+
     provider_alias = getattr(llm, "_provider_alias", "") or "llm"
     requested_model = (
         getattr(llm, "_requested_model", None)
@@ -196,6 +245,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
         getattr(llm, "_api_base_url", None)
         or str(_safe_attr(llm, "openai_api_base", "base_url", default="") or "")
     )
+    litellm_model = getattr(llm, "_litellm_model", "openai/" + requested_model)
     call_id = None
     db = None
 
@@ -229,8 +279,8 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                 request_metadata={
                     "node_name": node_name,
                     "timeout_s": timeout,
-                    "temperature": getattr(llm, "_temperature", None),
-                    "max_tokens": getattr(llm, "_max_tokens", None),
+                    "temperature": _temperature,
+                    "max_tokens": _max_tokens,
                     "provider_alias": provider_alias,
                     "config_keys": sorted((config or {}).keys()) if isinstance(config, dict) else [],
                 },
@@ -238,26 +288,45 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
         except Exception as e:
             logger.warning("Failed to create llm_call audit row", error=str(e), node=node_name)
 
+    # 通过 LiteLLM Router 发送请求（Router 内置 retry + failover）
+    from .provider_pool import get_llm_pool
+
     try:
-        semaphore = _get_llm_queue_semaphore()
-        async with semaphore:
-            response = await asyncio.wait_for(llm.ainvoke(input, config=config, **kwargs), timeout=timeout)
-            response = sanitize_llm_response(response)
-    except asyncio.TimeoutError:
-        elapsed_ms = int((_time.monotonic() - start_time) * 1000)
-        err_msg = f"LLM call timed out after {timeout}s"
-        if db and call_id:
-            try:
-                await db.finish_llm_call(
-                    call_id=call_id,
-                    status="error",
-                    error_message=err_msg,
-                    latency_ms=elapsed_ms,
+        pool = get_llm_pool()
+    except RuntimeError:
+        pool = None
+
+    try:
+        if pool is not None:
+            messages = _messages_to_openai(input)
+            semaphore = _get_llm_queue_semaphore()
+            router_kwargs = dict(kwargs)
+            router_kwargs.pop("config", None)
+
+            async with semaphore:
+                response = await asyncio.wait_for(
+                    pool.router.acompletion(
+                        model=litellm_model,
+                        messages=messages,
+                        temperature=_temperature,
+                        max_tokens=_max_tokens,
+                        timeout=timeout,
+                        **router_kwargs,
+                    ),
+                    timeout=timeout + 60,
                 )
-            except Exception as e:
-                logger.warning("Failed to persist llm_call timeout", error=str(e), node=node_name)
-        logger.error(err_msg, node=node_name, timeout_s=timeout)
-        raise TimeoutError(err_msg)
+
+            response = _router_response_to_aimessage(response, provider_alias)
+            response = sanitize_llm_response(response)
+        else:
+            # Fallback: 直接使用 llm.ainvoke()（测试环境未初始化 pool 时）
+            semaphore = _get_llm_queue_semaphore()
+            async with semaphore:
+                response = await asyncio.wait_for(
+                    llm.ainvoke(input, config=config, **kwargs), timeout=timeout
+                )
+                response = sanitize_llm_response(response)
+
     except asyncio.CancelledError:
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
         err_msg = "LLM call cancelled"
@@ -275,16 +344,19 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
         raise
     except Exception as e:
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
+        is_timeout = isinstance(e, asyncio.TimeoutError)
+        err_msg = f"LLM call timed out after {timeout}s" if is_timeout else str(e)
         if db and call_id:
             try:
                 await db.finish_llm_call(
                     call_id=call_id,
                     status="error",
-                    error_message=str(e),
+                    error_message=err_msg,
                     latency_ms=elapsed_ms,
                 )
             except Exception as persist_error:
                 logger.warning("Failed to persist llm_call error", error=str(persist_error), node=node_name)
+        logger.error(err_msg, node=node_name, timeout_s=timeout, elapsed_ms=elapsed_ms)
         raise
 
     elapsed_ms = int((_time.monotonic() - start_time) * 1000)

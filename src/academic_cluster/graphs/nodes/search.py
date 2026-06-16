@@ -384,6 +384,10 @@ async def search_node(state: PipelineState) -> dict:
         config = state.config or {}
         limit_per_source = config.get("limit_per_source", 200)
         sources = config.get("sources", ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"])
+        per_source_limits = {
+            s: int(config.get(f"search.source_limit.{s}", limit_per_source))
+            for s in sources
+        }
 
         # 从 config 读取可调参数
         max_rounds = config.get("search.max_rounds", _DEFAULT_MAX_SEARCH_ROUNDS)
@@ -422,6 +426,7 @@ async def search_node(state: PipelineState) -> dict:
                     query=q,
                     limit_per_source=limit_per_source,
                     sources=sources,
+                    per_source_limits=per_source_limits,
                 )
                 for q in queries
             ]
