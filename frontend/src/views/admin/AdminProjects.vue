@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { shallowRef, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from '@/i18n'
+import { getStatusVariant } from '@/lib/utils'
 import { adminApi, type ProjectAdmin } from '@/api/admin'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,10 +17,12 @@ import {
 } from '@/components/ui/table'
 
 const router = useRouter()
+const { t } = useI18n()
+
 const projects = ref<ProjectAdmin[]>([])
-const total = ref(0)
-const isLoading = ref(true)
-const deletingId = ref<string | null>(null)
+const total = shallowRef(0)
+const isLoading = shallowRef(true)
+const deletingId = shallowRef<string | null>(null)
 
 onMounted(async () => {
   await loadProjects()
@@ -38,67 +42,61 @@ async function loadProjects() {
 }
 
 async function handleDelete(id: string, name: string) {
-  if (!confirm(`确定删除项目「${name}」？此操作不可撤销。`)) return
+  if (!confirm(t('project.confirmDeleteSimple', { name }))) return
   deletingId.value = id
   try {
     await adminApi.deleteProject(id)
     projects.value = projects.value.filter(p => p.id !== id)
     total.value--
-  } catch (e) {
-    alert('删除失败')
+  } catch {
+    alert(t('project.deleteFailed'))
   } finally {
     deletingId.value = null
   }
 }
-
-function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (status === 'completed') return 'default'
-  if (status.startsWith('running')) return 'secondary'
-  if (status === 'failed') return 'destructive'
-  return 'outline'
-}
 </script>
 
 <template>
-  <div class="p-8">
-    <div class="flex items-center justify-between mb-8">
+  <div class="p-4 md:p-8">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
       <div>
-        <h2 class="text-heading font-medium tracking-tight">项目管理</h2>
-        <p class="text-sm text-muted-foreground mt-1">共 {{ total }} 个项目</p>
+        <h2 class="text-heading font-medium tracking-tight">{{ t('admin.projectManagement') }}</h2>
+        <p class="text-sm text-muted-foreground mt-1">{{ t('admin.totalProjectsCount', { count: total }) }}</p>
       </div>
     </div>
 
-    <div v-if="isLoading" class="text-center py-16 text-muted-foreground">加载中...</div>
+    <div v-if="isLoading" class="text-center py-16 text-muted-foreground">{{ t('common.loading') }}</div>
 
     <Card v-else class="border border-border shadow-[var(--shadow-sm)]">
       <CardContent class="p-0">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>名称</TableHead>
-              <TableHead>查询词</TableHead>
-              <TableHead>用户</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead>创建时间</TableHead>
-              <TableHead>操作</TableHead>
+              <TableHead>{{ t('project.projectName') }}</TableHead>
+              <TableHead class="hidden md:table-cell">{{ t('admin.queryLabel') }}</TableHead>
+              <TableHead class="hidden md:table-cell">{{ t('admin.userLabel') }}</TableHead>
+              <TableHead>{{ t('common.status') }}</TableHead>
+              <TableHead class="hidden sm:table-cell">{{ t('admin.createdAt') }}</TableHead>
+              <TableHead>{{ t('common.actions') }}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow v-for="p in projects" :key="p.id">
               <TableCell class="font-medium">{{ p.name }}</TableCell>
-              <TableCell class="text-muted-foreground max-w-[200px] truncate">{{ p.query }}</TableCell>
-              <TableCell class="text-muted-foreground text-sm">{{ p.user_email || '-' }}</TableCell>
+              <TableCell class="text-muted-foreground max-w-[200px] truncate hidden md:table-cell">{{ p.query }}</TableCell>
+              <TableCell class="text-muted-foreground text-sm hidden md:table-cell">{{ p.user_email || '-' }}</TableCell>
               <TableCell>
                 <Badge :variant="getStatusVariant(p.status)" class="text-[0.65rem]">
                   {{ p.status }}
                 </Badge>
               </TableCell>
-              <TableCell class="text-muted-foreground">
+              <TableCell class="text-muted-foreground hidden sm:table-cell">
                 {{ p.created_at ? new Date(p.created_at).toLocaleDateString() : '-' }}
               </TableCell>
-              <TableCell class="space-x-2">
+              <TableCell>
+                <div class="flex gap-1 flex-wrap">
                 <Button variant="ghost" size="sm" @click="router.push(`/projects/${p.id}`)">
-                  查看
+                  {{ t('common.view') }}
                 </Button>
                 <Button
                   variant="ghost"
@@ -107,8 +105,9 @@ function getStatusVariant(status: string): 'default' | 'secondary' | 'destructiv
                   :disabled="deletingId === p.id"
                   @click="handleDelete(p.id, p.name)"
                 >
-                  {{ deletingId === p.id ? '删除中...' : '删除' }}
+                  {{ deletingId === p.id ? t('common.deleting') : t('common.delete') }}
                 </Button>
+                </div>
               </TableCell>
             </TableRow>
           </TableBody>

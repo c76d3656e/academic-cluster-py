@@ -1,20 +1,21 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
+import { useFeatures } from '@/composables/useFeatures'
+import { useI18n } from '@/i18n'
+import { getInitials } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
-import { getFeatures } from '@/api/client'
+
+const emit = defineEmits<{ navigate: [] }>()
 
 const route = useRoute()
 const router = useRouter()
 const { user, isAdmin, logout } = useAuth()
+const { features, loadFeatures } = useFeatures()
+const { t } = useI18n()
 
-const showUsage = ref(false)
-
-onMounted(async () => {
-  const features = await getFeatures()
-  showUsage.value = features.show_usage ?? false
-})
+const showUsage = computed(() => features.value.show_usage ?? false)
 
 interface NavItem {
   path: string
@@ -22,36 +23,54 @@ interface NavItem {
   icon: string
 }
 
-const baseConsoleItems: NavItem[] = [
-  { path: '/console/overview', label: '仪表盘', icon: 'dashboard' },
-  { path: '/console/projects', label: '我的项目', icon: 'projects' },
-  { path: '/console/profile', label: '个人设置', icon: 'profile' },
-  { path: '/console/recharge', label: '充值', icon: 'recharge' },
-]
-
-const consoleItems = ref([...baseConsoleItems])
-
-onMounted(async () => {
-  const features = await getFeatures()
-  showUsage.value = features.show_usage ?? false
-  consoleItems.value = [...baseConsoleItems]
+const consoleItems = computed<NavItem[]>(() => {
+  const items: NavItem[] = [
+    { path: '/console/overview', label: t('console.dashboard'), icon: 'dashboard' },
+    { path: '/console/projects', label: t('console.myProjects'), icon: 'projects' },
+  ]
   if (showUsage.value) {
-    consoleItems.value.splice(2, 0, { path: '/console/usage', label: '我的用量', icon: 'usage' })
+    items.push({ path: '/console/usage', label: t('console.myUsage'), icon: 'usage' })
   }
+  items.push({ path: '/console/profile', label: t('console.profile'), icon: 'profile' })
+  items.push({ path: '/console/recharge', label: t('console.recharge'), icon: 'recharge' })
+  return items
 })
 
 const adminItems: NavItem[] = [
-  { path: '/admin/overview', label: '系统概览', icon: 'admin-overview' },
-  { path: '/admin/users', label: '用户管理', icon: 'admin-users' },
-  { path: '/admin/projects', label: '项目管理', icon: 'admin-projects' },
-  { path: '/admin/providers', label: 'Provider 管理', icon: 'admin-providers' },
-  { path: '/admin/pipeline-config', label: 'Pipeline 配置', icon: 'admin-pipeline' },
-  { path: '/admin/usage', label: '用量分析', icon: 'admin-usage' },
-  { path: '/admin/audit', label: '审计日志', icon: 'admin-audit' },
+  { path: '/admin/overview', label: t('admin.systemOverview'), icon: 'admin-overview' },
+  { path: '/admin/users', label: t('admin.userManagement'), icon: 'admin-users' },
+  { path: '/admin/projects', label: t('admin.projectManagement'), icon: 'admin-projects' },
+  { path: '/admin/providers', label: t('admin.providerManagement'), icon: 'admin-providers' },
+  { path: '/admin/pipeline-config', label: t('admin.pipelineConfig'), icon: 'admin-pipeline' },
+  { path: '/admin/usage', label: t('admin.usageAnalysis'), icon: 'admin-usage' },
+  { path: '/admin/audit', label: t('admin.auditLog'), icon: 'admin-audit' },
 ]
+
+const iconMap: Record<string, string> = {
+  'dashboard': '■',
+  'projects': '▣',
+  'usage': '▲',
+  'profile': '○',
+  'recharge': '◆',
+  'admin-overview': '▓',
+  'admin-users': '▤',
+  'admin-projects': '▦',
+  'admin-providers': '◈',
+  'admin-pipeline': '⚙',
+  'admin-usage': '▴',
+  'admin-audit': '▨',
+}
+
+function getIcon(icon: string): string {
+  return iconMap[icon] || '□'
+}
 
 function isActive(path: string): boolean {
   return route.path === path || route.path.startsWith(path + '/')
+}
+
+function handleNavigate() {
+  emit('navigate')
 }
 
 async function handleLogout() {
@@ -59,16 +78,16 @@ async function handleLogout() {
   router.push('/login')
 }
 
-function getInitials(email: string): string {
-  return email.slice(0, 2).toUpperCase()
-}
+onMounted(async () => {
+  await loadFeatures()
+})
 </script>
 
 <template>
-  <aside class="w-[220px] shrink-0 border-r border-border bg-sidebar h-screen sticky top-0 flex flex-col">
+  <aside class="w-[220px] shrink-0 border-r border-border bg-sidebar h-full flex flex-col overflow-x-hidden">
     <!-- Logo -->
     <div class="px-5 py-5">
-      <router-link to="/console/overview" class="text-sm font-semibold text-foreground tracking-tight">
+      <router-link to="/console/overview" class="text-sm font-semibold text-foreground tracking-tight" @click="handleNavigate">
         Academic Cluster
       </router-link>
     </div>
@@ -91,7 +110,7 @@ function getInitials(email: string): string {
     <!-- Console Navigation -->
     <nav class="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
       <p class="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground px-2 mb-2">
-        我的控制台
+        {{ t('console.myConsole') }}
       </p>
       <router-link
         v-for="item in consoleItems"
@@ -99,6 +118,7 @@ function getInitials(email: string): string {
         :to="item.path"
         class="sidebar-link"
         :class="{ 'sidebar-link-active': isActive(item.path) }"
+        @click="handleNavigate"
       >
         <span class="sidebar-icon">{{ getIcon(item.icon) }}</span>
         {{ item.label }}
@@ -108,7 +128,7 @@ function getInitials(email: string): string {
       <template v-if="isAdmin">
         <Separator class="my-3" />
         <p class="text-[0.6rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground px-2 mb-2">
-          系统管理
+          {{ t('admin.systemManagement') }}
         </p>
         <router-link
           v-for="item in adminItems"
@@ -116,6 +136,7 @@ function getInitials(email: string): string {
           :to="item.path"
           class="sidebar-link"
           :class="{ 'sidebar-link-active': isActive(item.path) }"
+          @click="handleNavigate"
         >
           <span class="sidebar-icon">{{ getIcon(item.icon) }}</span>
           {{ item.label }}
@@ -132,31 +153,11 @@ function getInitials(email: string): string {
         class="sidebar-link text-destructive hover:text-destructive w-full"
       >
         <span class="sidebar-icon">&#x2192;</span>
-        登出
+        {{ t('auth.logout') }}
       </button>
     </div>
   </aside>
 </template>
-
-<script lang="ts">
-function getIcon(icon: string): string {
-  const icons: Record<string, string> = {
-    'dashboard': '■',
-    'projects': '▣',
-    'usage': '▲',
-    'profile': '○',
-    'recharge': '◆',
-    'admin-overview': '▓',
-    'admin-users': '▤',
-    'admin-projects': '▦',
-    'admin-providers': '◈',
-    'admin-pipeline': '⚙',
-    'admin-usage': '▴',
-    'admin-audit': '▨',
-  }
-  return icons[icon] || '□'
-}
-</script>
 
 <style scoped>
 .sidebar-link {

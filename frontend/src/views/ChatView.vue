@@ -2,11 +2,14 @@
 import { ref, nextTick, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
+import { useI18n } from '@/i18n'
+import { formatTime } from '@/lib/utils'
 import { projectsApi } from '@/api/projects'
 import { Button } from '@/components/ui/button'
 
 const router = useRouter()
 const { user, logout } = useAuth()
+const { t } = useI18n()
 
 interface ChatMessage {
   id: string
@@ -27,8 +30,32 @@ let eventSource: EventSource | null = null
 
 const messagesContainer = ref<HTMLElement | null>(null)
 
-function formatTime(): string {
-  return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+const nodeKeyMap: Record<string, string> = {
+  search: 'nodes.searchFull',
+  deduplicate: 'nodes.deduplicateFull',
+  filter: 'nodes.filterFull',
+  bm25: 'nodes.bm25Full',
+  embedding: 'nodes.embeddingFull',
+  pgvector_knn: 'nodes.pgvectorKnnFull',
+  rerank: 'nodes.rerankFull',
+  kg_extraction: 'nodes.kgExtractionFull',
+  community_detection: 'nodes.communityDetectionFull',
+  visualize_community: 'nodes.visualizeCommunityFull',
+  evidence_cards: 'nodes.evidenceCardsFull',
+  gap_analysis: 'nodes.gapAnalysisFull',
+  targeted_refine: 'nodes.targetedRefineFull',
+  outline_generation: 'nodes.outlineGenerationFull',
+  user_confirm: 'nodes.userConfirmFull',
+  write_review: 'nodes.writeReviewFull',
+  coverage_audit: 'nodes.coverageAuditFull',
+  section_revision: 'nodes.sectionRevisionFull',
+  artifact_registration: 'nodes.artifactRegistrationFull',
+  finalize: 'nodes.finalizeFull',
+}
+
+function getNodeLabel(node: string): string {
+  const key = nodeKeyMap[node]
+  return key ? t(key) : node
 }
 
 function addMessage(role: ChatMessage['role'], content: string, extra?: Partial<ChatMessage>) {
@@ -46,29 +73,6 @@ function addMessage(role: ChatMessage['role'], content: string, extra?: Partial<
   })
 }
 
-const nodeLabels: Record<string, string> = {
-  search: '搜索学术论文',
-  deduplicate: '去重处理',
-  filter: '相关性过滤',
-  bm25: 'BM25 文本检索',
-  embedding: '向量嵌入',
-  pgvector_knn: '向量相似度搜索',
-  rerank: '重排序',
-  kg_extraction: '知识图谱抽取',
-  community_detection: '社区检测',
-  visualize_community: '社区可视化',
-  evidence_cards: '证据卡片生成',
-  gap_analysis: '研究空白分析',
-  targeted_refine: '定向补充检索',
-  outline_generation: '大纲生成',
-  user_confirm: '等待用户确认',
-  write_review: '综述撰写',
-  coverage_audit: '覆盖度审计',
-  section_revision: '章节修订',
-  artifact_registration: '成果注册',
-  finalize: '最终化处理',
-}
-
 async function handleSubmit() {
   const query = input.value.trim()
   if (!query || isProcessing.value) return
@@ -78,22 +82,20 @@ async function handleSubmit() {
   isProcessing.value = true
 
   try {
-    // 创建项目
     const project = await projectsApi.createProject({
       name: query.slice(0, 100),
       query,
     })
 
     currentProjectId.value = project.id
-    addMessage('system', `项目已创建，正在启动研究流程...`)
+    addMessage('system', t('pipeline.projectCreated'))
 
-    // 启动 pipeline
     await projectsApi.startPipeline(project.id)
 
-    // 连接 SSE
     connectSSE(project.id)
   } catch (err: any) {
-    addMessage('system', `创建失败: ${err.response?.data?.detail || err.message || '未知错误'}`)
+    const error = err.response?.data?.detail || err.message || ''
+    addMessage('system', t('pipeline.createFailed', { error }))
     isProcessing.value = false
   }
 }
@@ -106,7 +108,7 @@ function connectSSE(projectId: string) {
   eventSource = new EventSource(url)
 
   eventSource.addEventListener('connected', () => {
-    addMessage('progress', '已连接到研究流程', { node: 'system' })
+    addMessage('progress', t('pipeline.connected'), { node: 'system' })
   })
 
   eventSource.addEventListener('progress', (e) => {
@@ -114,19 +116,18 @@ function connectSSE(projectId: string) {
     progressNode.value = data.node || ''
     progressMessage.value = data.message || ''
 
-    const label = nodeLabels[data.node] || data.node
+    const label = getNodeLabel(data.node || '')
     addMessage('progress', data.message || label, { node: data.node, status: data.status })
   })
 
   eventSource.addEventListener('complete', () => {
-    addMessage('result', '研究流程已完成！正在加载结果...')
+    addMessage('result', t('pipeline.pipelineCompleted'))
     disconnectSSE()
     isProcessing.value = false
   })
 
   eventSource.addEventListener('error', () => {
-    addMessage('system', '连接中断，正在重试...')
-    // SSE 会自动重连
+    addMessage('system', t('pipeline.disconnected'))
   })
 }
 
@@ -162,15 +163,15 @@ onUnmounted(() => {
 <template>
   <div class="flex flex-col h-screen bg-background">
     <!-- Header -->
-    <header class="flex items-center justify-between px-6 py-3 border-b border-border shrink-0">
-      <div class="flex items-center gap-3">
-        <h1 class="text-sm font-semibold tracking-tight">Academic Cluster</h1>
-        <span class="text-[0.65rem] text-muted-foreground">学术研究助手</span>
+    <header class="flex items-center justify-between px-4 md:px-6 py-3 border-b border-border shrink-0 gap-2 flex-wrap">
+      <div class="flex items-center gap-3 min-w-0">
+        <h1 class="text-sm font-semibold tracking-tight shrink-0">Academic Cluster</h1>
+        <span class="text-[0.65rem] text-muted-foreground hidden sm:inline">{{ t('pipeline.assistant') }}</span>
       </div>
-      <div class="flex items-center gap-3">
-        <span class="text-xs text-muted-foreground">{{ user?.email }}</span>
-        <Button variant="ghost" size="sm" @click="viewConsole">控制台</Button>
-        <Button variant="ghost" size="sm" class="text-destructive" @click="handleLogout">登出</Button>
+      <div class="flex items-center gap-2 md:gap-3">
+        <span class="text-xs text-muted-foreground truncate max-w-[120px] md:max-w-none">{{ user?.email }}</span>
+        <Button variant="ghost" size="sm" @click="viewConsole">{{ t('pipeline.console') }}</Button>
+        <Button variant="ghost" size="sm" class="text-destructive" @click="handleLogout">{{ t('auth.logout') }}</Button>
       </div>
     </header>
 
@@ -179,9 +180,9 @@ onUnmounted(() => {
       <!-- Empty state -->
       <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center px-4">
         <div class="mb-6">
-          <h2 class="text-2xl font-semibold tracking-tight mb-2">学术研究助手</h2>
+          <h2 class="text-2xl font-semibold tracking-tight mb-2">{{ t('pipeline.assistant') }}</h2>
           <p class="text-muted-foreground max-w-md">
-            输入研究主题，我将自动搜索论文、聚类分析、生成综述。整个过程实时展示。
+            {{ t('pipeline.assistantDesc') }}
           </p>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg w-full">
@@ -232,7 +233,7 @@ onUnmounted(() => {
                 <div class="size-2 rounded-full bg-blue-500 mt-1.5 shrink-0 animate-pulse" />
                 <div>
                   <p class="text-[0.65rem] font-medium text-blue-600 dark:text-blue-400 mb-0.5">
-                    {{ nodeLabels[msg.node || ''] || msg.node || '处理中' }}
+                    {{ getNodeLabel(msg.node || '') || msg.node || t('common.processing') }}
                   </p>
                   <p class="text-sm text-foreground">{{ msg.content }}</p>
                 </div>
@@ -251,7 +252,7 @@ onUnmounted(() => {
         <!-- View result button -->
         <div v-if="hasResult" class="flex justify-center pt-4">
           <Button @click="viewResult" class="gap-2">
-            查看完整综述
+            {{ t('pipeline.viewFullReview') }}
           </Button>
         </div>
       </div>
@@ -265,7 +266,7 @@ onUnmounted(() => {
             <textarea
               v-model="input"
               @keydown.enter.exact.prevent="handleSubmit"
-              placeholder="输入研究主题，如: Large Language Model survey"
+              :placeholder="t('pipeline.inputPlaceholder')"
               :disabled="isProcessing"
               rows="1"
               class="w-full resize-none rounded-xl border border-border bg-muted/50 px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
@@ -283,7 +284,7 @@ onUnmounted(() => {
           </Button>
         </div>
         <p class="text-[0.6rem] text-muted-foreground text-center mt-2">
-          按 Enter 发送 · 研究过程将实时显示
+          {{ t('pipeline.inputHint') }}
         </p>
       </div>
     </div>

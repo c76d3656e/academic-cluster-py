@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { shallowRef, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from '@/i18n'
+import { getStatusVariant } from '@/lib/utils'
 import { projectsApi, type Project } from '@/api/projects'
 import { consoleApi } from '@/api/console'
 import { Button } from '@/components/ui/button'
@@ -16,10 +18,12 @@ import {
 } from '@/components/ui/table'
 
 const router = useRouter()
+const { t } = useI18n()
+
 const projects = ref<Project[]>([])
-const total = ref(0)
-const isLoading = ref(true)
-const actionLoading = ref<string | null>(null)
+const total = shallowRef(0)
+const isLoading = shallowRef(true)
+const actionLoading = shallowRef<string | null>(null)
 
 onMounted(async () => {
   await loadProjects()
@@ -38,13 +42,6 @@ async function loadProjects() {
   }
 }
 
-function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (status === 'completed') return 'default'
-  if (status.startsWith('running')) return 'secondary'
-  if (status === 'failed') return 'destructive'
-  return 'outline'
-}
-
 function isRunning(status: string): boolean {
   return status.startsWith('running')
 }
@@ -59,7 +56,7 @@ async function handlePause(projectId: string) {
     await consoleApi.controlPipeline(projectId, 'pause')
     await loadProjects()
   } catch {
-    alert('暂停失败')
+    alert(t('project.pauseFailed'))
   } finally {
     actionLoading.value = null
   }
@@ -71,21 +68,21 @@ async function handleResume(projectId: string) {
     await consoleApi.controlPipeline(projectId, 'resume')
     await loadProjects()
   } catch {
-    alert('恢复失败')
+    alert(t('project.resumeFailed'))
   } finally {
     actionLoading.value = null
   }
 }
 
 async function handleDelete(projectId: string, name: string) {
-  if (!confirm(`确定删除项目「${name}」及其全部调用记录？此操作不可撤销。`)) return
+  if (!confirm(t('project.confirmDelete', { name }))) return
   actionLoading.value = projectId
   try {
     await projectsApi.deleteProject(projectId)
-    projects.value = projects.value.filter(p => p.id !== projectId)
+    projects.value = projects.value.filter((p: Project) => p.id !== projectId)
     total.value--
   } catch {
-    alert('删除失败')
+    alert(t('project.deleteFailed'))
   } finally {
     actionLoading.value = null
   }
@@ -93,23 +90,23 @@ async function handleDelete(projectId: string, name: string) {
 </script>
 
 <template>
-  <div class="p-8">
-    <div class="flex items-center justify-between mb-8">
+  <div class="p-4 md:p-8">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
       <div>
-        <h2 class="text-heading font-medium tracking-tight">我的项目</h2>
-        <p class="text-sm text-muted-foreground mt-1">共 {{ total }} 个项目</p>
+        <h2 class="text-heading font-medium tracking-tight">{{ t('project.myProjects') }}</h2>
+        <p class="text-sm text-muted-foreground mt-1">{{ t('project.totalProjects', { count: total }) }}</p>
       </div>
       <router-link to="/projects/new">
-        <Button>新建项目</Button>
+        <Button>{{ t('project.newProject') }}</Button>
       </router-link>
     </div>
 
-    <div v-if="isLoading" class="text-center py-16 text-muted-foreground">加载中...</div>
+    <div v-if="isLoading" class="text-center py-16 text-muted-foreground">{{ t('common.loading') }}</div>
 
     <div v-else-if="projects.length === 0" class="text-center py-16">
-      <p class="text-muted-foreground mb-5 text-body">暂无项目</p>
+      <p class="text-muted-foreground mb-5 text-body">{{ t('project.noProjects') }}</p>
       <router-link to="/projects/new">
-        <Button variant="outline">创建第一个项目</Button>
+        <Button variant="outline">{{ t('project.createFirst') }}</Button>
       </router-link>
     </div>
 
@@ -118,28 +115,29 @@ async function handleDelete(projectId: string, name: string) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>名称</TableHead>
-              <TableHead>查询词</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead>创建时间</TableHead>
-              <TableHead>操作</TableHead>
+              <TableHead>{{ t('project.projectName') }}</TableHead>
+              <TableHead class="hidden md:table-cell">{{ t('project.queryLabel') }}</TableHead>
+              <TableHead>{{ t('common.status') }}</TableHead>
+              <TableHead class="hidden sm:table-cell">{{ t('project.createdAt') }}</TableHead>
+              <TableHead>{{ t('common.actions') }}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow v-for="p in projects" :key="p.id">
               <TableCell class="font-medium">{{ p.name }}</TableCell>
-              <TableCell class="text-muted-foreground max-w-[200px] truncate">{{ p.query }}</TableCell>
+              <TableCell class="text-muted-foreground max-w-[200px] truncate hidden md:table-cell">{{ p.query }}</TableCell>
               <TableCell>
                 <Badge :variant="getStatusVariant(p.status)" class="text-[0.65rem]">
                   {{ p.status }}
                 </Badge>
               </TableCell>
-              <TableCell class="text-muted-foreground text-sm">
+              <TableCell class="text-muted-foreground text-sm hidden sm:table-cell">
                 {{ p.created_at ? new Date(p.created_at).toLocaleDateString() : '-' }}
               </TableCell>
-              <TableCell class="space-x-2">
+              <TableCell>
+                <div class="flex gap-1 flex-wrap">
                 <Button variant="ghost" size="sm" @click="router.push(`/projects/${p.id}`)">
-                  查看
+                  {{ t('common.view') }}
                 </Button>
                 <Button
                   v-if="isRunning(p.status)"
@@ -148,7 +146,7 @@ async function handleDelete(projectId: string, name: string) {
                   :disabled="actionLoading === p.id"
                   @click="handlePause(p.id)"
                 >
-                  {{ actionLoading === p.id ? '处理中...' : '暂停' }}
+                  {{ actionLoading === p.id ? t('common.processing') : t('project.pause') }}
                 </Button>
                 <Button
                   v-if="showResume(p.status)"
@@ -157,7 +155,7 @@ async function handleDelete(projectId: string, name: string) {
                   :disabled="actionLoading === p.id"
                   @click="handleResume(p.id)"
                 >
-                  {{ actionLoading === p.id ? '处理中...' : '恢复' }}
+                  {{ actionLoading === p.id ? t('common.processing') : t('project.resume') }}
                 </Button>
                 <Button
                   variant="ghost"
@@ -166,8 +164,9 @@ async function handleDelete(projectId: string, name: string) {
                   :disabled="actionLoading === p.id"
                   @click="handleDelete(p.id, p.name)"
                 >
-                  {{ actionLoading === p.id ? '处理中...' : '删除' }}
+                  {{ actionLoading === p.id ? t('common.processing') : t('common.delete') }}
                 </Button>
+                </div>
               </TableCell>
             </TableRow>
           </TableBody>

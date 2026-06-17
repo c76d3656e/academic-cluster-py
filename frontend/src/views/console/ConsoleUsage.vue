@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { shallowRef, ref, watch, onMounted, computed } from 'vue'
+import { useI18n } from '@/i18n'
+import { formatTokens } from '@/lib/utils'
 import { consoleApi, type ConsoleUsageTrend, type ConsoleLlmCall } from '@/api/console'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import UsageTrendChart from '@/components/usage/UsageTrendChart.vue'
 import { callTypeBadgeClass, callTypeLabel } from '@/lib/usage-display'
 
-const days = ref(7)
-const granularity = ref<'day' | 'hour'>('day')
+const { t } = useI18n()
+
+const days = shallowRef(7)
+const granularity = shallowRef<'day' | 'hour'>('day')
 const trend = ref<ConsoleUsageTrend[]>([])
 const calls = ref<ConsoleLlmCall[]>([])
-const isLoadingTrend = ref(true)
-const isLoadingCalls = ref(true)
+const isLoadingTrend = shallowRef(true)
+const isLoadingCalls = shallowRef(true)
 
 async function loadTrend() {
   isLoadingTrend.value = true
@@ -43,12 +47,6 @@ onMounted(() => {
   loadCalls()
 })
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
-  return String(n)
-}
-
 function formatCost(n: number): string {
   if (n >= 1) return '$' + n.toFixed(2)
   if (n >= 0.01) return '$' + n.toFixed(4)
@@ -66,13 +64,13 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
 </script>
 
 <template>
-  <div class="p-8">
-    <div class="flex items-center justify-between mb-8">
+  <div class="p-4 md:p-8">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
       <div>
-        <h2 class="text-heading font-medium tracking-tight">我的用量</h2>
-        <p class="text-sm text-muted-foreground mt-1">Token 消耗与调用记录</p>
+        <h2 class="text-heading font-medium tracking-tight">{{ t('console.myUsage') }}</h2>
+        <p class="text-sm text-muted-foreground mt-1">{{ t('console.tokenConsumption') }}</p>
       </div>
-      <div class="flex gap-2 items-center">
+      <div class="flex gap-2 items-center flex-wrap">
         <button
           v-for="d in [1, 7, 30]"
           :key="d"
@@ -82,11 +80,11 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
             ? 'bg-foreground text-background'
             : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
         >
-          {{ d }}天
+          {{ d }}{{ t('common.days') }}
         </button>
         <span class="w-px h-4 bg-border mx-1"></span>
         <button
-          v-for="g in ([['day', '按日'], ['hour', '按小时']] as const)"
+          v-for="g in ([['day', t('common.byDay')], ['hour', t('common.byHour')]] as const)"
           :key="g[0]"
           @click="granularity = g[0] as any"
           class="px-3 py-1.5 text-xs rounded-md transition-colors"
@@ -103,18 +101,18 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
       <Card class="border border-border shadow-[var(--shadow-sm)]">
         <CardHeader class="pb-2">
-          <CardTitle class="text-caption text-muted-foreground font-normal">总 Tokens</CardTitle>
+          <CardTitle class="text-caption text-muted-foreground font-normal">{{ t('console.totalTokens') }}</CardTitle>
         </CardHeader>
         <CardContent>
           <p class="text-xl font-semibold tracking-tight">{{ formatTokens(totalTokens) }}</p>
           <p class="text-[0.65rem] text-muted-foreground mt-0.5">
-            输入 {{ formatTokens(totalPromptTokens) }} / 输出 {{ formatTokens(totalCompletionTokens) }}
+            {{ t('console.promptInput', { input: formatTokens(totalPromptTokens), output: formatTokens(totalCompletionTokens) }) }}
           </p>
         </CardContent>
       </Card>
       <Card class="border border-border shadow-[var(--shadow-sm)]">
         <CardHeader class="pb-2">
-          <CardTitle class="text-caption text-muted-foreground font-normal">总费用</CardTitle>
+          <CardTitle class="text-caption text-muted-foreground font-normal">{{ t('console.totalCost') }}</CardTitle>
         </CardHeader>
         <CardContent>
           <p class="text-xl font-semibold tracking-tight">{{ formatCost(totalCost) }}</p>
@@ -122,7 +120,7 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
       </Card>
       <Card class="border border-border shadow-[var(--shadow-sm)]">
         <CardHeader class="pb-2">
-          <CardTitle class="text-caption text-muted-foreground font-normal">调用次数</CardTitle>
+          <CardTitle class="text-caption text-muted-foreground font-normal">{{ t('console.callCount') }}</CardTitle>
         </CardHeader>
         <CardContent>
           <p class="text-xl font-semibold tracking-tight">{{ totalCalls }}</p>
@@ -130,7 +128,7 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
       </Card>
       <Card class="border border-border shadow-[var(--shadow-sm)]">
         <CardHeader class="pb-2">
-          <CardTitle class="text-caption text-muted-foreground font-normal">模型类型</CardTitle>
+          <CardTitle class="text-caption text-muted-foreground font-normal">{{ t('console.modelType') }}</CardTitle>
         </CardHeader>
         <CardContent>
           <div class="flex flex-col gap-0.5 text-[0.7rem]">
@@ -150,22 +148,23 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
     <!-- Recent calls table -->
     <Card class="border border-border shadow-[var(--shadow-sm)]">
       <CardHeader>
-        <CardTitle class="text-sm font-medium">近期调用记录</CardTitle>
+        <CardTitle class="text-sm font-medium">{{ t('console.recentCalls') }}</CardTitle>
       </CardHeader>
       <CardContent class="p-0">
-        <div v-if="isLoadingCalls" class="text-center py-8 text-muted-foreground text-sm">加载中...</div>
-        <div v-else-if="calls.length === 0" class="text-center py-8 text-muted-foreground text-sm">暂无调用记录</div>
-        <table v-else class="w-full text-sm">
+        <div v-if="isLoadingCalls" class="text-center py-8 text-muted-foreground text-sm">{{ t('common.loading') }}</div>
+        <div v-else-if="calls.length === 0" class="text-center py-8 text-muted-foreground text-sm">{{ t('console.noCallRecords') }}</div>
+        <div v-else class="overflow-x-auto">
+        <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-border">
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">时间</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">项目</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">类型</th>
-              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">输入</th>
-              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">输出</th>
-              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">费用</th>
-              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">延迟</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">状态</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('common.time') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('console.projectColumn') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('console.typeColumn') }}</th>
+              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('console.inputColumn') }}</th>
+              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('console.outputColumn') }}</th>
+              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('console.costColumn') }}</th>
+              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('console.latencyColumn') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('console.statusColumn') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -213,6 +212,7 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
             </tr>
           </tbody>
         </table>
+        </div>
       </CardContent>
     </Card>
   </div>

@@ -94,9 +94,15 @@ apiClient.interceptors.response.use(
 
 export default apiClient
 
-// 获取 UI 功能开关
-let _featuresCache: Record<string, boolean> | null = null
-export async function getFeatures(): Promise<Record<string, boolean>> {
+// ─── Feature flags ──────────────────────────────────────────────────────
+
+export interface Features {
+  show_usage: boolean
+  [key: string]: boolean
+}
+
+let _featuresCache: Features | null = null
+export async function getFeatures(): Promise<Features> {
   if (_featuresCache) return _featuresCache
   try {
     const { data } = await apiClient.get('/features')
