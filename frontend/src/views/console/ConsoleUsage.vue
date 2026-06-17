@@ -7,8 +7,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import UsageTrendChart from '@/components/usage/UsageTrendChart.vue'
 import { callTypeBadgeClass, callTypeLabel } from '@/lib/usage-display'
+import { useFeatures } from '@/composables/useFeatures'
 
 const { t } = useI18n()
+const { features, loadFeatures } = useFeatures()
+const featureEnabled = ref(false)
+const featureLoading = ref(true)
+
+onMounted(async () => {
+  await loadFeatures()
+  featureEnabled.value = features.value.show_usage ?? false
+  featureLoading.value = false
+  if (featureEnabled.value) {
+    loadTrend()
+    loadCalls()
+  }
+})
 
 const days = shallowRef(7)
 const granularity = shallowRef<'day' | 'hour'>('day')
@@ -42,11 +56,6 @@ async function loadCalls() {
 watch(granularity, loadTrend)
 watch(days, loadTrend)
 
-onMounted(() => {
-  loadTrend()
-  loadCalls()
-})
-
 function formatCost(n: number): string {
   if (n >= 1) return '$' + n.toFixed(2)
   if (n >= 0.01) return '$' + n.toFixed(4)
@@ -65,6 +74,19 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
 
 <template>
   <div class="p-4 md:p-8">
+    <!-- Feature disabled state -->
+    <div v-if="featureLoading" class="flex items-center justify-center py-16">
+      <div class="text-muted-foreground text-sm">{{ t('common.loading') }}</div>
+    </div>
+    <div v-else-if="!featureEnabled" class="flex flex-col items-center justify-center py-16 gap-4">
+      <div class="text-4xl opacity-20">&#x26A0;</div>
+      <div class="text-center">
+        <h3 class="text-lg font-medium text-foreground mb-1">{{ t('console.featureDisabled') }}</h3>
+        <p class="text-sm text-muted-foreground">{{ t('console.usageDisabledHint') }}</p>
+      </div>
+    </div>
+
+    <template v-else>
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
       <div>
         <h2 class="text-heading font-medium tracking-tight">{{ t('console.myUsage') }}</h2>
@@ -215,6 +237,7 @@ const totalRerankTokens = computed(() => trend.value.reduce((s, d) => s + d.rera
         </div>
       </CardContent>
     </Card>
+    </template>
   </div>
 
 </template>

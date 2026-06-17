@@ -72,7 +72,7 @@ async def get_dashboard_overview(
         # 运行中的项目数
         result = await session.execute(
             text(
-                "SELECT COUNT(*) FROM projects WHERE user_id = :user_id AND status = 'running'"
+                "SELECT COUNT(*) FROM projects WHERE user_id = :user_id AND status LIKE 'running%'"
             ),
             {"user_id": user_id},
         )

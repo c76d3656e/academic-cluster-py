@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useFeatures } from '@/composables/useFeatures'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -51,11 +52,12 @@ const router = createRouter({
           name: 'console-projects',
           component: () => import('../views/console/ConsoleProjects.vue'),
         },
-        // {
-        //   path: 'usage',
-        //   name: 'console-usage',
-        //   component: () => import('../views/console/ConsoleUsage.vue'),
-        // },
+        {
+          path: 'usage',
+          name: 'console-usage',
+          component: () => import('../views/console/ConsoleUsage.vue'),
+          meta: { requiresFeature: 'show_usage' },
+        },
         {
           path: 'profile',
           name: 'console-profile',
@@ -115,7 +117,7 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
@@ -128,6 +130,16 @@ router.beforeEach((to) => {
 
   if (to.meta.guestOnly && auth.isAuthenticated) {
     return { path: '/' }
+  }
+
+  // Feature flag check
+  if (to.meta.requiresFeature) {
+    const { features, loadFeatures } = useFeatures()
+    await loadFeatures()
+    const featureKey = to.meta.requiresFeature as keyof typeof features.value
+    if (!features.value[featureKey]) {
+      return { name: 'console-overview' }
+    }
   }
 })
 

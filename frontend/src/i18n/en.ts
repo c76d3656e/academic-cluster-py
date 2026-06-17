@@ -288,6 +288,8 @@ export const en = {
     costColumn: 'Cost',
     latencyColumn: 'Latency',
     statusColumn: 'Status',
+    featureDisabled: 'Feature Disabled',
+    usageDisabledHint: 'Usage statistics feature is not available. Please contact admin to enable it.',
   },
 
   admin: {
@@ -377,6 +379,19 @@ export const en = {
     updated: 'Updated',
     keysCount: '{count} keys',
     itemCount: '{count} item',
+    // Provider table headers
+    thName: 'Name',
+    thModel: 'Model',
+    thApiKey: 'API Key',
+    thInputPrice: 'Input $/M',
+    thOutputPrice: 'Output $/M',
+    thStatus: 'Status',
+    thHealth: 'Health',
+    thActions: 'Actions',
+    thSource: 'Source',
+    thCurrentValue: 'Current Value',
+    thOrigin: 'Origin',
+    thUpdated: 'Updated',
     // Pipeline config
     configHint: 'Modified configs take effect on the next pipeline run. Currently running pipelines are not affected. Search sources are comma-separated, valid values: semantic_scholar, openalex, crossref, arxiv, pubmed. Hybrid graph weights should sum to 1.0.',
     resetDefault: 'Reset Default',
