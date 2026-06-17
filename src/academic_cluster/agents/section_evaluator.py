@@ -19,7 +19,7 @@ from ..services.llm_client import create_llm, ainvoke_with_callbacks
 from ..tools.json_repair import try_parse_json
 
 logger = structlog.get_logger()
-DEFAULT_SECTION_EVALUATION_TIMEOUT_S = 90.0
+DEFAULT_SECTION_EVALUATION_TIMEOUT_S = 180.0
 
 # 评估失败时的默认返回值
 _DEFAULT_EVALUATION = {

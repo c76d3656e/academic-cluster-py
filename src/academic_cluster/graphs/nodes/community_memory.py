@@ -240,7 +240,7 @@ def synthesize_community_memory(
     entity_counts = Counter(str(e.get("entity_type")) for e in entities if e.get("entity_type"))
     top_titles = _top_unique([p.get("title") for p in sorted_papers], 3)
     summary = (
-        f"Community {cluster.get('name') or cluster_id} contains {len(cluster_paper_ids)} papers. "
+        f"Community with {len(cluster_paper_ids)} papers. "
         f"Representative work centers on {', '.join(method_families[:4]) or 'related methods'}"
         f" with claims from {len(cards)} evidence cards."
     )

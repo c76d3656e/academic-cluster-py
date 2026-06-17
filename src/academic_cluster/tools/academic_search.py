@@ -252,13 +252,13 @@ async def search_semantic_scholar(
     async with httpx.AsyncClient() as client:
         try:
             if pool:
-                # 多 key 模式：key pool 自身负责 per-key 限流
+                # 多 key 模式：key pool 负责 per-key 限流，同时施加全局限流避免超限
                 api_key = await pool.acquire()
+                await _enforce_rate_limit("semantic_scholar")
                 headers = {"x-api-key": api_key}
                 response = await _request_with_retry(
                     client, "GET", url, "semantic_scholar",
                     params=params, headers=headers, timeout=30,
-                    _skip_rate_limit=True,  # key pool 已限流，跳过全局限流
                 )
             else:
                 # 无 key 模式：使用全局单 key 限流

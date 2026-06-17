@@ -46,11 +46,10 @@ class LiteLLMPool:
         self._router = Router(
             model_list=self._model_list,
             routing_strategy="simple-shuffle",
-            num_retries=2,
+            num_retries=1,
             timeout=180,
             enable_pre_call_checks=False,
-            allowed_fails=3,
-            cooldown_time=60,
+            disable_cooldowns=True,
             **self._router_kwargs,
         )
         logger.info(

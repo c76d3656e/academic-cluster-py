@@ -33,10 +33,10 @@ logger = structlog.get_logger()
 
 _WRITING_CONTEXT_CHAR_BUDGET = 52000
 _REFINE_SECTION_UNITS_ENV = "WRITING_REFINE_SECTION_UNITS"
-DEFAULT_WRITING_TIMEOUT_S = 120.0
-DEFAULT_OUTLINE_TIMEOUT_S = 120.0
-DEFAULT_SECTION_WRITE_TIMEOUT_S = 120.0
-DEFAULT_SECTION_REFINE_TIMEOUT_S = 90.0
+DEFAULT_WRITING_TIMEOUT_S = 180.0
+DEFAULT_OUTLINE_TIMEOUT_S = 180.0
+DEFAULT_SECTION_WRITE_TIMEOUT_S = 180.0
+DEFAULT_SECTION_REFINE_TIMEOUT_S = 180.0
 
 
 def _clip_text_block(text: str | None, max_chars: int) -> str:
@@ -798,6 +798,9 @@ Hard rules:
 - NEVER use author-year citations like (Friedman, 2024) or (Smith et al., 2023). Only [1], [1,2], [1-3] format.
 - NEVER use paper_id (like p1, p2) as citation numbers. Only use the [N] numbers from the reference list.
 - NEVER put citation-bearing prose inside parentheses, for example "（文献[24][28]已证实...）" or "([27][29])".
+- **ABSOLUTELY FORBIDDEN**: Never start a sentence with "文献[N]" or use "文献[N]" as the subject of a sentence. Write the factual statement first and put [N] at the end.
+- **FORBIDDEN**: "文献[42]指出...", "文献[43]通过...", "文献[52]的实验...", "文献[49]的数据..."
+- **CORRECT**: "多尺度耦合计算中仍存在35%的算力浪费[42]。", "结合概率密度演化方程实现时序演化模拟[43]。"
 - Citations must be part of the normal sentence syntax, for example "已有研究[24,28]证实..." or "该局限已在医疗与交通场景研究中得到讨论[27,29]".
 - Merge adjacent citation tokens: write [24,28], never [24][28].
 - Keep output as UTF-8 markdown.
@@ -1118,7 +1121,7 @@ async def write_section_units(
 
         unit_prev = prev_summary
         if units:
-            unit_prev = f"{prev_summary}\n\nPrevious paragraph in this section:\n{units[-1]}"
+            unit_prev = f"{prev_summary}\n\nAlready written paragraphs in this section (DO NOT repeat these):\n" + "\n\n".join(units)
 
         try:
             raw_unit = await write_section(

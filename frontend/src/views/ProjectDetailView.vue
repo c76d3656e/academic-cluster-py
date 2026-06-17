@@ -74,6 +74,15 @@ const outline = computed<Outline | null>(() => reviewData.value?.outline ?? null
 const sections = computed<WrittenSection[]>(() => reviewData.value?.sections ?? [])
 const evidenceCards = computed<EvidenceCard[]>(() => reviewData.value?.evidence_cards ?? [])
 const references = computed(() => reviewData.value?.references ?? [])
+const evidenceCardByPaperId = computed(() => {
+  const map: Record<string, typeof evidenceCards.value[0]> = {}
+  for (const card of evidenceCards.value) {
+    if (card.paper_id && !map[card.paper_id]) {
+      map[card.paper_id] = card
+    }
+  }
+  return map
+})
 const recentNodeCalls = computed(() => llmCalls.value.slice(0, 200))
 
 /** Ordered outline section titles (indexed by position) */
@@ -409,6 +418,18 @@ async function resumePipeline() {
   }
 }
 
+function formatRuntime(start: string, end?: string): string {
+  const t1 = new Date(start).getTime()
+  const t2 = end ? new Date(end).getTime() : Date.now()
+  const total = Math.max(0, Math.floor((t2 - t1) / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return `${h}h ${m}m ${s}s`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
+
 function formatCallTime(value: string | null): string {
   if (!value) return ''
   return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -731,6 +752,10 @@ function scrollToReferences() {
                 <span>{{ sections.length }} sections</span>
                 <span class="text-muted-foreground/30">·</span>
                 <span>{{ evidenceCards.length }} evidence cards</span>
+                <span v-if="project.created_at && (project.status === 'completed' || project.status === 'failed' || project.status === 'interrupted')" class="text-muted-foreground/30">·</span>
+                <span v-if="project.created_at && (project.status === 'completed' || project.status === 'failed' || project.status === 'interrupted')" class="tabular-nums">
+                  运行时长 {{ formatRuntime(project.created_at) }}
+                </span>
                 <span v-if="uniqueClusters > 0" class="text-muted-foreground/30">·</span>
                 <span v-if="uniqueClusters > 0">{{ uniqueClusters }} clusters</span>
                 <span class="text-muted-foreground/30">·</span>
@@ -791,6 +816,20 @@ function scrollToReferences() {
                         <span v-if="ref.venue"><b class="text-foreground/40">Venue:</b> {{ ref.venue }}</span>
                         <span v-if="ref.year"><b class="text-foreground/40">Year:</b> {{ ref.year }}</span>
                         <span v-if="ref.doi"><b class="text-foreground/40">DOI:</b> {{ ref.doi }}</span>
+                      </div>
+                      <div v-if="evidenceCardByPaperId[ref.paper_id]" class="mt-2 pl-3 border-l-2 border-border/50 space-y-1">
+                        <p class="text-[0.6875rem] text-foreground/80 leading-relaxed">
+                          <b class="text-foreground/40">Claim:</b> {{ evidenceCardByPaperId[ref.paper_id].claim }}
+                        </p>
+                        <p v-if="evidenceCardByPaperId[ref.paper_id].method" class="text-[0.6875rem] text-muted-foreground">
+                          <b class="text-foreground/40">Method:</b> {{ evidenceCardByPaperId[ref.paper_id].method }}
+                        </p>
+                        <p v-if="evidenceCardByPaperId[ref.paper_id].metric" class="text-[0.6875rem] text-muted-foreground">
+                          <b class="text-foreground/40">Metric:</b> {{ evidenceCardByPaperId[ref.paper_id].metric }}
+                        </p>
+                        <p v-if="evidenceCardByPaperId[ref.paper_id].limitation" class="text-[0.6875rem] text-muted-foreground">
+                          <b class="text-foreground/40">Limitation:</b> {{ evidenceCardByPaperId[ref.paper_id].limitation }}
+                        </p>
                       </div>
                     </div>
                   </div>

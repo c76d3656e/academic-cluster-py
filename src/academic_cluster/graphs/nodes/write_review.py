@@ -8,6 +8,7 @@
 4. 确定性组装
 """
 
+import asyncio
 import traceback
 from dataclasses import asdict
 
@@ -130,6 +131,70 @@ def _section_citation_payload(plan, paper_map: dict[str, dict]) -> dict:
         **asdict(plan),
         "papers": papers,
     }
+
+
+def _build_cluster_context(plan, section: dict, evidence_plan: dict, clusters: list[dict], kg_entities: list[dict]) -> str:
+    # key_clusters 用数字索引代替 UUID
+    cluster_id_to_idx = {str(c.get("id")): i + 1 for i, c in enumerate(clusters)}
+    key_cluster_labels = [str(cluster_id_to_idx.get(str(k), k)) for k in (plan.key_clusters or [])]
+    parts = [f"section: {section.get('title', '')}\nsection_name: {section.get('name', 'unnamed')}\nkey_clusters: {', '.join(key_cluster_labels) if key_cluster_labels else 'all available clusters'}"]
+    csum = _render_citation_plan_summary(plan, {})
+    if csum:
+        parts.append(csum)
+    sm = evidence_plan.get("support_matrix") or []
+    if sm:
+        lines = ["section_evidence_support_matrix:"]
+        for item in sm[:10]:
+            lines.append(f"- paper_id={item.get('paper_id')}; score={item.get('relevance_score')}; source={item.get('candidate_source')}; claim={item.get('claim', '')[:180]}")
+        parts.append("\n".join(lines))
+    entity_map: dict[str, list[str]] = {}
+    for ent in kg_entities:
+        for pid in ent.get("paper_ids") or []:
+            entity_map.setdefault(pid, []).append(ent.get("name", ""))
+    stat_lines = []
+    for i, c in enumerate(clusters):
+        c_papers = c.get("paper_ids") or []
+        ents = list(dict.fromkeys(e for pid in c_papers[:50] for e in entity_map.get(pid, [])))[:12]
+        line = f"cluster{i + 1}: {len(c_papers)} papers"
+        if ents:
+            line += f"; entities: {', '.join(ents)}"
+        stat_lines.append(line)
+    if stat_lines:
+        parts.append("\n".join(stat_lines))
+    return "\n".join(parts) or "暂无聚类数据"
+
+def _build_sample_context(plan, paper_map: dict, ec_by_paper: dict) -> str:
+    import json as _json
+    samples = []
+    for idx, pid in enumerate(plan.candidate_paper_ids[:16], 1):
+        p = paper_map.get(pid)
+        if not p:
+            continue
+        card_list = ec_by_paper.get(pid, [])
+        card = card_list[0] if card_list else None
+        if card:
+            metric = card.get("metric")
+            metric_str = _json.dumps(metric) if isinstance(metric, dict) else (metric or "none")
+            samples.append(
+                f"[{idx}] paper_id: {pid}\ntitle: {p.get('title', '')}\n"
+                f"evidence_card_id: evidence_card:{pid}\n"
+                f"claim: {card.get('claim', '')}\n"
+                f"evidence_span: {card.get('evidence_span', '')[:200]}\n"
+                f"method: {card.get('method', 'unknown') or 'unknown'}\n"
+                f"metric: {metric_str}\n"
+                f"limitation: {card.get('limitation', 'none') or 'none'}\n"
+                f"confidence: {float(card.get('confidence', 0.0)):.2f}"
+            )
+        else:
+            samples.append(
+                f"[{idx}] paper_id: {pid}\ntitle: {p.get('title', '')}\n"
+                f"evidence_card_id: unavailable\nabstract: {(p.get('abstract') or '')[:300]}"
+            )
+    return "\n".join(samples) or "暂无论文样本"
+
+async def _revise_section(content: str, evaluation: dict) -> str:
+    from ...agents.section_evaluator import revise_section as _do_revise
+    return await _do_revise(content, evaluation)
 
 
 async def write_review_node(state: PipelineState) -> dict:
@@ -305,37 +370,22 @@ async def write_review_node(state: PipelineState) -> dict:
             except Exception as e:
                 logger.warning("Failed to check existing sections", error=str(e))
 
-        written_sections = []
-        written_section_ids = []
-        written_outlines = []  # 追踪每个 section 的 outline 规划（用于上下文链）
-
+        # === Step 2: 两阶段并行写作 ===
+        # 先识别需要写的章节（跳过已有的）
         total_sections = len(citation_plans)
+        pending_plans: list[tuple[int, Any, Any]] = []
         for plan_idx, plan in enumerate(citation_plans):
             si = plan.section_index
             section = sections[si]
             section_id_key = str(section.get("name", section.get("number", 0)))
+            if section_id_key not in existing_sections:
+                pending_plans.append((plan_idx, plan, section))
 
-            # 幂等：跳过已写章节
-            if section_id_key in existing_sections:
-                existing = existing_sections[section_id_key]
-                written_sections.append(existing["content"])
-                written_section_ids.append(existing["id"])
-                written_outlines.append(None)  # 恢复时无 outline 信息
-                logger.info("Skipping already written section", title=section.get("title"))
-                continue
-
-            section_title = section.get("title", f"章节 {plan_idx + 1}")
-            await send_progress(
-                state.project_id, "write_review",
-                f"正在规划第 {plan_idx + 1}/{total_sections} 章节: {section_title}",
-                progress=(plan_idx + 1) / total_sections * 0.3,
-            )
-
-            # === Step 2a: Section Outline Planning ===
-            prev_outline = written_outlines[-1] if written_outlines else None
-            next_section = sections[si + 1] if si + 1 < len(sections) else None
-
-            # 该章节的证据卡片
+        # 预构建所有章节的上下文数据（非 LLM，纯数据组装）
+        section_contexts: list[dict] = []
+        for plan_idx, plan, section in pending_plans:
+            si = plan.section_index
+            next_section_data = sections[si + 1] if si + 1 < len(sections) else None
             section_evidence_plan = section_evidence_plans.get(si, {})
             section_evidence = cards_from_support_matrix(
                 section_evidence_plan.get("support_matrix") or []
@@ -344,172 +394,92 @@ async def write_review_node(state: PipelineState) -> dict:
                 for pid in plan.candidate_paper_ids[:10]:
                     section_evidence.extend(ec_by_paper.get(pid, []))
 
-            section_outline = await plan_section_outline(
-                section_plan=section,
-                citation_plan=_section_citation_payload(plan, paper_map),
-                prev_outline=prev_outline,
-                next_section=next_section,
-                clusters=clusters,
-                evidence_cards=section_evidence,
-                kg_entities=kg_entities,
-                kg_relations=kg_relations,
-            )
-            written_outlines.append(section_outline)
+            section_contexts.append({
+                "plan_idx": plan_idx, "plan": plan, "section": section,
+                "next_section": next_section_data, "si": si,
+                "section_evidence": section_evidence,
+                "section_evidence_plan": section_evidence_plan,
+                "section_refs": render_section_references(plan, paper_map),
+                "section_citation": _section_citation_payload(plan, paper_map),
+                "cluster_data": _build_cluster_context(plan, section, section_evidence_plan, clusters, kg_entities),
+                "sample_papers": _build_sample_context(plan, paper_map, ec_by_paper),
+                "community_context": section_evidence_plan.get("community_context") or render_section_community_context(
+                    section_plan=section, clusters=clusters, papers=papers,
+                    evidence_cards=evidence_cards, kg_entities=kg_entities,
+                ) or None,
+                "evidence_limitations": section_evidence_plan.get("evidence_limitations") or render_section_evidence_limitations(
+                    section_plan=section, evidence_cards=evidence_cards,
+                ) or None,
+            })
 
-            logger.info(
-                "Section outline planned",
-                title=section_title,
-                paragraphs=len(section_outline.get("paragraphs", [])),
-                core_question=section_outline.get("core_question", "")[:80],
-            )
+        # Phase 1: 并行生成所有章节大纲
+        outline_concurrency = max(1, min(4, len(section_contexts)))
+        outline_semaphore = asyncio.Semaphore(outline_concurrency)
+        section_outlines: list[dict | None] = [None] * len(section_contexts)
 
-            # === Step 2b: Write Section（注入段落规划 + 上下文链） ===
-            await send_progress(
-                state.project_id, "write_review",
-                f"正在撰写第 {plan_idx + 1}/{total_sections} 章节: {section_title}",
-                progress=(plan_idx + 1) / total_sections * 0.6,
-            )
-
-            # 渲染该章节分配的参考文献（局部编号 1..N）
-            section_refs = render_section_references(plan, paper_map)
-
-            # 构建聚类数据上下文
-            cluster_data_parts = []
-            key_clusters_str = ", ".join(str(c) for c in plan.key_clusters) if plan.key_clusters else "all available clusters"
-            cluster_data_parts.append(
-                f"section: {section.get('title', '')}\n"
-                f"section_name: {section.get('name', 'unnamed')}\n"
-                f"key_clusters: {key_clusters_str}"
-            )
-
-            citation_plan_summary = _render_citation_plan_summary(plan, paper_map)
-            if citation_plan_summary:
-                cluster_data_parts.append(citation_plan_summary)
-
-            support_matrix = section_evidence_plan.get("support_matrix") or []
-            if support_matrix:
-                matrix_lines = ["section_evidence_support_matrix:"]
-                for item in support_matrix[:10]:
-                    matrix_lines.append(
-                        f"- paper_id={item.get('paper_id')}; score={item.get('relevance_score')}; "
-                        f"source={item.get('candidate_source')}; claim={item.get('claim', '')[:180]}"
-                    )
-                cluster_data_parts.append("\n".join(matrix_lines))
-
-            # 全局聚类统计
-            paper_to_cluster = {}
-            for c in clusters[:24]:
-                for pid in c.get("paper_ids") or []:
-                    paper_to_cluster[pid] = c.get("id")
-            entity_by_paper_cluster: dict[str, list[str]] = {}
-            for ent in kg_entities:
-                for pid in ent.get("paper_ids") or []:
-                    entity_by_paper_cluster.setdefault(pid, []).append(ent.get("name", ""))
-            cluster_stats_parts = []
-            for c in clusters:
-                cid = c.get("id")
-                c_papers = c.get("paper_ids") or []
-                c_size = len(c_papers)
-                entities = []
-                for pid in c_papers[:50]:
-                    entities.extend(entity_by_paper_cluster.get(pid, []))
-                unique_entities = list(dict.fromkeys(entities))[:12]
-                entity_str = ", ".join(unique_entities) if unique_entities else ""
-                line = f"cluster {cid}: {c_size} papers"
-                if entity_str:
-                    line += f"; entities: {entity_str}"
-                cluster_stats_parts.append(line)
-            if cluster_stats_parts:
-                cluster_data_parts.append("\n".join(cluster_stats_parts))
-
-            # 构建论文样本上下文
-            sample_parts = []
-            for idx, pid in enumerate(plan.candidate_paper_ids[:16], 1):
-                p = paper_map.get(pid)
-                if not p:
-                    continue
-                card = ec_by_paper.get(pid, [None])[0] if ec_by_paper else None
-                if card:
-                    method = card.get("method", "unknown") or "unknown"
-                    metric = card.get("metric", "none")
-                    if isinstance(metric, dict):
-                        import json as _json
-                        metric = _json.dumps(metric)
-                    elif not metric:
-                        metric = "none"
-                    limitation = card.get("limitation", "none") or "none"
-                    confidence = card.get("confidence", 0.0)
-                    sample_parts.append(
-                        f"[{idx}] paper_id: {pid}\n"
-                        f"title: {p.get('title', '')}\n"
-                        f"evidence_card_id: evidence_card:{pid}\n"
-                        f"claim: {card.get('claim', '')}\n"
-                        f"evidence_span: {card.get('evidence_span', '')[:200]}\n"
-                        f"method: {method}\n"
-                        f"metric: {metric}\n"
-                        f"limitation: {limitation}\n"
-                        f"confidence: {confidence:.2f}"
-                    )
-                else:
-                    abstract = (p.get("abstract") or "")[:300]
-                    sample_parts.append(
-                        f"[{idx}] paper_id: {pid}\n"
-                        f"title: {p.get('title', '')}\n"
-                        f"evidence_card_id: unavailable\n"
-                        f"abstract: {abstract}"
-                    )
-
-            # 渲染社区上下文和证据局限性
-            community_context = section_evidence_plan.get("community_context") or render_section_community_context(
-                section_plan=section,
-                clusters=clusters,
-                papers=papers,
-                evidence_cards=evidence_cards,
-                kg_entities=kg_entities,
-            )
-            evidence_limitations = section_evidence_plan.get("evidence_limitations") or render_section_evidence_limitations(
-                section_plan=section,
-                evidence_cards=evidence_cards,
-            )
-
-            # 构建前序摘要（用于上下文链）
-            prev_summary = ""
-            if written_sections:
-                prev_summaries = []
-                for wo in written_outlines[:-1]:
-                    if wo:
-                        prev_summaries.append(
-                            f"- {wo.get('core_question', '')}: {wo.get('narrative_arc', '')}"
-                        )
-                if prev_summaries:
-                    prev_summary = "前序章节已覆盖的内容（不要重复）:\n" + "\n".join(prev_summaries)
-
-            content = await write_section_units(
-                topic=state.query,
-                review_title=review_title,
-                section_plan=section,
-                cluster_data="\n".join(cluster_data_parts) or "暂无聚类数据",
-                sample_papers="\n".join(sample_parts) or "暂无论文样本",
-                references=section_refs,
-                evidence_cards=section_evidence,
-                community_context=community_context or None,
-                evidence_limitations=evidence_limitations or None,
-                section_outline=section_outline,
-                prev_summary=prev_summary,
-                next_outline=next_section,
-            )
-
-            # LLM 响应 content 可能是 list（多模态格式）或 string
-            if isinstance(content, list):
-                content = "".join(
-                    block.get("text", "") if isinstance(block, dict) else str(block)
-                    for block in content
+        async def _gen_outline(ctx: dict, idx: int) -> dict:
+            prev_outline = section_outlines[idx - 1] if idx > 0 else None
+            async with outline_semaphore:
+                return await plan_section_outline(
+                    section_plan=ctx["section"],
+                    citation_plan=ctx["section_citation"],
+                    prev_outline=prev_outline,
+                    next_section=ctx["next_section"],
+                    clusters=clusters,
+                    evidence_cards=ctx["section_evidence"],
+                    kg_entities=kg_entities,
+                    kg_relations=kg_relations,
                 )
 
-            if not content or len(content.strip()) < 50:
-                raise ValueError(f"Section '{section.get('title')}' produced insufficient content")
+        outline_results = await asyncio.gather(
+            *[_gen_outline(ctx, i) for i, ctx in enumerate(section_contexts)],
+            return_exceptions=True,
+        )
+        for i, (ctx, result) in enumerate(zip(section_contexts, outline_results)):
+            if isinstance(result, Exception):
+                logger.error("Section outline failed", title=ctx["section"].get("title"), error=str(result)[:200])
+                raise result
+            section_outlines[i] = result
+            logger.info("Section outline planned", title=ctx["section"].get("title"),
+                        paragraphs=len(result.get("paragraphs", [])),
+                        core_question=result.get("core_question", "")[:80])
 
-            # === 后处理：剥离章节内参考文献块 + 清理禁用词汇 ===
+        # 基于全部大纲构建 prev_summary
+        prev_lines = []
+        for so in section_outlines:
+            if so:
+                prev_lines.append(f"- {so.get('core_question', '')}: {so.get('narrative_arc', '')}")
+        full_prev_summary = "前序章节已覆盖的内容（不要重复）:\n" + "\n".join(prev_lines) if prev_lines else ""
+
+        # Phase 2: 并行撰写 + 评估 + 保存
+        write_concurrency = max(1, min(4, len(section_contexts)))
+        write_semaphore = asyncio.Semaphore(write_concurrency)
+
+        async def _write_and_save(ctx: dict, idx: int) -> dict:
+            outline = section_outlines[idx]
+            async with write_semaphore:
+                content = await write_section_units(
+                    topic=state.query,
+                    review_title=review_title,
+                    section_plan=ctx["section"],
+                    cluster_data=ctx["cluster_data"],
+                    sample_papers=ctx["sample_papers"],
+                    references=ctx["section_refs"],
+                    evidence_cards=ctx["section_evidence"],
+                    community_context=ctx["community_context"],
+                    evidence_limitations=ctx["evidence_limitations"],
+                    section_outline=outline,
+                    prev_summary=full_prev_summary,
+                    next_outline=ctx["next_section"],
+                )
+
+            if isinstance(content, list):
+                content = "".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block) for block in content
+                )
+            if not content or len(content.strip()) < 50:
+                raise ValueError(f"Section '{ctx['section'].get('title')}' produced insufficient content")
+
             content = strip_section_reference_block(content)
             content = clean_filler_phrases(content)
             content = strip_meta_commentary(content)
@@ -517,138 +487,89 @@ async def write_review_node(state: PipelineState) -> dict:
             content = strip_revision_commentary(content)
             content = strip_body_structure_leakage(content)
             content = strip_author_year_citations(content)
-            content = strip_unsupported_precise_metrics(content, section_evidence)
+            content = strip_unsupported_precise_metrics(content, ctx["section_evidence"])
             content = normalize_citation_surface(content)
 
-            # 替换 LLM 可能输出的 UUID 引用为正确编号
-            paper_id_to_num = {
-                d["paper_id"]: i + 1
-                for i, d in enumerate(plan.candidate_details)
-                if d.get("paper_id")
-            }
-            content = replace_uuid_citations(content, paper_id_to_num)
+            pid_to_num = {d["paper_id"]: i + 1 for i, d in enumerate(ctx["plan"].candidate_details) if d.get("paper_id")}
+            content = replace_uuid_citations(content, pid_to_num)
 
-            # 语言检测
-            if not is_primarily_chinese(content):
-                logger.warning(
-                    "Section primarily in non-Chinese language, content may need review",
-                    title=section.get("title"),
-                )
-
-            # 字数异常检测
-            target_chars = section.get("target_words", 2000) * 2
+            target_chars = ctx["section"].get("target_words", 2000) * 2
             if len(content) > target_chars * 2:
-                logger.warning(
-                    "Section overly long, truncating",
-                    title=section.get("title"),
-                    actual_chars=len(content),
-                    target_chars=target_chars,
-                )
                 max_chars = int(target_chars * 1.8)
                 truncated = content[:max_chars]
                 last_para = truncated.rfind("\n\n")
                 if last_para > max_chars * 0.6:
                     content = truncated[:last_para]
-                logger.info("Truncated section", new_chars=len(content))
 
-            # === Step 2c: Evaluate + Revise ===
-            await send_progress(
-                state.project_id, "write_review",
-                f"正在评估第 {plan_idx + 1}/{total_sections} 章节: {section_title}",
-                progress=(plan_idx + 1) / total_sections * 0.9,
-            )
-
+            # 评估 + 修订循环
+            max_refinement = 1
             next_outline_data = None
-            if next_section:
+            if ctx["next_section"]:
                 next_outline_data = {
-                    "title": next_section.get("title", ""),
-                    "description": next_section.get("description", ""),
+                    "title": ctx["next_section"].get("title", ""),
+                    "description": ctx["next_section"].get("description", ""),
                 }
 
-            evaluation = await evaluate_section(
-                section_title=section_title,
-                section_draft=content,
-                section_outline=section_outline,
-                target_words=section.get("target_words", 2000),
-                prev_summary=prev_summary,
-                next_outline=next_outline_data,
-                references=section_refs,
-            )
-
-            logger.info(
-                "Section evaluated",
-                title=section_title,
-                score=evaluation.get("score", 0),
-                blind_score=evaluation.get("blind_evaluation", {}).get("score", 0),
-                visible_score=evaluation.get("visible_evaluation", {}).get("score", 0),
-                needs_revision=evaluation.get("needs_revision", False),
-            )
-
-            # 一轮修订（最多 1 轮，避免无限循环）
-            if evaluation.get("needs_revision", False) and evaluation.get("score", 100) < 75:
-                logger.info("Revising section based on evaluation feedback",
-                            title=section_title,
-                            instructions=evaluation.get("revision_instructions", "")[:100])
-                content = await revise_section(
+            for ref_attempt in range(max_refinement + 1):
+                evaluation = await evaluate_section(
+                    section_title=ctx["section"].get("title", f"章节 {ctx['plan_idx'] + 1}"),
                     section_draft=content,
-                    revision_instructions=evaluation.get("revision_instructions", ""),
-                    section_outline=section_outline,
-                    references=section_refs,
+                    section_outline=outline,
+                    target_words=ctx["section"].get("target_words", 2000),
+                    prev_summary=full_prev_summary,
+                    next_outline=next_outline_data,
+                    references=ctx["section_refs"],
                 )
-                # 重新后处理
-                content = strip_section_reference_block(content)
-                content = clean_filler_phrases(content)
-                content = strip_meta_commentary(content)
-                content = strip_prompt_leakage(content)
-                content = strip_revision_commentary(content)
-                content = strip_body_structure_leakage(content)
-                content = strip_author_year_citations(content)
-                content = strip_unsupported_precise_metrics(content, section_evidence)
-                content = normalize_citation_surface(content)
+                if ref_attempt < max_refinement and evaluation.get("score", 0) < 70:
+                    content = await _revise_section(content, evaluation)
+                else:
+                    break
 
-            # 保存章节
+            # 保存到 DB
             section_data = {
                 "outline_id": state.outline_id,
-                "section_id": str(section.get("name", section.get("number", 0))),
+                "section_id": str(ctx["section"].get("name", ctx["section"].get("number", 0))),
                 "content": content,
                 "word_count": len(content),
             }
             section_id = await db.save_written_section(section_data)
 
-            written_sections.append(content)
-            written_section_ids.append(section_id)
+            return {
+                "content": content, "section_id": section_id,
+                "evaluation": evaluation, "ctx": ctx,
+                "outline": outline,
+            }
 
-            # === Step 2d: Citation Support Audit（确定性引用支撑检测） ===
-            section_evidence_for_audit = []
-            for pid in plan.candidate_paper_ids[:30]:
-                card_list = ec_by_paper.get(pid, [])
-                if card_list:
-                    section_evidence_for_audit.append(card_list[0])
-                else:
-                    section_evidence_for_audit.append({})
+        write_results = await asyncio.gather(
+            *[_write_and_save(ctx, i) for i, ctx in enumerate(section_contexts)],
+            return_exceptions=True,
+        )
 
-            support_result = audit_citation_support(
-                section_text=content,
-                evidence_cards=section_evidence_for_audit,
-            )
-            if support_result["unsupported_count"] > 0:
-                logger.warning(
-                    "Citation support audit found unsupported citations",
-                    title=section_title,
-                    supported=support_result["supported_count"],
-                    weak=support_result["weak_count"],
-                    unsupported=support_result["unsupported_count"],
-                    support_rate=f"{support_result['support_rate']:.1%}",
-                )
+        # 按原始顺序组装结果
+        written_sections: list[str] = []
+        written_section_ids: list[str] = []
+        section_evaluations: list[dict] = []
 
-            logger.info(
-                "Section written",
-                title=section.get("title"),
-                word_count=section_data["word_count"],
-                refs=len(plan.candidate_paper_ids),
-                evaluation_score=evaluation.get("score", 0),
-                citation_support_rate=f"{support_result['support_rate']:.1%}",
-            )
+        write_idx = 0
+        for plan_idx, plan in enumerate(citation_plans):
+            section = sections[plan.section_index]
+            sk = str(section.get("name", section.get("number", 0)))
+            if sk in existing_sections:
+                ex = existing_sections[sk]
+                written_sections.append(ex["content"])
+                written_section_ids.append(ex["id"])
+            else:
+                result = write_results[write_idx]
+                write_idx += 1
+                if isinstance(result, Exception):
+                    logger.error("Section write failed", title=section.get("title"), error=str(result)[:200])
+                    raise result
+                written_sections.append(result["content"])
+                written_section_ids.append(result["section_id"])
+                section_evaluations.append(result["evaluation"])
+
+        logger.info("All sections written", total=total_sections,
+                     written=len(written_sections), skipped=len(existing_sections))
 
         await send_progress(
             state.project_id, "write_review",
@@ -698,9 +619,13 @@ async def write_review_node(state: PipelineState) -> dict:
                     global_ref_map,
                 )
                 if invalid_local:
-                    raise ValueError(
-                        f"Section {idx} contains invalid local citations: {sorted(invalid_local)}"
+                    logger.warning(
+                        "Stripping invalid local citations from section",
+                        section=idx,
+                        invalid=sorted(invalid_local),
                     )
+                    from ...services.citation_utils import strip_invalid_citations
+                    remapped_body = strip_invalid_citations(remapped_body, invalid_local)
                 remapped_section_bodies.append(remapped_body)
 
             finalization = finalize_review_markdown(

@@ -17,7 +17,7 @@ from ..services.llm_client import ainvoke_with_callbacks, create_llm
 from ..tools.json_repair import try_parse_json
 
 logger = structlog.get_logger()
-DEFAULT_SECTION_OUTLINE_TIMEOUT_S = 90.0
+DEFAULT_SECTION_OUTLINE_TIMEOUT_S = 180.0
 
 
 def _normalize_paragraph_word_budget(outline: dict, target_words: int) -> dict:
@@ -120,6 +120,7 @@ def _build_cluster_context(
 
     parts = []
     for i, cluster in enumerate(clusters):
+        cluster_label = f"聚类{i + 1}"
         cluster_id = cluster.get("id", i)
         paper_ids = cluster.get("paper_ids", [])
         size = len(paper_ids)
@@ -154,7 +155,7 @@ def _build_cluster_context(
                     confidence = card.get("confidence", "")
                     cluster_evidence.append(f"[{card_id}] {claim} (confidence={confidence})")
 
-        line = f"聚类 {cluster_id}: {size} 篇论文"
+        line = f"{cluster_label}: {size} 篇论文"
         if sample_titles:
             line += f"; 代表性论文: {'; '.join(sample_titles[:3])}"
         if entity_str:

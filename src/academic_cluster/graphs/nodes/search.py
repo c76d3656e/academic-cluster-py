@@ -420,13 +420,15 @@ async def search_node(state: PipelineState) -> dict:
                 detail={"round": round_num, "queries": queries},
             )
 
-            # 并行搜索
+            # 并行搜索（用 create_task 包装，支持超时后检查 done/cancel）
             search_tasks = [
-                search_all_sources(
-                    query=q,
-                    limit_per_source=limit_per_source,
-                    sources=sources,
-                    per_source_limits=per_source_limits,
+                asyncio.create_task(
+                    search_all_sources(
+                        query=q,
+                        limit_per_source=limit_per_source,
+                        sources=sources,
+                        per_source_limits=per_source_limits,
+                    )
                 )
                 for q in queries
             ]
@@ -595,6 +597,15 @@ async def search_node(state: PipelineState) -> dict:
             relevant=len(final_papers),
             papers_saved=len(paper_ids),
         )
+
+        # 可用文献过少则提前报错，避免后续全流程空跑
+        if len(paper_ids) < 200:
+            error_msg = f"可用文献过少：仅搜索到 {len(paper_ids)} 篇论文（需至少 200 篇），请调整搜索词或数据源"
+            logger.error(error_msg, project_id=state.project_id, query=state.query)
+            await send_progress(state.project_id, "search", error_msg)
+            if tracker:
+                await tracker.end_node("search", "failed", error_message=error_msg)
+            raise ValueError(error_msg)
 
         result = {
             "paper_ids": paper_ids,

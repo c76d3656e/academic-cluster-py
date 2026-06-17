@@ -311,6 +311,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                         temperature=_temperature,
                         max_tokens=_max_tokens,
                         timeout=timeout,
+                        frequency_penalty=0.5,
                         **router_kwargs,
                     ),
                     timeout=timeout + 60,
