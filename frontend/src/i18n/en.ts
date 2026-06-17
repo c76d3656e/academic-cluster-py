@@ -159,6 +159,7 @@ export const en = {
     assistantDesc: 'Enter a research topic and I will automatically search papers, cluster analysis, and generate a review. The entire process is displayed in real-time.',
     viewFullReview: 'View Full Review',
     console: 'Console',
+    newChat: 'New Chat',
     llmFilterHint: 'Select evidence_cards to view detailed LLM calls for the evidence card stage',
   },
 

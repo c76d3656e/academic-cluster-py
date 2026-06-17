@@ -226,11 +226,11 @@ onMounted(async () => {
             <div v-if="showDownloadMenu" class="absolute right-0 top-full mt-1 w-44 bg-card border border-border rounded-lg shadow-lg py-1 z-20">
               <button class="w-full px-3 py-2 text-left text-sm hover:bg-secondary transition-colors flex items-center gap-2" @click="downloadTopicMd">
                 <span class="text-muted-foreground font-mono text-xs">.md</span>
-                {{ t('article.topicMd') }}
+                {{ (outline?.title || project?.query || 'topic') + '.md' }}
               </button>
               <button class="w-full px-3 py-2 text-left text-sm hover:bg-secondary transition-colors flex items-center gap-2" @click="downloadReferenceBib">
                 <span class="text-muted-foreground font-mono text-xs">.bib</span>
-                {{ t('article.referenceBib') }}
+                {{ (outline?.title || project?.query || 'references') + '.bib' }}
               </button>
             </div>
           </div>

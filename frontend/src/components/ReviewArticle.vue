@@ -337,6 +337,7 @@ function scrollToReferences() {
   margin-bottom: 0.875rem;
   color: var(--foreground);
   text-align: justify;
+  text-indent: 2em;
 }
 
 .nature-prose :deep(ul),

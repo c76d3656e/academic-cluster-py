@@ -326,14 +326,14 @@ onMounted(loadData)
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-border">
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Name</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden md:table-cell">Model</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden lg:table-cell">API Key</th>
-              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal hidden lg:table-cell">Input $/M</th>
-              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal hidden lg:table-cell">Output $/M</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Status</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden sm:table-cell">Health</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Actions</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('admin.thName') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden md:table-cell">{{ t('admin.thModel') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden lg:table-cell">{{ t('admin.thApiKey') }}</th>
+              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal hidden lg:table-cell">{{ t('admin.thInputPrice') }}</th>
+              <th class="text-right py-3 px-4 text-caption text-muted-foreground font-normal hidden lg:table-cell">{{ t('admin.thOutputPrice') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('admin.thStatus') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden sm:table-cell">{{ t('admin.thHealth') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('admin.thActions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -392,12 +392,12 @@ onMounted(loadData)
         <table class="w-full text-sm">
           <thead>
             <tr class="border-b border-border">
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Source</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden lg:table-cell">Current Value</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden sm:table-cell">Origin</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden sm:table-cell">Status</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden md:table-cell">Updated</th>
-              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">Actions</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('admin.thSource') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden lg:table-cell">{{ t('admin.thCurrentValue') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden sm:table-cell">{{ t('admin.thOrigin') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden sm:table-cell">{{ t('admin.thStatus') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal hidden md:table-cell">{{ t('admin.thUpdated') }}</th>
+              <th class="text-left py-3 px-4 text-caption text-muted-foreground font-normal">{{ t('admin.thActions') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -413,7 +413,7 @@ onMounted(loadData)
               <td class="py-3 px-4 hidden lg:table-cell">
                 <div class="text-muted-foreground font-mono text-xs">{{ source.value || '-' }}</div>
                 <div v-if="source.key_count > 0" class="text-[0.65rem] text-muted-foreground mt-1">
-                  {{ source.key_count }} {{ source.supports_multiple ? 'keys' : 'item' }}
+                  {{ source.supports_multiple ? t('admin.keysCount', { count: source.key_count }) : t('admin.itemCount', { count: source.key_count }) }}
                 </div>
               </td>
               <td class="py-3 px-4 hidden sm:table-cell">

@@ -159,6 +159,7 @@ export const zh = {
     assistantDesc: '输入研究主题，我将自动搜索论文、聚类分析、生成综述。整个过程实时展示。',
     viewFullReview: '查看完整综述',
     console: '控制台',
+    newChat: '新建对话',
     llmFilterHint: '选择 evidence_cards 可查看证据卡片阶段的完整调用明细',
   },
 
