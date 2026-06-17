@@ -5,9 +5,12 @@ API 路由定义
 import asyncio
 import uuid
 
+import json
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from ..config import get_settings
 from ..services.database import DatabaseService, get_database
@@ -19,6 +22,18 @@ router = APIRouter()
 
 # 正在运行的 pipeline task 映射（project_id → asyncio.Task），用于暂停
 _running_pipelines: dict[str, asyncio.Task] = {}
+
+
+@router.get("/features")
+async def get_features(db: DatabaseService = Depends(get_database)):
+    """获取 UI 功能开关（无需登录）"""
+    try:
+        async with db.session() as session:
+            r = await session.execute(text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'"))
+            rows = r.fetchall()
+        return {row[0].replace("ui.", ""): (row[1] == "true") for row in rows}
+    except Exception:
+        return {"show_usage": False}
 
 
 # =============================================================================

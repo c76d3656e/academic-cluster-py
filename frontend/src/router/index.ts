@@ -50,11 +50,11 @@ const router = createRouter({
           name: 'console-projects',
           component: () => import('../views/console/ConsoleProjects.vue'),
         },
-        {
-          path: 'usage',
-          name: 'console-usage',
-          component: () => import('../views/console/ConsoleUsage.vue'),
-        },
+        // {
+        //   path: 'usage',
+        //   name: 'console-usage',
+        //   component: () => import('../views/console/ConsoleUsage.vue'),
+        // },
         {
           path: 'profile',
           name: 'console-profile',

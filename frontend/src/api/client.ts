@@ -93,3 +93,17 @@ apiClient.interceptors.response.use(
 )
 
 export default apiClient
+
+// 获取 UI 功能开关
+let _featuresCache: Record<string, boolean> | null = null
+export async function getFeatures(): Promise<Record<string, boolean>> {
+  if (_featuresCache) return _featuresCache
+  try {
+    const { data } = await apiClient.get('/features')
+    _featuresCache = data
+    return data
+  } catch {
+    return { show_usage: false }
+  }
+}
+export function clearFeaturesCache() { _featuresCache = null }

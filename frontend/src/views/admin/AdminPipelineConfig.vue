@@ -29,6 +29,10 @@ const groupLabels: Record<string, string> = {
   '重排序': '重排序阶段',
   '聚类': '聚类阶段',
   '写作': '写作阶段',
+  'KG 抽取': 'KG 抽取阶段',
+  '证据卡片': '证据卡片阶段',
+  '社区记忆': '社区记忆阶段',
+  '系统': '系统设置',
 }
 
 const groupIcons: Record<string, string> = {

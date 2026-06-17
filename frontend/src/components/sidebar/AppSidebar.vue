@@ -1,11 +1,20 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import { Separator } from '@/components/ui/separator'
+import { getFeatures } from '@/api/client'
 
 const route = useRoute()
 const router = useRouter()
 const { user, isAdmin, logout } = useAuth()
+
+const showUsage = ref(false)
+
+onMounted(async () => {
+  const features = await getFeatures()
+  showUsage.value = features.show_usage ?? false
+})
 
 interface NavItem {
   path: string
@@ -13,13 +22,23 @@ interface NavItem {
   icon: string
 }
 
-const consoleItems: NavItem[] = [
+const baseConsoleItems: NavItem[] = [
   { path: '/console/overview', label: '仪表盘', icon: 'dashboard' },
   { path: '/console/projects', label: '我的项目', icon: 'projects' },
-  { path: '/console/usage', label: '我的用量', icon: 'usage' },
   { path: '/console/profile', label: '个人设置', icon: 'profile' },
   { path: '/console/recharge', label: '充值', icon: 'recharge' },
 ]
+
+const consoleItems = ref([...baseConsoleItems])
+
+onMounted(async () => {
+  const features = await getFeatures()
+  showUsage.value = features.show_usage ?? false
+  consoleItems.value = [...baseConsoleItems]
+  if (showUsage.value) {
+    consoleItems.value.splice(2, 0, { path: '/console/usage', label: '我的用量', icon: 'usage' })
+  }
+})
 
 const adminItems: NavItem[] = [
   { path: '/admin/overview', label: '系统概览', icon: 'admin-overview' },

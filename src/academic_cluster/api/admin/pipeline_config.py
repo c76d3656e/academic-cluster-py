@@ -180,7 +180,7 @@ DEFAULT_CONFIG = {
     },
     "evidence.concurrency": {
         "value": "-1",
-        "label": "Evidence card 并发度",
+        "label": "证据卡片并发度",
         "description": "-1 表示自动：按已启用 LLM provider 的 rpm_limit 总和设置并发；正整数表示手动上限。",
         "group": "证据卡片",
         "type": "int",
@@ -195,9 +195,9 @@ DEFAULT_CONFIG = {
     },
     "evidence.timeout_s": {
         "value": "300",
-        "label": "Evidence card timeout",
-        "description": "Maximum seconds for one evidence-card LLM call. Timed-out papers get a deterministic fallback card so the batch can finish and persist.",
-        "group": "Evidence cards",
+        "label": "证据卡片超时",
+        "description": "单篇证据卡片 LLM 调用的最长等待秒数，超时后使用确定性 fallback 卡片以保证批次完成",
+        "group": "证据卡片",
         "type": "int",
     },
     "community_memory.timeout_s": {
@@ -215,10 +215,10 @@ DEFAULT_CONFIG = {
         "type": "int",
     },
     "gap_analysis.timeout_s": {
-        "value": "45",
-        "label": "Gap judge timeout",
-        "description": "Maximum seconds for the optional LLM gap judge. On timeout, deterministic gaps are kept for diagnostics but the pipeline proceeds to outline generation.",
-        "group": "Gap analysis",
+        "value": "180",
+        "label": "缺口分析超时",
+        "description": "缺口分析 LLM judge 的最长等待秒数，超时后使用确定性 gap 判定继续流程",
+        "group": "缺口分析",
         "type": "int",
     },
 
@@ -287,6 +287,13 @@ DEFAULT_CONFIG = {
         "group": "写作",
         "type": "int",
     },
+    "ui.show_usage": {
+        "value": "false",
+        "label": "显示调用明细",
+        "description": "开启后用户可在项目详情页查看 LLM 调用明细，并在控制台查看个人用量页面",
+        "group": "系统",
+        "type": "bool",
+    },
 }
 
 
@@ -346,6 +353,23 @@ async def _ensure_defaults():
                 SET value = :new_val, updated_at = NOW()
                 WHERE key = :key AND value = :old_val
             """), {"key": key, "old_val": old_val, "new_val": new_val})
+        # 中文化迁移：更新旧版英文标签/描述/分组
+        cn_migrations = [
+            ("evidence.timeout_s", "label", "证据卡片超时"),
+            ("evidence.timeout_s", "description", "单篇证据卡片 LLM 调用的最长等待秒数，超时后使用确定性 fallback 卡片以保证批次完成"),
+            ("evidence.timeout_s", "group_name", "证据卡片"),
+            ("gap_analysis.timeout_s", "label", "缺口分析超时"),
+            ("gap_analysis.timeout_s", "description", "缺口分析 LLM judge 的最长等待秒数，超时后使用确定性 gap 判定继续流程"),
+            ("gap_analysis.timeout_s", "group_name", "缺口分析"),
+            ("ui.show_usage", "label", "显示调用明细"),
+            ("ui.show_usage", "description", "开启后用户可在项目详情页查看 LLM 调用明细，并在控制台查看个人用量页面"),
+            ("ui.show_usage", "group_name", "系统"),
+        ]
+        for key, col, cn_val in cn_migrations:
+            await session.execute(
+                text(f"UPDATE pipeline_config SET {col} = :val, updated_at = NOW() WHERE key = :key"),
+                {"key": key, "val": cn_val},
+            )
         await session.commit()
 
 
@@ -471,6 +495,18 @@ class PipelineConfigItem(BaseModel):
 
 class PipelineConfigUpdate(BaseModel):
     value: str
+
+
+@router.get("/features")
+async def get_features():
+    """获取UI功能开关配置（无需认证，前端启动时读取）"""
+    db = get_database()
+    async with db.session() as session:
+        from sqlalchemy import text
+        r = await session.execute(text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'"))
+        rows = r.fetchall()
+    features = {row[0].replace("ui.", ""): row[1] == "true" for row in rows}
+    return features
 
 
 @router.get("", response_model=list[PipelineConfigItem])

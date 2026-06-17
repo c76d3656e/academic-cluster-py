@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'vue-sonner'
 import { consoleApi, type ConsoleLlmCall } from '@/api/console'
+import { getFeatures } from '@/api/client'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +25,7 @@ const projectId = route.params.id as string
 const project = ref<Project | null>(null)
 const reviewData = ref<ReviewResponse | null>(null)
 const isLoading = ref(true)
+const showUsage = ref(false)
 const isStarting = ref(false)
 const isResuming = ref(false)
 const llmCalls = ref<ConsoleLlmCall[]>([])
@@ -357,8 +359,10 @@ onMounted(async () => {
       startStatusPolling()
       startCallsPolling()
     }
+    const features = await getFeatures()
+    showUsage.value = features.show_usage ?? false
     await loadReview()
-    await loadLlmCalls()
+    if (showUsage.value) await loadLlmCalls()
   } catch (e: unknown) {
     const err = e as { response?: { status?: number } }
     if (err.response?.status === 401 || err.response?.status === 403) {
@@ -654,7 +658,7 @@ function scrollToReferences() {
           </div>
         </details>
 
-        <details class="mt-4 border border-border rounded-xl bg-card overflow-hidden" open>
+        <details v-if="showUsage" class="mt-4 border border-border rounded-xl bg-card overflow-hidden" open>
           <summary class="px-5 py-3 text-sm font-medium cursor-pointer hover:bg-muted/50 transition-colors">
             LLM 调用明细 ({{ llmCalls.length }})
           </summary>
