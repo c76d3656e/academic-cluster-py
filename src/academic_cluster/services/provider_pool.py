@@ -44,7 +44,7 @@ class LiteLLMPool:
         if self._router is not None:
             return
 
-        from litellm import Router
+        from litellm import Router  # type: ignore[attr-defined]
 
         self._router = Router(
             model_list=self._model_list,

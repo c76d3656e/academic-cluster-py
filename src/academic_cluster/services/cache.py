@@ -25,7 +25,7 @@ class CacheService:
         if redis_url is None:
             redis_url = settings.redis.url
 
-        self.redis = redis.from_url(  # type: ignore[no-untyped-call]
+        self.redis = redis.from_url(
             redis_url,
             decode_responses=True,
         )
