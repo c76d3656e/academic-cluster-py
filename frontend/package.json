@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint src/ --ext .ts,.vue",
     "lint:fix": "eslint src/ --ext .ts,.vue --fix",
-    "type-check": "vue-tsc -b"
+    "type-check": "vue-tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
     "@lucide/vue": "^1.17.0",
