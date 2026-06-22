@@ -40,6 +40,7 @@ env/
 
 # Database
 *.db
+!jcrdata/*.db
 *.sqlite3
 
 # Logs
@@ -69,6 +70,7 @@ htmlcov/
 data/raw/
 data/processed/
 *.csv
+!jcrdata/*.csv
 *.json
 !package.json
 !package-lock.json
