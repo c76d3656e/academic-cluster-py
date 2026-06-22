@@ -170,8 +170,8 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             timeout_s = 120
 
         def _progress(completed: int, total: int):
-            _task = asyncio.ensure_future(
-                send_progress(  # noqa: RUF006
+            _task = asyncio.ensure_future(  # noqa: RUF006
+                send_progress(
                     state.project_id,
                     "evidence_cards",
                     f"证据卡片生成中 {completed}/{total}...",
