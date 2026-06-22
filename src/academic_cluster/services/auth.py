@@ -80,7 +80,9 @@ class TokenService:
     def decode_access_token(self, token: str) -> dict[str, Any]:
         """解码 Access Token"""
         try:
-            payload: dict[str, Any] = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            payload: dict[str, Any] = jwt.decode(
+                token, self.secret_key, algorithms=[self.algorithm]
+            )
             if payload.get("type") != "access":
                 raise jwt.InvalidTokenError("Invalid token type")
             return payload
