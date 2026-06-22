@@ -74,6 +74,10 @@ data/processed/
 *.json
 !package.json
 !package-lock.json
+!tsconfig.json
+!tsconfig.*.json
+!frontend/tsconfig.json
+!frontend/tsconfig.*.json
 
 # Generated output
 output/
