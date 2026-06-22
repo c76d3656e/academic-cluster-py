@@ -39,20 +39,22 @@ def with_audit(node_name: str):
     注意：Checkpoint 由 LangGraph 的 AsyncPostgresSaver 自动管理，
     不需要手动保存。
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(state, *args, **kwargs):
             db = get_database()
-            project_id = state.project_id if hasattr(state, 'project_id') else None
+            project_id = state.project_id if hasattr(state, "project_id") else None
             start_time = time.time()
             push_node(node_name)
 
             # 获取 tracker（从 ContextVar）
             tracker = get_current_tracker()
-            if tracker and hasattr(tracker, 'begin_node'):
+            if tracker and hasattr(tracker, "begin_node"):
                 try:
                     await tracker.begin_node(
-                        node_name, "compute",
+                        node_name,
+                        "compute",
                         db_create_node=db.create_node_execution,
                     )
                 except Exception as e:
@@ -79,27 +81,33 @@ def with_audit(node_name: str):
                     output_summary = _summarize_output(result)
 
                 # 获取 retry 次数
-                retry_count = state.retry_count if hasattr(state, 'retry_count') else 0
+                retry_count = state.retry_count if hasattr(state, "retry_count") else 0
 
                 if project_id:
                     try:
-                        await db.save_audit_log({
-                            "project_id": project_id,
-                            "node_name": node_name,
-                            "event_type": "node_completed",
-                            "event_data": {
-                                "status": result.get("status", "unknown") if isinstance(result, dict) else "unknown",
-                                "result_keys": list(result.keys()) if isinstance(result, dict) else [],
-                                "output_summary": output_summary,
-                                "retry_count": retry_count,
-                            },
-                            "duration_ms": duration_ms,
-                        })
+                        await db.save_audit_log(
+                            {
+                                "project_id": project_id,
+                                "node_name": node_name,
+                                "event_type": "node_completed",
+                                "event_data": {
+                                    "status": result.get("status", "unknown")
+                                    if isinstance(result, dict)
+                                    else "unknown",
+                                    "result_keys": list(result.keys())
+                                    if isinstance(result, dict)
+                                    else [],
+                                    "output_summary": output_summary,
+                                    "retry_count": retry_count,
+                                },
+                                "duration_ms": duration_ms,
+                            }
+                        )
                     except Exception as e:
                         logger.warning("Failed to save audit log", error=str(e))
 
                 # 更新 tracker
-                if tracker and hasattr(tracker, 'end_node'):
+                if tracker and hasattr(tracker, "end_node"):
                     try:
                         await tracker.end_node(
                             node_name,
@@ -119,12 +127,17 @@ def with_audit(node_name: str):
                 if project_id:
                     try:
                         from ..api.sse import get_sse_manager
+
                         sse = get_sse_manager()
-                        await sse.send_event(project_id, "node_finished", {
-                            "node": node_name,
-                            "status": "succeeded",
-                            "duration_ms": duration_ms,
-                        })
+                        await sse.send_event(
+                            project_id,
+                            "node_finished",
+                            {
+                                "node": node_name,
+                                "status": "succeeded",
+                                "duration_ms": duration_ms,
+                            },
+                        )
                     except Exception as e:
                         logger.warning(
                             "Failed to finish failed tracked node execution",
@@ -138,7 +151,9 @@ def with_audit(node_name: str):
                     node=node_name,
                     project_id=project_id,
                     duration_ms=duration_ms,
-                    status=result.get("status", "unknown") if isinstance(result, dict) else "unknown",
+                    status=result.get("status", "unknown")
+                    if isinstance(result, dict)
+                    else "unknown",
                 )
 
                 return result
@@ -146,27 +161,31 @@ def with_audit(node_name: str):
             except Exception as e:
                 duration_ms = int((time.time() - start_time) * 1000)
                 tb = traceback.format_exc()
-                retry_count = state.retry_count if hasattr(state, 'retry_count') else 0
+                retry_count = state.retry_count if hasattr(state, "retry_count") else 0
 
                 if project_id:
                     try:
-                        await db.save_audit_log({
-                            "project_id": project_id,
-                            "node_name": node_name,
-                            "event_type": "node_failed",
-                            "event_data": {
-                                "error": str(e),
-                                "error_type": type(e).__name__,
-                                "traceback": tb,
-                                "retry_count": retry_count,
-                            },
-                            "duration_ms": duration_ms,
-                        })
+                        await db.save_audit_log(
+                            {
+                                "project_id": project_id,
+                                "node_name": node_name,
+                                "event_type": "node_failed",
+                                "event_data": {
+                                    "error": str(e),
+                                    "error_type": type(e).__name__,
+                                    "traceback": tb,
+                                    "retry_count": retry_count,
+                                },
+                                "duration_ms": duration_ms,
+                            }
+                        )
                     except Exception as audit_error:
-                        logger.warning("Failed to save audit log", error=str(audit_error))
+                        logger.warning(
+                            "Failed to save audit log", error=str(audit_error)
+                        )
 
                 # 更新 tracker
-                if tracker and hasattr(tracker, 'end_node'):
+                if tracker and hasattr(tracker, "end_node"):
                     with contextlib.suppress(Exception):
                         await tracker.end_node(
                             node_name,
@@ -180,12 +199,17 @@ def with_audit(node_name: str):
                 if project_id:
                     try:
                         from ..api.sse import get_sse_manager
+
                         sse = get_sse_manager()
-                        await sse.send_event(project_id, "node_finished", {
-                            "node": node_name,
-                            "status": "failed",
-                            "error": str(e),
-                        })
+                        await sse.send_event(
+                            project_id,
+                            "node_finished",
+                            {
+                                "node": node_name,
+                                "status": "failed",
+                                "error": str(e),
+                            },
+                        )
                     except Exception:  # nosec B110
                         pass
 
@@ -204,4 +228,5 @@ def with_audit(node_name: str):
                 pop_node()
 
         return wrapper
+
     return decorator

@@ -22,7 +22,7 @@ def extract_json_object(text: str) -> str | None:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
-        return text[start:end + 1]
+        return text[start : end + 1]
     return None
 
 
@@ -31,7 +31,7 @@ def extract_json_array(text: str) -> str | None:
     start = text.find("[")
     end = text.rfind("]")
     if start != -1 and end > start:
-        return text[start:end + 1]
+        return text[start : end + 1]
     return None
 
 
@@ -43,7 +43,7 @@ def strip_markdown_fences(text: str) -> str:
         # 找到第一行结束
         first_nl = text.find("\n")
         if first_nl != -1:
-            text = text[first_nl + 1:]
+            text = text[first_nl + 1 :]
         # 去掉尾部的 ```
         if text.rstrip().endswith("```"):
             text = text.rstrip()[:-3].rstrip()

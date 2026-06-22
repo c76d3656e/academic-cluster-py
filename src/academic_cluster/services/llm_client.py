@@ -21,12 +21,15 @@ _rr_counter = 0
 _llm_queue_semaphore: asyncio.Semaphore | None = None
 _llm_queue_capacity = 0
 
-_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL)
+_THINK_BLOCK_RE = re.compile(
+    r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL
+)
 
 
 def _messages_to_openai(input) -> list[dict]:
     """将 LangChain 消息或字符串转为 OpenAI 消息 dict 列表（供 Router 使用）。"""
     from langchain_core.messages.utils import convert_to_openai_messages
+
     if isinstance(input, str):
         return [{"role": "user", "content": input}]
     if isinstance(input, list):
@@ -38,14 +41,32 @@ def _router_response_to_aimessage(response, provider_alias: str = "") -> AIMessa
     """将 LiteLLM Router 的响应 dict 转为 LangChain AIMessage。"""
     choices = getattr(response, "choices", None) or response.get("choices", [])
     choice = choices[0] if choices else {}
-    msg_dict = choice.get("message", {}) if isinstance(choice, dict) else getattr(choice, "message", {})
-    content = msg_dict.get("content", "") if isinstance(msg_dict, dict) else getattr(msg_dict, "content", "")
-    finish_reason = choice.get("finish_reason", "") if isinstance(choice, dict) else getattr(choice, "finish_reason", "")
+    msg_dict = (
+        choice.get("message", {})
+        if isinstance(choice, dict)
+        else getattr(choice, "message", {})
+    )
+    content = (
+        msg_dict.get("content", "")
+        if isinstance(msg_dict, dict)
+        else getattr(msg_dict, "content", "")
+    )
+    finish_reason = (
+        choice.get("finish_reason", "")
+        if isinstance(choice, dict)
+        else getattr(choice, "finish_reason", "")
+    )
 
     usage = getattr(response, "usage", None) or response.get("usage", {}) or {}
 
-    hidden = getattr(response, "_hidden_params", None) or response.get("_hidden_params", {}) or {}
-    actual_provider = str(hidden.get("model_id", "") or hidden.get("api_base", "") or provider_alias)
+    hidden = (
+        getattr(response, "_hidden_params", None)
+        or response.get("_hidden_params", {})
+        or {}
+    )
+    actual_provider = str(
+        hidden.get("model_id", "") or hidden.get("api_base", "") or provider_alias
+    )
 
     return AIMessage(
         content=content or "",
@@ -139,6 +160,7 @@ def _get_llm_queue_semaphore() -> asyncio.Semaphore:
         logger.info("LLM queue capacity resolved", capacity=capacity, base_slots=base)
     return _llm_queue_semaphore
 
+
 # 轮询计数器
 _rr_counter = 0
 
@@ -189,8 +211,12 @@ def create_llm(
     )
     # 在 llm 对象上附加 provider 别名和路由分组名，供 ainvoke_with_callbacks 读取
     model_info = deployment.get("model_info", {}) or {}
-    llm._litellm_model = deployment.get("model_name", actual_model)  # 路由分组名（如 "Qwen3-8B"），传给 Router
-    llm._provider_alias = model_info.get("provider_alias", "") or deployment.get("model_name", "")
+    llm._litellm_model = deployment.get(
+        "model_name", actual_model
+    )  # 路由分组名（如 "Qwen3-8B"），传给 Router
+    llm._provider_alias = model_info.get("provider_alias", "") or deployment.get(
+        "model_name", ""
+    )
     llm._provider_rpm_limit = int(params.get("rpm") or 10)
     llm._requested_model = actual_model
     llm._upstream_model = actual_model
@@ -201,7 +227,9 @@ def create_llm(
     return llm
 
 
-async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0, **kwargs):
+async def ainvoke_with_callbacks(
+    llm, input, config=None, timeout: float = 300.0, **kwargs
+):
     """
     包装 LLM 调用，手动追踪 token 用量和持久化到 DB。
 
@@ -233,7 +261,11 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     tracker = get_current_tracker()
     run_id = get_resolved_run_id()
     if not run_id:
-        logger.warning("ainvoke_with_callbacks no run_id", node=node_name, has_tracker=tracker is not None)
+        logger.warning(
+            "ainvoke_with_callbacks no run_id",
+            node=node_name,
+            has_tracker=tracker is not None,
+        )
 
     _temperature = getattr(llm, "_temperature", 0.7)
     _max_tokens = getattr(llm, "_max_tokens", None)
@@ -245,9 +277,8 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
         or "unknown"
     )
     upstream_model = getattr(llm, "_upstream_model", None) or requested_model
-    api_base_url = (
-        getattr(llm, "_api_base_url", None)
-        or str(_safe_attr(llm, "openai_api_base", "base_url", default="") or "")
+    api_base_url = getattr(llm, "_api_base_url", None) or str(
+        _safe_attr(llm, "openai_api_base", "base_url", default="") or ""
     )
     litellm_model = getattr(llm, "_litellm_model", "openai/" + requested_model)
     call_id = None
@@ -256,6 +287,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     if run_id:
         try:
             from .database import get_database
+
             db = get_database()
             exec_id = tracker._node_ids.get(node_name) if tracker else None
             if not exec_id:
@@ -269,7 +301,8 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
             call_id = await db.create_llm_call(
                 pipeline_run_id=run_id,
                 node_execution_id=exec_id,
-                project_id=get_current_project() or getattr(tracker, "project_id", None),
+                project_id=get_current_project()
+                or getattr(tracker, "project_id", None),
                 node_name=node_name,
                 call_type="llm",
                 provider_name=provider_alias,
@@ -286,11 +319,15 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                     "temperature": _temperature,
                     "max_tokens": _max_tokens,
                     "provider_alias": provider_alias,
-                    "config_keys": sorted((config or {}).keys()) if isinstance(config, dict) else [],
+                    "config_keys": sorted((config or {}).keys())
+                    if isinstance(config, dict)
+                    else [],
                 },
             )
         except Exception as e:
-            logger.warning("Failed to create llm_call audit row", error=str(e), node=node_name)
+            logger.warning(
+                "Failed to create llm_call audit row", error=str(e), node=node_name
+            )
 
     # 通过 LiteLLM Router 发送请求（Router 内置 retry + failover）
     from .provider_pool import get_llm_pool
@@ -344,7 +381,11 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                     latency_ms=elapsed_ms,
                 )
             except Exception as e:
-                logger.warning("Failed to persist llm_call cancellation", error=str(e), node=node_name)
+                logger.warning(
+                    "Failed to persist llm_call cancellation",
+                    error=str(e),
+                    node=node_name,
+                )
         logger.warning(err_msg, node=node_name)
         raise
     except Exception as e:
@@ -360,7 +401,11 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                     latency_ms=elapsed_ms,
                 )
             except Exception as persist_error:
-                logger.warning("Failed to persist llm_call error", error=str(persist_error), node=node_name)
+                logger.warning(
+                    "Failed to persist llm_call error",
+                    error=str(persist_error),
+                    node=node_name,
+                )
         logger.error(err_msg, node=node_name, timeout_s=timeout, elapsed_ms=elapsed_ms)
         raise
 
@@ -373,8 +418,12 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
 
     usage_meta = getattr(response, "usage_metadata", None)
     if usage_meta:
-        prompt_tokens = usage_meta.get("input_tokens", 0) or usage_meta.get("prompt_tokens", 0)
-        completion_tokens = usage_meta.get("output_tokens", 0) or usage_meta.get("completion_tokens", 0)
+        prompt_tokens = usage_meta.get("input_tokens", 0) or usage_meta.get(
+            "prompt_tokens", 0
+        )
+        completion_tokens = usage_meta.get("output_tokens", 0) or usage_meta.get(
+            "completion_tokens", 0
+        )
 
     resp_meta = getattr(response, "response_metadata", None)
     if resp_meta:
@@ -394,11 +443,17 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     output_price = 0.0
     try:
         from .database import get_database
+
         _db = get_database()
         from ..api.admin.providers import get_provider_pricing
-        input_price, output_price = await get_provider_pricing(_db, provider_alias, model_name)
+
+        input_price, output_price = await get_provider_pricing(
+            _db, provider_alias, model_name
+        )
         if input_price or output_price:
-            cost = (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
+            cost = (
+                prompt_tokens * input_price + completion_tokens * output_price
+            ) / 1_000_000
     except Exception:  # nosec B110
         pass
 
@@ -434,7 +489,9 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                 output_price_per_m=output_price,
             )
         except Exception as e:
-            logger.warning("Failed to finish llm_call audit row", error=str(e), node=node_name)
+            logger.warning(
+                "Failed to finish llm_call audit row", error=str(e), node=node_name
+            )
 
     return response
 
@@ -452,6 +509,7 @@ def create_llm_with_retry(
     Returns:
         async callable: _invoke(messages) -> response
     """
+
     async def _invoke(messages):
         from tenacity import (
             retry,

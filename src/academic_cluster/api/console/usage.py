@@ -23,8 +23,10 @@ router = APIRouter()
 # 响应模型
 # =============================================================================
 
+
 class DailyTrendItem(BaseModel):
     """每日用量趋势"""
+
     date: str
     call_count: int = 0
     total_tokens: int = 0
@@ -43,12 +45,14 @@ class DailyTrendItem(BaseModel):
 
 class UsageTrendResponse(BaseModel):
     """用量趋势响应"""
+
     days: int
     trend: list[DailyTrendItem]
 
 
 class LLMCallRecord(BaseModel):
     """LLM 调用记录"""
+
     id: str
     pipeline_run_id: str | None = None
     project_id: str | None = None
@@ -79,6 +83,7 @@ class LLMCallRecord(BaseModel):
 
 class LLMCallListResponse(BaseModel):
     """LLM 调用记录列表响应"""
+
     calls: list[LLMCallRecord]
     total: int
 
@@ -86,6 +91,7 @@ class LLMCallListResponse(BaseModel):
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("/usage/trend", response_model=UsageTrendResponse)
 async def get_usage_trend(
@@ -97,8 +103,16 @@ async def get_usage_trend(
     """获取用户用量趋势，支持 day/hour 粒度"""
     user_id = current_user["id"]
 
-    time_group = "DATE(lc.created_at)" if granularity == "day" else "date_trunc('hour', lc.created_at)"
-    run_time_group = "DATE(pr.created_at)" if granularity == "day" else "date_trunc('hour', pr.created_at)"
+    time_group = (
+        "DATE(lc.created_at)"
+        if granularity == "day"
+        else "date_trunc('hour', lc.created_at)"
+    )
+    run_time_group = (
+        "DATE(pr.created_at)"
+        if granularity == "day"
+        else "date_trunc('hour', pr.created_at)"
+    )
     time_filter = "lc.created_at >= NOW() - (:days * INTERVAL '1 day')"
     run_time_filter = "pr.created_at >= NOW() - (:days * INTERVAL '1 day')"
 

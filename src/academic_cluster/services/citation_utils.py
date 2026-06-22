@@ -40,12 +40,16 @@ _INLINE_REVISION_SENTENCE_RE = re.compile(
     r"[^。！？\n]*(?:[。！？.!?]|$)",
     re.IGNORECASE,
 )
-_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL)
+_THINK_BLOCK_RE = re.compile(
+    r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL
+)
 
 
 def _looks_like_revision_commentary(block: str) -> bool:
     lowered = block.lower()
-    hits = sum(1 for marker in _REVISION_COMMENTARY_MARKERS if marker.lower() in lowered)
+    hits = sum(
+        1 for marker in _REVISION_COMMENTARY_MARKERS if marker.lower() in lowered
+    )
     return hits >= 2
 
 
@@ -72,10 +76,9 @@ def strip_revision_commentary(content: str) -> str:
             skip_continuation = False
             continue
         if _looks_like_revision_commentary(stripped):
-            skip_continuation = (
-                stripped.count("（") > stripped.count("）")
-                or stripped.count("(") > stripped.count(")")
-            )
+            skip_continuation = stripped.count("（") > stripped.count(
+                "）"
+            ) or stripped.count("(") > stripped.count(")")
             continue
         if skip_continuation:
             if "）" in stripped or ")" in stripped:
@@ -99,7 +102,15 @@ _PRECISE_METRIC_RE = re.compile(
 def _evidence_metric_text(evidence_cards: list[dict] | None) -> str:
     if not evidence_cards:
         return ""
-    fields = ("claim", "evidence_span", "metric", "method", "limitation", "paper_title", "title")
+    fields = (
+        "claim",
+        "evidence_span",
+        "metric",
+        "method",
+        "limitation",
+        "paper_title",
+        "title",
+    )
     parts: list[str] = []
     for card in evidence_cards:
         if not isinstance(card, dict):
@@ -137,10 +148,15 @@ def strip_unsupported_precise_metrics(
             if punctuation:
                 kept.append(punctuation)
             continue
-        metrics = [match.group(0).strip() for match in _PRECISE_METRIC_RE.finditer(sentence)]
+        metrics = [
+            match.group(0).strip() for match in _PRECISE_METRIC_RE.finditer(sentence)
+        ]
         unsupported = [
-            metric for metric in metrics
-            if metric and metric not in evidence_text and metric.replace("％", "%") not in evidence_text
+            metric
+            for metric in metrics
+            if metric
+            and metric not in evidence_text
+            and metric.replace("％", "%") not in evidence_text
         ]
         if unsupported:
             # 如果句子有引用标记 [N]，说明指标来自被引文献，保留
@@ -158,6 +174,7 @@ def strip_unsupported_precise_metrics(
         cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip()
 
+
 # Matches [N] or [N,M,K] or [N-M] style citation tokens inside markdown.
 # We exclude year-like brackets [1800-2200] via a negative lookahead in
 # the caller rather than here, because the regex itself is intentionally
@@ -168,7 +185,9 @@ _CITATION_RE = re.compile(r"\[([0-9,\s;–—、，·\-]+)\]")
 _YEAR_BRACKET_RE = re.compile(r"\[(\d{4})(?:\s*[-–—]\s*(\d{4}))?\]")
 
 # Matches UUID-style paper_id in brackets, e.g. [433802d1-ebf8-49f7-8efc-0183ef0170b8]
-_UUID_CITATION_RE = re.compile(r"\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]")
+_UUID_CITATION_RE = re.compile(
+    r"\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]"
+)
 _PAREN_NUMERIC_CITATION_RE = re.compile(
     r"[（(]\s*((?:\[[0-9,\s;–—、，·\-]+\]\s*)+)\s*[）)]"
 )
@@ -187,6 +206,7 @@ _REF_HEADING_RE = re.compile(
 # ---------------------------------------------------------------------------
 # 1. parse_citation_numbers
 # ---------------------------------------------------------------------------
+
 
 def parse_citation_numbers(text: str) -> list[int]:
     """Parse citation content like ``"1, 3-5, 7"`` into ``[1, 3, 4, 5, 7]``.
@@ -246,6 +266,7 @@ def parse_citation_numbers(text: str) -> list[int]:
 # 2. renumber_citations_by_first_use
 # ---------------------------------------------------------------------------
 
+
 def renumber_citations_by_first_use(
     markdown: str,
     paper_map: dict,
@@ -299,16 +320,18 @@ def renumber_citations_by_first_use(
     mappings: list[dict] = []
     for orig, new in sorted(first_appearance.items(), key=lambda kv: kv[1]):
         paper_info = paper_map.get(orig, paper_map.get(str(orig), {}))
-        mappings.append({
-            "new_number": new,
-            "original_number": orig,
-            "paper_id": paper_info.get("paper_id", ""),
-            "title": paper_info.get("title", ""),
-            "authors": paper_info.get("authors", ""),
-            "venue": paper_info.get("venue", ""),
-            "year": paper_info.get("year", ""),
-            "doi": paper_info.get("doi", ""),
-        })
+        mappings.append(
+            {
+                "new_number": new,
+                "original_number": orig,
+                "paper_id": paper_info.get("paper_id", ""),
+                "title": paper_info.get("title", ""),
+                "authors": paper_info.get("authors", ""),
+                "venue": paper_info.get("venue", ""),
+                "year": paper_info.get("year", ""),
+                "doi": paper_info.get("doi", ""),
+            }
+        )
 
     return renumbered, mappings
 
@@ -316,6 +339,7 @@ def renumber_citations_by_first_use(
 # ---------------------------------------------------------------------------
 # 3. validate_citations
 # ---------------------------------------------------------------------------
+
 
 def validate_citations(
     markdown: str,
@@ -351,10 +375,14 @@ def validate_citations(
 
     unique_nums = set(all_numbers)
 
-    out_of_range: list[int] = sorted(n for n in unique_nums if n > valid_paper_count or n < 1)
+    out_of_range: list[int] = sorted(
+        n for n in unique_nums if n > valid_paper_count or n < 1
+    )
     outside_plan: list[int] = []
     if allowed_indices is not None:
-        outside_plan = sorted(n for n in unique_nums if n not in allowed_indices and n not in out_of_range)
+        outside_plan = sorted(
+            n for n in unique_nums if n not in allowed_indices and n not in out_of_range
+        )
 
     invalid_numbers_set: set[int] = set(out_of_range)
     if allowed_indices is not None:
@@ -371,7 +399,8 @@ def validate_citations(
             invalid_count += 1
 
     return {
-        "valid_count": len(all_numbers) - sum(1 for n in all_numbers if n in invalid_numbers_set),
+        "valid_count": len(all_numbers)
+        - sum(1 for n in all_numbers if n in invalid_numbers_set),
         "invalid_count": invalid_count,
         "invalid_numbers": invalid_numbers,
         "out_of_range": out_of_range,
@@ -382,6 +411,7 @@ def validate_citations(
 # ---------------------------------------------------------------------------
 # 4. strip_invalid_citations
 # ---------------------------------------------------------------------------
+
 
 def strip_invalid_citations(
     markdown: str,
@@ -394,6 +424,7 @@ def strip_invalid_citations(
     ``[...]`` block is removed.  Year brackets like ``[2024]`` are
     preserved.
     """
+
     def _clean_token(match: re.Match) -> str:
         original = match.group(0)
         # Preserve year brackets.
@@ -437,6 +468,7 @@ def replace_uuid_citations(
     str
         Markdown with UUID citations replaced by [N] numbers.
     """
+
     def _replace_uuid(match: re.Match) -> str:
         uuid = match.group(1)
         num = paper_id_to_number.get(uuid)
@@ -477,6 +509,7 @@ def normalize_citation_surface(content: str) -> str:
 # ---------------------------------------------------------------------------
 # 5. render_reference_list
 # ---------------------------------------------------------------------------
+
 
 def render_reference_list(
     papers: list[dict],
@@ -528,7 +561,9 @@ def render_reference_list(
             # If no semicolons, try comma-split but be conservative
             # (author names often contain commas).
             if len(author_parts) <= 1:
-                author_parts = [a.strip() for a in re.split(r",\s*(?=[A-Z])", authors) if a.strip()]
+                author_parts = [
+                    a.strip() for a in re.split(r",\s*(?=[A-Z])", authors) if a.strip()
+                ]
             if len(author_parts) > 3:
                 authors = ", ".join(author_parts[:3]) + " et al."
             else:
@@ -560,6 +595,7 @@ def render_reference_list(
 # 6. strip_reference_block
 # ---------------------------------------------------------------------------
 
+
 def strip_reference_block(markdown: str) -> str:
     """Remove ``## References`` heading and everything after it.
 
@@ -574,10 +610,12 @@ def strip_reference_block(markdown: str) -> str:
     start = match.start()
     # Find the next heading at the same or higher level (fewer or equal
     # leading ``#`` characters).
-    heading_level = len(match.group(0).lstrip()) - len(match.group(0).lstrip().lstrip("#"))
+    heading_level = len(match.group(0).lstrip()) - len(
+        match.group(0).lstrip().lstrip("#")
+    )
 
     # Search for the next heading after the references heading.
-    rest = markdown[match.end():]
+    rest = markdown[match.end() :]
     next_heading = re.search(rf"^#{{{1},{heading_level}}}\s+\S", rest, re.MULTILINE)
 
     if next_heading is not None:
@@ -784,6 +822,8 @@ _PROMPT_LEAKAGE_LIST_RE = re.compile(
     r"\n\s*\d+\.\s*(?:全文采用|每处引用|技术比较|争议性问题|实验数据|禁止出现).*$",
     re.DOTALL,
 )
+
+
 def strip_prompt_leakage(content: str) -> str:
     """Strip LLM prompt leakage like '（注：本节严格遵循以下规范...）'."""
     content = _PROMPT_LEAKAGE_RE.sub("", content)

@@ -43,7 +43,11 @@ def _normalize_paragraph_word_budget(outline: dict, target_words: int) -> dict:
     weights: list[int] = []
     for paragraph in paragraphs:
         try:
-            value = int(paragraph.get("target_words") or 0) if isinstance(paragraph, dict) else 0
+            value = (
+                int(paragraph.get("target_words") or 0)
+                if isinstance(paragraph, dict)
+                else 0
+            )
         except (TypeError, ValueError):
             value = 0
         weights.append(value if value > 0 else 1)
@@ -59,7 +63,7 @@ def _normalize_paragraph_word_budget(outline: dict, target_words: int) -> dict:
         fractions.append((exact_extra - extra, idx))
 
     delta = target_words - sum(allocated)
-    for _, idx in sorted(fractions, reverse=True)[:max(0, delta)]:
+    for _, idx in sorted(fractions, reverse=True)[: max(0, delta)]:
         allocated[idx] += 1
 
     for paragraph, words in zip(paragraphs, allocated, strict=False):
@@ -135,7 +139,9 @@ def _build_cluster_context(
                 name = e.get("name", "") if isinstance(e, dict) else str(e)
                 if name:
                     entity_counts[name] = entity_counts.get(name, 0) + 1
-        top_entities = sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+        top_entities = sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)[
+            :8
+        ]
         entity_str = ", ".join(f"{name}({cnt})" for name, cnt in top_entities)
 
         # 代表性论文标题
@@ -153,7 +159,9 @@ def _build_cluster_context(
                 if claim:
                     card_id = card.get("id", "")
                     confidence = card.get("confidence", "")
-                    cluster_evidence.append(f"[{card_id}] {claim} (confidence={confidence})")
+                    cluster_evidence.append(
+                        f"[{card_id}] {claim} (confidence={confidence})"
+                    )
 
         line = f"{cluster_label}: {size} 篇论文"
         if sample_titles:
@@ -188,7 +196,11 @@ def _build_evidence_context(evidence_cards: list[dict]) -> str:
         if claim:
             parts.append(f"论断: {claim}")
         if evidence_span:
-            span_preview = evidence_span[:120] + "..." if len(evidence_span) > 120 else evidence_span
+            span_preview = (
+                evidence_span[:120] + "..."
+                if len(evidence_span) > 120
+                else evidence_span
+            )
             parts.append(f"证据: {span_preview}")
         if method:
             parts.append(f"方法: {method}")
@@ -223,7 +235,11 @@ def _build_kg_context(kg_entities: list[dict], kg_relations: list[dict]) -> str:
             target = r.get("target", "")
             rtype = r.get("relation_type", "")
             if source and target:
-                relation_lines.append(f"{source} --[{rtype}]--> {target}" if rtype else f"{source} --> {target}")
+                relation_lines.append(
+                    f"{source} --[{rtype}]--> {target}"
+                    if rtype
+                    else f"{source} --> {target}"
+                )
         if relation_lines:
             parts.append("关键关系:\n" + "\n".join(f"- {rl}" for rl in relation_lines))
 
@@ -312,7 +328,7 @@ def _try_repair_section_outline_json(content: str, target_words: int) -> dict:
         r'(?:\s*,\s*"key_papers"\s*:\s*\[([^\]]*)\])?'
         r'(?:\s*,\s*"key_evidence"\s*:\s*\[([^\]]*)\])?'
         r'(?:\s*,\s*"synthesis_instruction"\s*:\s*"([^"]*)")?'
-        r'\s*\}',
+        r"\s*\}",
         re.DOTALL,
     )
 
@@ -423,7 +439,9 @@ def _parse_response(raw_content: str, target_words: int) -> dict:
     if start != -1:
         return _try_repair_section_outline_json(content[start:], target_words)
 
-    raise ValueError(f"LLM returned invalid JSON for section outline: {raw_content[:200]}")
+    raise ValueError(
+        f"LLM returned invalid JSON for section outline: {raw_content[:200]}"
+    )
 
 
 # =============================================================================
@@ -541,7 +559,9 @@ async def plan_section_outline(
 
     # 为聚类附加论文详情
     papers_by_cluster: dict[object, list[dict]] = {}
-    key_clusters = section_plan.get("target_communities") or section_plan.get("key_clusters", [])
+    key_clusters = section_plan.get("target_communities") or section_plan.get(
+        "key_clusters", []
+    )
     for cluster in clusters:
         cid = cluster.get("id", -1)
         cluster_paper_ids = cluster.get("paper_ids", [])
@@ -555,12 +575,16 @@ async def plan_section_outline(
     related_clusters = []
     if key_clusters:
         key_cluster_values = {str(value) for value in key_clusters}
-        related_clusters = [c for c in clusters if str(c.get("id")) in key_cluster_values]
+        related_clusters = [
+            c for c in clusters if str(c.get("id")) in key_cluster_values
+        ]
     else:
         related_clusters = clusters
 
     # 构建上下文
-    cluster_context = _build_cluster_context(related_clusters, papers_by_cluster, evidence_cards)
+    cluster_context = _build_cluster_context(
+        related_clusters, papers_by_cluster, evidence_cards
+    )
     evidence_context = _build_evidence_context(evidence_cards)
     kg_context = _build_kg_context(kg_entities, kg_relations)
     prev_context = _build_prev_context(prev_outline)
@@ -570,7 +594,9 @@ async def plan_section_outline(
     core_question_hint = section_plan.get("core_question_hint", "")
     core_question_hint_section = ""
     if core_question_hint:
-        core_question_hint_section = f"核心问题提示（来自大纲生成阶段）: {core_question_hint}"
+        core_question_hint_section = (
+            f"核心问题提示（来自大纲生成阶段）: {core_question_hint}"
+        )
 
     # 构建前序/后序 section 上下文块
     prev_section_context_section = ""
@@ -613,14 +639,16 @@ async def plan_section_outline(
     agent = create_llm(temperature=0.3, max_tokens=4096)
 
     messages = [
-        SystemMessage(content=(
-            "你是一个学术综述的结构规划师。你的任务是为章节生成详细的段落级写作规划。"
-            "所有内容必须使用中文。严格返回 JSON 格式，不要输出任何额外文字。\n\n"
-            "段落-任务映射规则：每个 paragraph 必须包含 task_type 字段，表示该段落承担的唯一分析任务。"
-            "可用的 task_type 类型：context（背景）、gap（空白）、approach（方法）、"
-            "result（结果）、comparison（对比）、mechanism（机理）、implication（意义）、limitation（局限）。"
-            "每段只做一个任务，相邻段落 task_type 不能相同。"
-        )),
+        SystemMessage(
+            content=(
+                "你是一个学术综述的结构规划师。你的任务是为章节生成详细的段落级写作规划。"
+                "所有内容必须使用中文。严格返回 JSON 格式，不要输出任何额外文字。\n\n"
+                "段落-任务映射规则：每个 paragraph 必须包含 task_type 字段，表示该段落承担的唯一分析任务。"
+                "可用的 task_type 类型：context（背景）、gap（空白）、approach（方法）、"
+                "result（结果）、comparison（对比）、mechanism（机理）、implication（意义）、limitation（局限）。"
+                "每段只做一个任务，相邻段落 task_type 不能相同。"
+            )
+        ),
         HumanMessage(content=prompt),
     ]
 
@@ -635,8 +663,26 @@ async def plan_section_outline(
             return _fallback_outline(section_plan)
 
         # 确保 paragraph 字段完整
-        valid_task_types = {"context", "gap", "approach", "result", "comparison", "mechanism", "implication", "limitation"}
-        fallback_task_sequence = ["context", "gap", "approach", "result", "comparison", "mechanism", "implication", "limitation"]
+        valid_task_types = {
+            "context",
+            "gap",
+            "approach",
+            "result",
+            "comparison",
+            "mechanism",
+            "implication",
+            "limitation",
+        }
+        fallback_task_sequence = [
+            "context",
+            "gap",
+            "approach",
+            "result",
+            "comparison",
+            "mechanism",
+            "implication",
+            "limitation",
+        ]
         for i, para in enumerate(outline["paragraphs"]):
             para.setdefault("index", i + 1)
             para.setdefault("direction", "")
@@ -647,7 +693,9 @@ async def plan_section_outline(
             # 验证 task_type：缺失或无效时按位置分配
             tt = para.get("task_type", "")
             if tt not in valid_task_types:
-                para["task_type"] = fallback_task_sequence[i % len(fallback_task_sequence)]
+                para["task_type"] = fallback_task_sequence[
+                    i % len(fallback_task_sequence)
+                ]
 
         # 确保顶层字段完整
         outline.setdefault("core_question", "")

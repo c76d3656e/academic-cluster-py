@@ -66,15 +66,17 @@ def _analyze_community_gaps(
         elif entity_count < 2:
             gap_type = "sparse_kg_entities"
 
-        gap_reports.append({
-            "cluster_id": cluster.get("id"),
-            "status": "needs_refinement" if gap_type else "enough_evidence",
-            "gap_type": gap_type,
-            "paper_count": paper_count,
-            "evidence_card_count": len(cluster_evidence),
-            "avg_confidence": round(avg_confidence, 3),
-            "entity_count": entity_count,
-        })
+        gap_reports.append(
+            {
+                "cluster_id": cluster.get("id"),
+                "status": "needs_refinement" if gap_type else "enough_evidence",
+                "gap_type": gap_type,
+                "paper_count": paper_count,
+                "evidence_card_count": len(cluster_evidence),
+                "avg_confidence": round(avg_confidence, 3),
+                "entity_count": entity_count,
+            }
+        )
 
     return gap_reports
 
@@ -102,20 +104,27 @@ async def _refine_gaps_with_llm(
 
     judge_available = True
     user_prompt = "\n".join(
-        f'{r["cluster_id"]}: gap={r["gap_type"]}, papers={r["paper_count"]}, '
-        f'evidence={r["evidence_card_count"]}, entities={r["entity_count"]}'
+        f"{r['cluster_id']}: gap={r['gap_type']}, papers={r['paper_count']}, "
+        f"evidence={r['evidence_card_count']}, entities={r['entity_count']}"
         for r in gap_communities
     )
     try:
         llm = create_llm(temperature=0.0, max_tokens=1024)
         response = await asyncio.wait_for(
-            ainvoke_with_callbacks(llm, [
-                SystemMessage(content="Return JSON only. Confirm or soften literature-review gap decisions."),
-                HumanMessage(content=(
-                    f"Topic: {topic}\n\nCommunities:\n{user_prompt}\n\n"
-                    'Return {"decisions":[{"community_id":"...","status":"enough_evidence|needs_refinement","reason":"..."}]}'
-                )),
-            ]),
+            ainvoke_with_callbacks(
+                llm,
+                [
+                    SystemMessage(
+                        content="Return JSON only. Confirm or soften literature-review gap decisions."
+                    ),
+                    HumanMessage(
+                        content=(
+                            f"Topic: {topic}\n\nCommunities:\n{user_prompt}\n\n"
+                            'Return {"decisions":[{"community_id":"...","status":"enough_evidence|needs_refinement","reason":"..."}]}'
+                        )
+                    ),
+                ],
+            ),
             timeout=max(1, timeout_s),
         )
         content = response.content
@@ -127,8 +136,7 @@ async def _refine_gaps_with_llm(
         data = try_parse_json(content)
         if data and isinstance(data.get("decisions"), list):
             decision_map = {
-                str(d.get("community_id")): d.get("status")
-                for d in data["decisions"]
+                str(d.get("community_id")): d.get("status") for d in data["decisions"]
             }
             for report in gap_reports:
                 if decision_map.get(str(report["cluster_id"])) == "enough_evidence":
@@ -142,7 +150,9 @@ async def _refine_gaps_with_llm(
         )
     except Exception as e:
         judge_available = False
-        logger.warning("LLM gap judge failed, keeping deterministic decisions", error=str(e))
+        logger.warning(
+            "LLM gap judge failed, keeping deterministic decisions", error=str(e)
+        )
 
     return gap_reports, judge_available
 
@@ -178,8 +188,12 @@ async def gap_analysis_node(state: PipelineState) -> dict:
         papers = await db.get_papers_by_ids(all_paper_ids)
 
         # 复用 community_detection 的 gap 分析逻辑
-        gap_reports = _analyze_community_gaps(clusters, evidence_cards, kg_entities, papers)
-        timeout_s = _int_config(state.config or {}, "gap_analysis_timeout_s", DEFAULT_GAP_ANALYSIS_TIMEOUT_S)
+        gap_reports = _analyze_community_gaps(
+            clusters, evidence_cards, kg_entities, papers
+        )
+        timeout_s = _int_config(
+            state.config or {}, "gap_analysis_timeout_s", DEFAULT_GAP_ANALYSIS_TIMEOUT_S
+        )
         gap_reports, gap_judge_available = await _refine_gaps_with_llm(
             state.query,
             gap_reports,
@@ -233,16 +247,23 @@ async def gap_analysis_node(state: PipelineState) -> dict:
             "status": "gaps_analyzed",
         }
         if tracker:
-            await tracker.end_node("gap_analysis", "succeeded", output_summary={
-                "gaps": len(needs_refinement),
-                "needs_refinement": needs_refinement_flag,
-            })
+            await tracker.end_node(
+                "gap_analysis",
+                "succeeded",
+                output_summary={
+                    "gaps": len(needs_refinement),
+                    "needs_refinement": needs_refinement_flag,
+                },
+            )
         return result
 
     except Exception as e:
         if tracker:
-            await tracker.end_node("gap_analysis", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "gap_analysis",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         logger.error("Gap analysis failed", error=str(e))
         raise

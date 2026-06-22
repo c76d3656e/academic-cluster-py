@@ -169,9 +169,7 @@ def detect_paper_stacking(text: str) -> list[str]:
         # 检测正则模式
         for pattern in _PAPER_STACKING_PATTERNS:
             if pattern.search(para):
-                warnings.append(
-                    f"段落 {i}: 检测到逐篇罗列模式，建议改为综合对比或归纳"
-                )
+                warnings.append(f"段落 {i}: 检测到逐篇罗列模式，建议改为综合对比或归纳")
                 break
 
     return warnings
@@ -201,6 +199,7 @@ async def _ainvoke_with_retry(
 # Agent 创建
 # =============================================================================
 
+
 def create_writing_agent(
     model: str | None = None,
     temperature: float = 0.7,
@@ -226,6 +225,7 @@ def create_writing_agent(
 # =============================================================================
 # 写作函数
 # =============================================================================
+
 
 async def generate_outline(
     topic: str,
@@ -278,13 +278,19 @@ async def generate_outline(
         if entity_str:
             line += f"; entities: {entity_str}"
         clusters_context_parts.append(line)
-    clusters_context = "\n".join(clusters_context_parts) if clusters_context_parts else "暂无聚类数据"
+    clusters_context = (
+        "\n".join(clusters_context_parts) if clusters_context_parts else "暂无聚类数据"
+    )
 
     # 构建层次分类指导段落
     layer_guidance_block = ""
     if cluster_layers:
         # 按层分组
-        layer_groups: dict[str, list[int]] = {"foundation": [], "development": [], "frontier": []}
+        layer_groups: dict[str, list[int]] = {
+            "foundation": [],
+            "development": [],
+            "frontier": [],
+        }
         for idx, c in enumerate(clusters):
             cid = c.get("id", str(idx))
             layer = cluster_layers.get(cid, "development")
@@ -317,7 +323,9 @@ async def generate_outline(
             name = e.get("name", "")
             if name:
                 entity_counts[name] = entity_counts.get(name, 0) + 1
-        sorted_entities = sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)[:30]
+        sorted_entities = sorted(
+            entity_counts.items(), key=lambda x: x[1], reverse=True
+        )[:30]
         for name, count in sorted_entities:
             kg_parts.append(f"{name}: {count} papers")
     kg_context = "\n".join(kg_parts) if kg_parts else "暂无知识图谱数据"
@@ -403,7 +411,9 @@ async def generate_outline(
     # 构建社区摘要段落（如果模板不包含占位符则追加到末尾）
     community_block = ""
     if community_context:
-        community_block = f"\n\n## 社区摘要（各聚类关键发现与代表性方法）\n{community_context}\n"
+        community_block = (
+            f"\n\n## 社区摘要（各聚类关键发现与代表性方法）\n{community_context}\n"
+        )
 
     # 如果模板包含 {community_summaries} 占位符则替换，否则在 kg_summary 后追加
     if "{community_summaries}" in outline_prompt_template:
@@ -434,16 +444,18 @@ async def generate_outline(
         )
 
     messages = [
-        SystemMessage(content=(
-            "你是一位精通学术写作的综述专家。请基于提供的聚类和知识图谱数据生成大纲。所有标题和描述必须使用中文。\n\n"
-            "关键原则：综述是综合分析，不是文献堆叠。每个章节的 description 必须体现主题式的分析逻辑，"
-            "而非逐篇介绍论文。大纲应为后续写作奠定'综合优先于列举'的基调——"
-            "每个 section 的核心论点应围绕机制/方法/结论的对比或归纳展开，而非罗列各论文的发现。\n\n"
-            "层次结构指导：聚类已按研究演进阶段分为 Foundation（基础层）、Development（发展层）、Frontier（前沿层）三层。"
-            "请据此安排章节顺序：Foundation 层聚类对应综述前部（研究背景、经典方法），"
-            "Development 层聚类对应综述中部（技术演进、方法对比），"
-            "Frontier 层聚类对应综述后部（前沿方向、未来展望）。"
-        )),
+        SystemMessage(
+            content=(
+                "你是一位精通学术写作的综述专家。请基于提供的聚类和知识图谱数据生成大纲。所有标题和描述必须使用中文。\n\n"
+                "关键原则：综述是综合分析，不是文献堆叠。每个章节的 description 必须体现主题式的分析逻辑，"
+                "而非逐篇介绍论文。大纲应为后续写作奠定'综合优先于列举'的基调——"
+                "每个 section 的核心论点应围绕机制/方法/结论的对比或归纳展开，而非罗列各论文的发现。\n\n"
+                "层次结构指导：聚类已按研究演进阶段分为 Foundation（基础层）、Development（发展层）、Frontier（前沿层）三层。"
+                "请据此安排章节顺序：Foundation 层聚类对应综述前部（研究背景、经典方法），"
+                "Development 层聚类对应综述中部（技术演进、方法对比），"
+                "Frontier 层聚类对应综述后部（前沿方向、未来展望）。"
+            )
+        ),
         HumanMessage(content=prompt),
     ]
 
@@ -474,13 +486,17 @@ async def generate_outline(
             end = content.rfind("}")
             if start != -1 and end > start:
                 try:
-                    outline = json.loads(content[start:end + 1])
+                    outline = json.loads(content[start : end + 1])
                 except json.JSONDecodeError:
                     # JSON 被截断：尝试修复不完整的 JSON
                     outline = _try_repair_truncated_json(content[start:])
             else:
-                logger.error("Failed to parse outline response", response=raw_content[:500])
-                raise ValueError(f"LLM returned invalid JSON for outline: {raw_content[:200]}") from None
+                logger.error(
+                    "Failed to parse outline response", response=raw_content[:500]
+                )
+                raise ValueError(
+                    f"LLM returned invalid JSON for outline: {raw_content[:200]}"
+                ) from None
 
     # 验证大纲：至少 3 个章节，否则使用 fallback
     sections = outline.get("sections", [])
@@ -490,6 +506,7 @@ async def generate_outline(
             section_count=len(sections),
         )
         from ..graphs.nodes.outline_generation import _default_outline
+
         outline = _default_outline(topic)
 
     return outline
@@ -516,7 +533,7 @@ def _try_repair_truncated_json(content: str) -> dict:
         r'(?:\s*,\s*"target_words"\s*:\s*(\d+))?'
         r'(?:\s*,\s*"key_clusters"\s*:\s*\[([^\]]*)\])?'
         r'(?:\s*,\s*"key_entities"\s*:\s*\[([^\]]*)\])?'
-        r'\s*\}',
+        r"\s*\}",
         re.DOTALL,
     )
 
@@ -535,7 +552,9 @@ def _try_repair_truncated_json(content: str) -> dict:
             section["target_words"] = int(m.group(4))
         if m.group(5):
             try:
-                section["key_clusters"] = [int(x.strip()) for x in m.group(5).split(",") if x.strip()]
+                section["key_clusters"] = [
+                    int(x.strip()) for x in m.group(5).split(",") if x.strip()
+                ]
             except ValueError:
                 section["key_clusters"] = []
         if m.group(6):
@@ -684,7 +703,10 @@ async def write_section(
 
     # Load prompt template and system prompt
     section_prompt_template = get_write_section_prompt()
-    system_prompt = get_write_system_prompt() or "You write grounded Chinese academic literature reviews using only supplied evidence."
+    system_prompt = (
+        get_write_system_prompt()
+        or "You write grounded Chinese academic literature reviews using only supplied evidence."
+    )
 
     # Single format() call — structure and headers live in the .md template
     prompt = section_prompt_template.format(
@@ -753,7 +775,11 @@ def _as_single_unit(text: str) -> str:
         line = raw_line.strip()
         if not line:
             continue
-        if line.startswith("#") or line.startswith("- ") or re.match(r"^\d+[.)]\s+", line):
+        if (
+            line.startswith("#")
+            or line.startswith("- ")
+            or re.match(r"^\d+[.)]\s+", line)
+        ):
             continue
         if line.lower().startswith(("references", "bibliography")):
             break
@@ -767,13 +793,16 @@ def _unit_outline(section_outline: dict, paragraph: dict) -> dict:
     return outline
 
 
-def _next_unit_hint(paragraphs: list[dict], index: int, next_outline: dict | None) -> dict | None:
+def _next_unit_hint(
+    paragraphs: list[dict], index: int, next_outline: dict | None
+) -> dict | None:
     if index + 1 < len(paragraphs):
         para = paragraphs[index + 1]
         return {
             "title": f"next paragraph {para.get('index', index + 2)}",
             "description": "; ".join(
-                part for part in [
+                part
+                for part in [
                     f"task_type={para.get('task_type', '')}",
                     str(para.get("direction", "")),
                     str(para.get("synthesis_instruction", "")),
@@ -816,27 +845,29 @@ Rules:
 - Do not merge with previous or next paragraph.
 
 Paragraph plan:
-task_type: {para_plan.get('task_type', '')}
-direction: {para_plan.get('direction', '')}
-synthesis_instruction: {para_plan.get('synthesis_instruction', '')}
-target_words: {para_plan.get('target_words', '')}
+task_type: {para_plan.get("task_type", "")}
+direction: {para_plan.get("direction", "")}
+synthesis_instruction: {para_plan.get("synthesis_instruction", "")}
+target_words: {para_plan.get("target_words", "")}
 
 Usable references:
 {references}
 
 PREVIOUS paragraph:
-{refined[i - 1] if i > 0 else ''}
+{refined[i - 1] if i > 0 else ""}
 
 CURRENT paragraph:
 {refined[i]}
 
 NEXT paragraph:
-{refined[i + 1] if i + 1 < len(refined) else ''}
+{refined[i + 1] if i + 1 < len(refined) else ""}
 """
         response = await _ainvoke_with_retry(
             agent,
             [
-                SystemMessage(content="You are a strict academic prose editor. Preserve evidence grounding and numeric citations."),
+                SystemMessage(
+                    content="You are a strict academic prose editor. Preserve evidence grounding and numeric citations."
+                ),
                 HumanMessage(content=prompt),
             ],
             max_retries=2,
@@ -908,10 +939,14 @@ async def write_section_units(
         unit_plan = dict(section_plan)
         unit_plan["target_words"] = paragraph.get(
             "target_words",
-            max(250, int(section_plan.get("target_words", 1500) / max(len(paragraphs), 1))),
+            max(
+                250,
+                int(section_plan.get("target_words", 1500) / max(len(paragraphs), 1)),
+            ),
         )
         unit_plan["description"] = " ".join(
-            part for part in [
+            part
+            for part in [
                 str(section_plan.get("description", "")),
                 f"Current writing unit task_type={paragraph.get('task_type', '')}.",
                 str(paragraph.get("direction", "")),
@@ -922,7 +957,10 @@ async def write_section_units(
 
         unit_prev = prev_summary
         if units:
-            unit_prev = f"{prev_summary}\n\nAlready written paragraphs in this section (DO NOT repeat these):\n" + "\n\n".join(units)
+            unit_prev = (
+                f"{prev_summary}\n\nAlready written paragraphs in this section (DO NOT repeat these):\n"
+                + "\n\n".join(units)
+            )
 
         try:
             raw_unit = await write_section(
@@ -946,14 +984,18 @@ async def write_section_units(
                 paragraph_index=idx + 1,
                 error=str(e),
             )
-            raw_unit = _fallback_section_text(unit_plan, compact_references, compact_evidence_cards)
+            raw_unit = _fallback_section_text(
+                unit_plan, compact_references, compact_evidence_cards
+            )
         unit_text = _as_single_unit(_coerce_llm_text(raw_unit))
         if not unit_text:
             raise ValueError(f"Paragraph unit {idx + 1} produced empty content")
         units.append(unit_text)
 
     if _should_refine_section_units():
-        units = await refine_section_units_local_coherence(units, section_outline or {}, references)
+        units = await refine_section_units_local_coherence(
+            units, section_outline or {}, references
+        )
     else:
         logger.info(
             "Skipped optional section unit coherence refinement",
@@ -1000,9 +1042,13 @@ async def revise_section(
     ]
 
     try:
-        response = await _ainvoke_with_retry(agent, messages, timeout_s=DEFAULT_WRITING_TIMEOUT_S)
+        response = await _ainvoke_with_retry(
+            agent, messages, timeout_s=DEFAULT_WRITING_TIMEOUT_S
+        )
     except Exception as e:
-        logger.error("Legacy section revision failed, returning original content", error=str(e))
+        logger.error(
+            "Legacy section revision failed, returning original content", error=str(e)
+        )
         return section_content
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
@@ -1019,6 +1065,7 @@ async def revise_section(
 # 组装综述（对齐 Rust 版 assemble_review）
 # =============================================================================
 
+
 def render_section_community_context(
     section_plan: dict,
     clusters: list[dict],
@@ -1032,7 +1079,9 @@ def render_section_community_context(
     为每个章节的关键聚类生成简要摘要，帮助 LLM 理解社区结构。
     包含：论文数、代表性论文、top entities、关键发现。
     """
-    key_clusters = section_plan.get("target_communities") or section_plan.get("key_clusters", [])
+    key_clusters = section_plan.get("target_communities") or section_plan.get(
+        "key_clusters", []
+    )
     if not key_clusters:
         return ""
 
@@ -1068,7 +1117,9 @@ def render_section_community_context(
         for pid in cluster_papers:
             for ename in entity_by_paper.get(pid, []):
                 entity_counts[ename] = entity_counts.get(ename, 0) + 1
-        top_entities = sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+        top_entities = sorted(entity_counts.items(), key=lambda x: x[1], reverse=True)[
+            :8
+        ]
         entity_str = ", ".join(f"{name}({cnt})" for name, cnt in top_entities)
 
         # 提取该社区的 evidence cards

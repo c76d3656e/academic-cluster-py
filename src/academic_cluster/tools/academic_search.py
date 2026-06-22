@@ -47,13 +47,14 @@ async def _get_rate_limits() -> dict[str, float]:
 
     pubmed_api_key = await get_effective_source_value("pubmed_api_key")
     _RATE_LIMITS = {
-        "arxiv": 3.0,                                           # 1 req / 3s（无认证）
-        "semantic_scholar": 1.0,                                 # 1 req / s / key
-        "pubmed": 0.1 if pubmed_api_key else 0.34,               # 有 key: 10 rps, 无 key: 3 rps
-        "openalex": 0.1,                                         # polite pool
-        "crossref": 0.2,                                         # 5 req / s（polite pool）
+        "arxiv": 3.0,  # 1 req / 3s（无认证）
+        "semantic_scholar": 1.0,  # 1 req / s / key
+        "pubmed": 0.1 if pubmed_api_key else 0.34,  # 有 key: 10 rps, 无 key: 3 rps
+        "openalex": 0.1,  # polite pool
+        "crossref": 0.2,  # 5 req / s（polite pool）
     }
     return _RATE_LIMITS
+
 
 # 上次请求时间戳（按源）
 _last_request_time: dict[str, float] = {}
@@ -84,8 +85,10 @@ async def _enforce_rate_limit(source: str) -> None:
 # Semantic Scholar 多 Key 池
 # =============================================================================
 
+
 class _KeySlot:
     """单个 API key 的限流状态"""
+
     __slots__ = ("key", "last_used", "lock")
 
     def __init__(self, key: str):
@@ -221,6 +224,7 @@ async def _request_with_retry(
 # Semantic Scholar
 # =============================================================================
 
+
 async def search_semantic_scholar(
     query: str,
     limit: int = 100,
@@ -256,18 +260,30 @@ async def search_semantic_scholar(
                 await _enforce_rate_limit("semantic_scholar")
                 headers = {"x-api-key": api_key}
                 response = await _request_with_retry(
-                    client, "GET", url, "semantic_scholar",
-                    params=params, headers=headers, timeout=30,
+                    client,
+                    "GET",
+                    url,
+                    "semantic_scholar",
+                    params=params,
+                    headers=headers,
+                    timeout=30,
                 )
             else:
                 # 无 key 模式：使用全局单 key 限流
                 headers = {}
-                semantic_scholar_api_key = await get_effective_source_value("semantic_scholar_api_key")
+                semantic_scholar_api_key = await get_effective_source_value(
+                    "semantic_scholar_api_key"
+                )
                 if semantic_scholar_api_key:
                     headers["x-api-key"] = semantic_scholar_api_key
                 response = await _request_with_retry(
-                    client, "GET", url, "semantic_scholar",
-                    params=params, headers=headers, timeout=30,
+                    client,
+                    "GET",
+                    url,
+                    "semantic_scholar",
+                    params=params,
+                    headers=headers,
+                    timeout=30,
                 )
 
             response.raise_for_status()
@@ -282,24 +298,26 @@ async def search_semantic_scholar(
                 # 优先使用 DOI 作为 external_id
                 external_id = doi if doi and is_valid_doi(doi) else item.get("paperId")
 
-                papers.append({
-                    "external_id": external_id,
-                    "source": "semantic_scholar",
-                    "title": item.get("title"),
-                    "abstract": item.get("abstract"),
-                    "authors": [
-                        {"name": a.get("name"), "id": a.get("authorId")}
-                        for a in item.get("authors", [])
-                    ],
-                    "publication_date": item.get("publicationDate"),
-                    "year": item.get("year"),
-                    "journal": item.get("venue"),
-                    "citation_count": item.get("citationCount", 0),
-                    "reference_count": item.get("referenceCount", 0),
-                    "fields_of_study": item.get("fieldsOfStudy", []),
-                    "doi": doi,
-                    "url": f"https://www.semanticscholar.org/paper/{item.get('paperId')}",
-                })
+                papers.append(
+                    {
+                        "external_id": external_id,
+                        "source": "semantic_scholar",
+                        "title": item.get("title"),
+                        "abstract": item.get("abstract"),
+                        "authors": [
+                            {"name": a.get("name"), "id": a.get("authorId")}
+                            for a in item.get("authors", [])
+                        ],
+                        "publication_date": item.get("publicationDate"),
+                        "year": item.get("year"),
+                        "journal": item.get("venue"),
+                        "citation_count": item.get("citationCount", 0),
+                        "reference_count": item.get("referenceCount", 0),
+                        "fields_of_study": item.get("fieldsOfStudy", []),
+                        "doi": doi,
+                        "url": f"https://www.semanticscholar.org/paper/{item.get('paperId')}",
+                    }
+                )
 
             logger.info(
                 "Semantic Scholar search completed",
@@ -333,6 +351,7 @@ async def search_semantic_scholar(
 # =============================================================================
 # PubMed
 # =============================================================================
+
 
 async def search_pubmed(
     query: str,
@@ -371,8 +390,12 @@ async def search_pubmed(
     async with httpx.AsyncClient() as client:
         try:
             search_response = await _request_with_retry(
-                client, "GET", search_url, "pubmed",
-                params=search_params, timeout=30,
+                client,
+                "GET",
+                search_url,
+                "pubmed",
+                params=search_params,
+                timeout=30,
             )
             search_response.raise_for_status()
             search_data = search_response.json()
@@ -396,8 +419,12 @@ async def search_pubmed(
                 fetch_params["api_key"] = api_key
 
             fetch_response = await _request_with_retry(
-                client, "GET", fetch_url, "pubmed",
-                params=fetch_params, timeout=30,
+                client,
+                "GET",
+                fetch_url,
+                "pubmed",
+                params=fetch_params,
+                timeout=30,
             )
             fetch_response.raise_for_status()
             fetch_data = fetch_response.json()
@@ -410,8 +437,7 @@ async def search_pubmed(
 
                 # 提取作者
                 authors = [
-                    {"name": a.get("name", "")}
-                    for a in article.get("authors", [])
+                    {"name": a.get("name", "")} for a in article.get("authors", [])
                 ]
 
                 # 提取并标准化 DOI
@@ -421,19 +447,23 @@ async def search_pubmed(
                 # 优先使用 DOI 作为 external_id
                 external_id = doi if doi and is_valid_doi(doi) else f"PMID:{pmid}"
 
-                papers.append({
-                    "external_id": external_id,
-                    "source": "pubmed",
-                    "title": article.get("title", ""),
-                    "abstract": "",  # esummary 不返回摘要，需要额外调用 efetch
-                    "authors": authors,
-                    "publication_date": article.get("pubdate"),
-                    "year": article.get("pubdate", "")[:4],
-                    "journal": article.get("fulljournalname", article.get("source", "")),
-                    "doi": doi,
-                    "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
-                    "citation_count": 0,  # PubMed 不提供引用数
-                })
+                papers.append(
+                    {
+                        "external_id": external_id,
+                        "source": "pubmed",
+                        "title": article.get("title", ""),
+                        "abstract": "",  # esummary 不返回摘要，需要额外调用 efetch
+                        "authors": authors,
+                        "publication_date": article.get("pubdate"),
+                        "year": article.get("pubdate", "")[:4],
+                        "journal": article.get(
+                            "fulljournalname", article.get("source", "")
+                        ),
+                        "doi": doi,
+                        "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                        "citation_count": 0,  # PubMed 不提供引用数
+                    }
+                )
 
             logger.info(
                 "PubMed search completed",
@@ -469,6 +499,7 @@ async def search_pubmed(
 # arXiv
 # =============================================================================
 
+
 async def search_arxiv(
     query: str,
     limit: int = 100,
@@ -498,8 +529,12 @@ async def search_arxiv(
     async with httpx.AsyncClient() as client:
         try:
             response = await _request_with_retry(
-                client, "GET", url, "arxiv",
-                params=params, timeout=30,
+                client,
+                "GET",
+                url,
+                "arxiv",
+                params=params,
+                timeout=30,
             )
             response.raise_for_status()
 
@@ -526,7 +561,9 @@ async def search_arxiv(
 
                 # 提取 arXiv ID
                 entry_id = entry.find("atom:id", ns)
-                arxiv_id = entry_id.text.split("/abs/")[-1] if entry_id is not None else ""
+                arxiv_id = (
+                    entry_id.text.split("/abs/")[-1] if entry_id is not None else ""
+                )
 
                 # 提取链接
                 links = entry.findall("atom:link", ns)
@@ -544,19 +581,27 @@ async def search_arxiv(
                 # 优先使用 DOI 作为 external_id
                 external_id = doi if doi and is_valid_doi(doi) else f"arXiv:{arxiv_id}"
 
-                papers.append({
-                    "external_id": external_id,
-                    "source": "arxiv",
-                    "title": title.text.strip().replace("\n", " ") if title is not None else "",
-                    "abstract": summary.text.strip().replace("\n", " ") if summary is not None else "",
-                    "authors": authors,
-                    "publication_date": published.text if published is not None else "",
-                    "year": published.text[:4] if published is not None else "",
-                    "url": entry_id.text if entry_id is not None else "",
-                    "pdf_url": pdf_url,
-                    "doi": doi,
-                    "citation_count": 0,  # arXiv API 不提供引用数
-                })
+                papers.append(
+                    {
+                        "external_id": external_id,
+                        "source": "arxiv",
+                        "title": title.text.strip().replace("\n", " ")
+                        if title is not None
+                        else "",
+                        "abstract": summary.text.strip().replace("\n", " ")
+                        if summary is not None
+                        else "",
+                        "authors": authors,
+                        "publication_date": published.text
+                        if published is not None
+                        else "",
+                        "year": published.text[:4] if published is not None else "",
+                        "url": entry_id.text if entry_id is not None else "",
+                        "pdf_url": pdf_url,
+                        "doi": doi,
+                        "citation_count": 0,  # arXiv API 不提供引用数
+                    }
+                )
 
             logger.info(
                 "arXiv search completed",
@@ -581,6 +626,7 @@ async def search_arxiv(
 # =============================================================================
 # OpenAlex
 # =============================================================================
+
 
 def _get_openalex_journal(work: dict) -> str | None:
     """从 OpenAlex work 中安全提取期刊名称"""
@@ -609,7 +655,8 @@ async def search_openalex(
     params = {
         "search": query,
         "per_page": min(limit, 200),
-        "mailto": await get_effective_source_value("pubmed_email") or "user@example.com",
+        "mailto": await get_effective_source_value("pubmed_email")
+        or "user@example.com",
     }
 
     if from_year:
@@ -618,8 +665,12 @@ async def search_openalex(
     async with httpx.AsyncClient() as client:
         try:
             response = await _request_with_retry(
-                client, "GET", url, "openalex",
-                params=params, timeout=30,
+                client,
+                "GET",
+                url,
+                "openalex",
+                params=params,
+                timeout=30,
             )
             response.raise_for_status()
             data = response.json()
@@ -640,23 +691,24 @@ async def search_openalex(
                 openalex_id = work.get("id", "").split("/")[-1]
                 external_id = doi if doi and is_valid_doi(doi) else openalex_id
 
-                papers.append({
-                    "external_id": external_id,
-                    "source": "openalex",
-                    "title": work.get("title", ""),
-                    "abstract": "",  # OpenAlex 需要单独获取摘要
-                    "authors": authors,
-                    "publication_date": work.get("publication_date"),
-                    "year": work.get("publication_year"),
-                    "journal": _get_openalex_journal(work),
-                    "doi": doi,
-                    "url": work.get("id"),
-                    "citation_count": work.get("cited_by_count", 0),
-                    "fields_of_study": [
-                        t.get("display_name")
-                        for t in work.get("topics", [])
-                    ],
-                })
+                papers.append(
+                    {
+                        "external_id": external_id,
+                        "source": "openalex",
+                        "title": work.get("title", ""),
+                        "abstract": "",  # OpenAlex 需要单独获取摘要
+                        "authors": authors,
+                        "publication_date": work.get("publication_date"),
+                        "year": work.get("publication_year"),
+                        "journal": _get_openalex_journal(work),
+                        "doi": doi,
+                        "url": work.get("id"),
+                        "citation_count": work.get("cited_by_count", 0),
+                        "fields_of_study": [
+                            t.get("display_name") for t in work.get("topics", [])
+                        ],
+                    }
+                )
 
             logger.info(
                 "OpenAlex search completed",
@@ -692,6 +744,7 @@ async def search_openalex(
 # Crossref
 # =============================================================================
 
+
 async def search_crossref(
     query: str,
     limit: int = 200,
@@ -725,8 +778,13 @@ async def search_crossref(
     async with httpx.AsyncClient() as client:
         try:
             response = await _request_with_retry(
-                client, "GET", url, "crossref",
-                params=params, headers=headers, timeout=30,
+                client,
+                "GET",
+                url,
+                "crossref",
+                params=params,
+                headers=headers,
+                timeout=30,
             )
             response.raise_for_status()
             data = response.json()
@@ -768,24 +826,31 @@ async def search_crossref(
                 # Crossref 摘要可能包含 JATS XML 标签，简单清理
                 if abstract:
                     import re
-                    abstract = re.sub(r'<[^>]+>', '', abstract).strip()
 
-                external_id = doi if doi and is_valid_doi(doi) else raw_doi or f"crossref:{raw_doi}"
+                    abstract = re.sub(r"<[^>]+>", "", abstract).strip()
 
-                papers.append({
-                    "external_id": external_id,
-                    "source": "crossref",
-                    "title": title,
-                    "abstract": abstract,
-                    "authors": authors,
-                    "publication_date": f"{year}" if year else None,
-                    "year": year,
-                    "journal": journal,
-                    "doi": doi,
-                    "url": f"https://doi.org/{doi}" if doi else "",
-                    "citation_count": item.get("is-referenced-by-count", 0),
-                    "fields_of_study": item.get("subject", []),
-                })
+                external_id = (
+                    doi
+                    if doi and is_valid_doi(doi)
+                    else raw_doi or f"crossref:{raw_doi}"
+                )
+
+                papers.append(
+                    {
+                        "external_id": external_id,
+                        "source": "crossref",
+                        "title": title,
+                        "abstract": abstract,
+                        "authors": authors,
+                        "publication_date": f"{year}" if year else None,
+                        "year": year,
+                        "journal": journal,
+                        "doi": doi,
+                        "url": f"https://doi.org/{doi}" if doi else "",
+                        "citation_count": item.get("is-referenced-by-count", 0),
+                        "fields_of_study": item.get("subject", []),
+                    }
+                )
 
             logger.info(
                 "Crossref search completed",
@@ -818,6 +883,7 @@ async def search_crossref(
 # =============================================================================
 # 统一搜索接口
 # =============================================================================
+
 
 async def search_all_sources(
     query: str,
@@ -856,7 +922,11 @@ async def search_all_sources(
     active_sources = []
     for source in sources:
         if source in search_functions:
-            limit = per_source_limits.get(source, limit_per_source) if per_source_limits else limit_per_source
+            limit = (
+                per_source_limits.get(source, limit_per_source)
+                if per_source_limits
+                else limit_per_source
+            )
             tasks.append(search_functions[source](query, limit=limit))
             active_sources.append(source)
 

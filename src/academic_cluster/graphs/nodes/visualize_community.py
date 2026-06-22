@@ -36,6 +36,7 @@ async def visualize_community_node(state: PipelineState) -> dict:
 
         # 获取混合图（简化版本，只包含核心论文间的边）
         import networkx as nx
+
         hybrid_graph = nx.Graph()
         for paper in papers:
             hybrid_graph.add_node(paper.get("id"))

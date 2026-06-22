@@ -110,7 +110,9 @@ async def generate_abstract_node(state: PipelineState) -> dict:
         response = await ainvoke_with_callbacks(
             llm,
             [
-                SystemMessage(content="Write only a citation-free Chinese abstract. No markdown, no citations, no references."),
+                SystemMessage(
+                    content="Write only a citation-free Chinese abstract. No markdown, no citations, no references."
+                ),
                 HumanMessage(content=prompt),
             ],
             timeout=240.0,
@@ -127,10 +129,13 @@ async def generate_abstract_node(state: PipelineState) -> dict:
 
     db = get_database()
     try:
-        final_artifact = await db.get_pipeline_checkpoint(state.project_id, "final_review_artifact")
+        final_artifact = await db.get_pipeline_checkpoint(
+            state.project_id, "final_review_artifact"
+        )
         snapshot = final_artifact.get("state_snapshot") if final_artifact else {}
         if isinstance(snapshot, str):
             import json as _json
+
             try:
                 snapshot = _json.loads(snapshot)
             except (_json.JSONDecodeError, TypeError):
@@ -138,23 +143,30 @@ async def generate_abstract_node(state: PipelineState) -> dict:
         if not isinstance(snapshot, dict):
             snapshot = {}
         snapshot["abstract"] = abstract
-        await db.save_pipeline_checkpoint({
-            "project_id": state.project_id,
-            "node_name": "final_review_artifact",
-            "state_snapshot": snapshot,
-            "status": "completed",
-        })
+        await db.save_pipeline_checkpoint(
+            {
+                "project_id": state.project_id,
+                "node_name": "final_review_artifact",
+                "state_snapshot": snapshot,
+                "status": "completed",
+            }
+        )
     except Exception as e:
-        logger.warning("Failed to persist abstract into final artifact checkpoint", error=str(e))
+        logger.warning(
+            "Failed to persist abstract into final artifact checkpoint", error=str(e)
+        )
 
     logger.info("Abstract generation completed", chars=len(abstract))
     if tracker:
-        await tracker.end_node("abstract_generation", "succeeded", output_summary={
-            "abstract_chars": len(abstract),
-        })
+        await tracker.end_node(
+            "abstract_generation",
+            "succeeded",
+            output_summary={
+                "abstract_chars": len(abstract),
+            },
+        )
 
     return {
         "abstract": abstract,
         "status": "abstract_generated",
     }
-

@@ -19,6 +19,7 @@ def _load_prompt(name: str) -> str:
 
 # === 搜索相关 ===
 
+
 def get_parse_topic_prompt() -> str:
     """获取主题解析和搜索 query 生成提示"""
     return _load_prompt("parse_topic.md")
@@ -50,6 +51,7 @@ def get_paper_filter_prompt() -> str:
 
 
 # === 写作相关 ===
+
 
 def get_generate_outline_prompt() -> str:
     """获取大纲生成提示"""

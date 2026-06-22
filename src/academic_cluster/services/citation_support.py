@@ -124,10 +124,12 @@ def audit_citation_support(
             # Parse numbers using shared utility
             numbers = parse_citation_numbers(inner)
             for num in numbers:
-                citation_mentions.append({
-                    "reference_number": num,
-                    "byte_offset": match.start(),
-                })
+                citation_mentions.append(
+                    {
+                        "reference_number": num,
+                        "byte_offset": match.start(),
+                    }
+                )
 
     details: list[dict] = []
     supported = 0
@@ -149,12 +151,14 @@ def audit_citation_support(
 
         if card is None:
             # Missing evidence card
-            details.append({
-                "reference_number": ref_num,
-                "status": "unsupported",
-                "reason": "missing_evidence_card",
-                "support_score_bp": 0,
-            })
+            details.append(
+                {
+                    "reference_number": ref_num,
+                    "status": "unsupported",
+                    "reason": "missing_evidence_card",
+                    "support_score_bp": 0,
+                }
+            )
             unsupported += 1
             continue
 
@@ -187,14 +191,16 @@ def audit_citation_support(
             status = "unsupported"
             unsupported += 1
 
-        details.append({
-            "reference_number": ref_num,
-            "status": status,
-            "lexical_overlap_bp": round(overlap_bp),
-            "support_score_bp": round(support_bp),
-            "confidence": confidence,
-            "sentence_preview": sentence[:100],
-        })
+        details.append(
+            {
+                "reference_number": ref_num,
+                "status": status,
+                "lexical_overlap_bp": round(overlap_bp),
+                "support_score_bp": round(support_bp),
+                "confidence": confidence,
+                "sentence_preview": sentence[:100],
+            }
+        )
 
     total = len(citation_mentions)
     return {

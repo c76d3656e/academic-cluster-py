@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class EvidenceCard(BaseModel):
     """证据卡片"""
+
     id: str
     paper_id: str
     title: str
@@ -23,6 +24,7 @@ class EvidenceCard(BaseModel):
 
 class GapAnalysis(BaseModel):
     """社区差距分析"""
+
     cluster_id: str
     missing_evidence: list[str] = Field(default_factory=list)
     suggested_queries: list[str] = Field(default_factory=list)
@@ -32,6 +34,7 @@ class GapAnalysis(BaseModel):
 
 class SectionPlan(BaseModel):
     """章节计划"""
+
     id: str
     section_number: int
     title: str
@@ -43,17 +46,21 @@ class SectionPlan(BaseModel):
 
 class CitationPlan(BaseModel):
     """引用计划"""
+
     id: str
     section_id: str
     paper_id: str
     citation_text: str
     citation_style: str = "apa"
     relevance_score: float = 0.0
-    location_in_section: str | None = None  # 'introduction', 'methodology', 'results', 'discussion'
+    location_in_section: str | None = (
+        None  # 'introduction', 'methodology', 'results', 'discussion'
+    )
 
 
 class WrittenSection(BaseModel):
     """已写章节"""
+
     id: str
     section_plan_id: str
     content: str
@@ -67,6 +74,7 @@ class WrittenSection(BaseModel):
 
 class OutlineSection(BaseModel):
     """大纲章节"""
+
     id: str
     number: int
     title: str
@@ -77,6 +85,7 @@ class OutlineSection(BaseModel):
 
 class Outline(BaseModel):
     """综述大纲"""
+
     id: str
     title: str
     abstract: str | None = None
@@ -89,6 +98,7 @@ class Outline(BaseModel):
 
 class CitationReport(BaseModel):
     """引用报告"""
+
     total_citations: int = 0
     unique_papers: int = 0
     coverage_by_cluster: dict[str, float] = Field(default_factory=dict)
@@ -98,6 +108,7 @@ class CitationReport(BaseModel):
 
 class ReviewArtifact(BaseModel):
     """综述产出物"""
+
     id: str
     project_id: str
     outline_id: str

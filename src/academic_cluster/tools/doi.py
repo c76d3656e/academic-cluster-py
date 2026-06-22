@@ -8,7 +8,7 @@ import re
 
 # DOI 正则表达式
 DOI_PATTERN = re.compile(
-    r'(?:doi[:\s]*|https?://doi\.org/|https?://dx\.doi\.org/)?'
+    r"(?:doi[:\s]*|https?://doi\.org/|https?://dx\.doi\.org/)?"
     r'(10\.\d{4,9}/[^\s,;}\])"]+)',
     re.IGNORECASE,
 )
@@ -58,9 +58,16 @@ def normalize_doi(doi: str) -> str:
 
     # 去除前缀
     doi = doi.strip()
-    for prefix in ["doi:", "DOI:", "https://doi.org/", "https://dx.doi.org/", "http://doi.org/", "http://dx.doi.org/"]:
+    for prefix in [
+        "doi:",
+        "DOI:",
+        "https://doi.org/",
+        "https://dx.doi.org/",
+        "http://doi.org/",
+        "http://dx.doi.org/",
+    ]:
         if doi.startswith(prefix):
-            doi = doi[len(prefix):]
+            doi = doi[len(prefix) :]
             break
 
     # 去除尾部空白和标点
@@ -88,7 +95,7 @@ def is_valid_doi(doi: str) -> bool:
         return False
 
     doi = normalize_doi(doi)
-    return bool(re.match(r'^10\.\d{4,9}/[^\s]+$', doi))
+    return bool(re.match(r"^10\.\d{4,9}/[^\s]+$", doi))
 
 
 def doi_to_url(doi: str) -> str:

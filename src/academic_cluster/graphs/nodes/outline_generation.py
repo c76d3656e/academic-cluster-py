@@ -24,23 +24,37 @@ logger = structlog.get_logger()
 def _community_memories_to_summaries(memories: list[dict]) -> list[dict]:
     summaries = []
     for memory in memories:
-        summaries.append({
-            "cluster_id": memory.get("cluster_id"),
-            "cluster_label": memory.get("cluster_id"),
-            "paper_count": (memory.get("metadata") or {}).get("paper_count", 0) if isinstance(memory.get("metadata"), dict) else 0,
-            "summary": memory.get("summary", ""),
-            "key_findings": [
-                item.get("claim") if isinstance(item, dict) else item
-                for item in (memory.get("key_claims") or [])[:8]
-            ],
-            "representative_methods": memory.get("method_families") or [],
-            "limitations": memory.get("limitations") or [],
-            "future_directions": memory.get("future_directions") or [],
-            "proof_ids": memory.get("proof_ids") or [],
-            "coherence_assessment": (memory.get("metadata") or {}).get("coherence_assessment", {}) if isinstance(memory.get("metadata"), dict) else {},
-            "topic_relevance": (memory.get("metadata") or {}).get("topic_relevance", {}) if isinstance(memory.get("metadata"), dict) else {},
-            "evidence_gaps": (memory.get("metadata") or {}).get("evidence_gaps", []) if isinstance(memory.get("metadata"), dict) else [],
-        })
+        summaries.append(
+            {
+                "cluster_id": memory.get("cluster_id"),
+                "cluster_label": memory.get("cluster_id"),
+                "paper_count": (memory.get("metadata") or {}).get("paper_count", 0)
+                if isinstance(memory.get("metadata"), dict)
+                else 0,
+                "summary": memory.get("summary", ""),
+                "key_findings": [
+                    item.get("claim") if isinstance(item, dict) else item
+                    for item in (memory.get("key_claims") or [])[:8]
+                ],
+                "representative_methods": memory.get("method_families") or [],
+                "limitations": memory.get("limitations") or [],
+                "future_directions": memory.get("future_directions") or [],
+                "proof_ids": memory.get("proof_ids") or [],
+                "coherence_assessment": (memory.get("metadata") or {}).get(
+                    "coherence_assessment", {}
+                )
+                if isinstance(memory.get("metadata"), dict)
+                else {},
+                "topic_relevance": (memory.get("metadata") or {}).get(
+                    "topic_relevance", {}
+                )
+                if isinstance(memory.get("metadata"), dict)
+                else {},
+                "evidence_gaps": (memory.get("metadata") or {}).get("evidence_gaps", [])
+                if isinstance(memory.get("metadata"), dict)
+                else [],
+            }
+        )
     return summaries
 
 
@@ -64,7 +78,9 @@ def _normalize_outline_word_budget(
         return outline_data
 
     section_count = len(sections)
-    effective_min = min(min_section_words, max(120, total_target_words // max(section_count, 1)))
+    effective_min = min(
+        min_section_words, max(120, total_target_words // max(section_count, 1))
+    )
     min_total = effective_min * section_count
     if total_target_words < min_total:
         effective_min = max(80, total_target_words // max(section_count, 1))
@@ -92,7 +108,7 @@ def _normalize_outline_word_budget(
         fractions.append((exact_extra - extra, idx))
 
     delta = total_target_words - sum(allocated)
-    for _, idx in sorted(fractions, reverse=True)[:max(0, delta)]:
+    for _, idx in sorted(fractions, reverse=True)[: max(0, delta)]:
         allocated[idx] += 1
 
     for section, target in zip(sections, allocated, strict=False):
@@ -113,52 +129,110 @@ def _normalize_outline_sections(
     if not isinstance(sections, list):
         sections = []
     memories = community_memories or []
-    memory_by_cluster = {str(m.get("cluster_id")): m for m in memories if m.get("cluster_id")}
+    memory_by_cluster = {
+        str(m.get("cluster_id")): m for m in memories if m.get("cluster_id")
+    }
     all_cluster_ids = list(memory_by_cluster.keys())
 
     for idx, section in enumerate(sections):
         if not isinstance(section, dict):
             continue
-        target = section.get("target_communities") or section.get("key_clusters") or section.get("clusters") or []
+        target = (
+            section.get("target_communities")
+            or section.get("key_clusters")
+            or section.get("clusters")
+            or []
+        )
         target = [str(x) for x in target if str(x) in memory_by_cluster]
         if not target and all_cluster_ids:
-            target = all_cluster_ids[idx::max(1, len(sections))] or all_cluster_ids[:1]
+            target = (
+                all_cluster_ids[idx :: max(1, len(sections))] or all_cluster_ids[:1]
+            )
 
         related = [memory_by_cluster[cid] for cid in target if cid in memory_by_cluster]
         section["target_communities"] = target
-        section["method_families"] = section.get("method_families") or [
-            method for memory in related for method in (memory.get("method_families") or [])
-        ][:12]
-        section["expected_claims"] = section.get("expected_claims") or [
-            claim for memory in related for claim in (memory.get("key_claims") or [])
-        ][:12]
-        section["limitations_to_cover"] = section.get("limitations_to_cover") or [
-            item for memory in related for item in (memory.get("limitations") or [])
-        ][:8]
-        section["future_directions_to_cover"] = section.get("future_directions_to_cover") or [
-            item for memory in related for item in (memory.get("future_directions") or [])
-        ][:8]
-        section["proof_ids"] = section.get("proof_ids") or [
-            proof for memory in related for proof in (memory.get("proof_ids") or [])
-        ][:24]
-        section["community_synthesis"] = section.get("community_synthesis") or [
-            {
-                "cluster_id": memory.get("cluster_id"),
-                "summary": memory.get("summary", ""),
-                "coherence_assessment": (memory.get("metadata") or {}).get("coherence_assessment", {}) if isinstance(memory.get("metadata"), dict) else {},
-                "topic_relevance": (memory.get("metadata") or {}).get("topic_relevance", {}) if isinstance(memory.get("metadata"), dict) else {},
-                "evidence_gaps": (memory.get("metadata") or {}).get("evidence_gaps", []) if isinstance(memory.get("metadata"), dict) else [],
-            }
-            for memory in related
-        ][:6]
-        section.setdefault("section_role", section.get("role") or section.get("description") or "")
-        section.setdefault("previous_section_dependency", sections[idx - 1].get("title") if idx > 0 and isinstance(sections[idx - 1], dict) else "")
-        section.setdefault("next_section_dependency", sections[idx + 1].get("title") if idx + 1 < len(sections) and isinstance(sections[idx + 1], dict) else "")
+        section["method_families"] = (
+            section.get("method_families")
+            or [
+                method
+                for memory in related
+                for method in (memory.get("method_families") or [])
+            ][:12]
+        )
+        section["expected_claims"] = (
+            section.get("expected_claims")
+            or [
+                claim
+                for memory in related
+                for claim in (memory.get("key_claims") or [])
+            ][:12]
+        )
+        section["limitations_to_cover"] = (
+            section.get("limitations_to_cover")
+            or [
+                item for memory in related for item in (memory.get("limitations") or [])
+            ][:8]
+        )
+        section["future_directions_to_cover"] = (
+            section.get("future_directions_to_cover")
+            or [
+                item
+                for memory in related
+                for item in (memory.get("future_directions") or [])
+            ][:8]
+        )
+        section["proof_ids"] = (
+            section.get("proof_ids")
+            or [
+                proof for memory in related for proof in (memory.get("proof_ids") or [])
+            ][:24]
+        )
+        section["community_synthesis"] = (
+            section.get("community_synthesis")
+            or [
+                {
+                    "cluster_id": memory.get("cluster_id"),
+                    "summary": memory.get("summary", ""),
+                    "coherence_assessment": (memory.get("metadata") or {}).get(
+                        "coherence_assessment", {}
+                    )
+                    if isinstance(memory.get("metadata"), dict)
+                    else {},
+                    "topic_relevance": (memory.get("metadata") or {}).get(
+                        "topic_relevance", {}
+                    )
+                    if isinstance(memory.get("metadata"), dict)
+                    else {},
+                    "evidence_gaps": (memory.get("metadata") or {}).get(
+                        "evidence_gaps", []
+                    )
+                    if isinstance(memory.get("metadata"), dict)
+                    else [],
+                }
+                for memory in related
+            ][:6]
+        )
+        section.setdefault(
+            "section_role", section.get("role") or section.get("description") or ""
+        )
+        section.setdefault(
+            "previous_section_dependency",
+            sections[idx - 1].get("title")
+            if idx > 0 and isinstance(sections[idx - 1], dict)
+            else "",
+        )
+        section.setdefault(
+            "next_section_dependency",
+            sections[idx + 1].get("title")
+            if idx + 1 < len(sections) and isinstance(sections[idx + 1], dict)
+            else "",
+        )
 
     outline_data["sections"] = sections
     if total_target_words is not None:
         outline_data = _normalize_outline_word_budget(outline_data, total_target_words)
     return outline_data
+
 
 # ---------------------------------------------------------------------------
 # 层次分类：Foundation / Development / Frontier
@@ -351,27 +425,35 @@ async def outline_generation_node(state: PipelineState) -> dict:
     db = get_database()
     settings = get_settings()
     config = state.config or {}
-    total_target_words = config.get("total_target_words", settings.writing_total_target_words)
+    total_target_words = config.get(
+        "total_target_words", settings.writing_total_target_words
+    )
 
     try:
         # 确保项目存在
         project = await db.get_project(state.project_id)
         if not project:
-            await db.save_project({
-                "id": state.project_id,
-                "name": f"Review: {state.query}",
-                "query": state.query,
-                "status": "in_progress",
-            })
+            await db.save_project(
+                {
+                    "id": state.project_id,
+                    "name": f"Review: {state.query}",
+                    "query": state.query,
+                    "status": "in_progress",
+                }
+            )
 
         # 获取聚类信息
         clusters = await db.get_clusters_by_ids(state.cluster_ids)
 
         # 获取核心论文详情
-        review_paper_ids = list(dict.fromkeys(
-            list(state.core_paper_ids or []) + list(state.auxiliary_paper_ids or [])
-        ))
-        core_papers = await db.get_papers_by_ids(review_paper_ids or state.core_paper_ids)
+        review_paper_ids = list(
+            dict.fromkeys(
+                list(state.core_paper_ids or []) + list(state.auxiliary_paper_ids or [])
+            )
+        )
+        core_papers = await db.get_papers_by_ids(
+            review_paper_ids or state.core_paper_ids
+        )
 
         # 获取知识图谱实体和关系
         kg_entities = await db.get_kg_entities_by_ids(state.kg_entity_ids)
@@ -381,8 +463,12 @@ async def outline_generation_node(state: PipelineState) -> dict:
         evidence_cards_raw = await db.get_evidence_cards_by_ids(state.evidence_card_ids)
 
         # 构建知识图谱摘要（对齐 Rust 版）
-        entity_types = list({e.get("entity_type", "") for e in kg_entities if e.get("entity_type")})
-        relation_types = list({r.get("relation_type", "") for r in kg_relations if r.get("relation_type")})
+        entity_types = list(
+            {e.get("entity_type", "") for e in kg_entities if e.get("entity_type")}
+        )
+        relation_types = list(
+            {r.get("relation_type", "") for r in kg_relations if r.get("relation_type")}
+        )
 
         kg_summary = {
             "entity_types": entity_types,
@@ -394,7 +480,11 @@ async def outline_generation_node(state: PipelineState) -> dict:
                 for e in kg_entities[:50]
             ],
             "relations": [
-                {"source": r.get("source"), "target": r.get("target"), "type": r.get("relation_type")}
+                {
+                    "source": r.get("source"),
+                    "target": r.get("target"),
+                    "type": r.get("relation_type"),
+                }
                 for r in kg_relations[:30]
             ],
         }
@@ -409,7 +499,9 @@ async def outline_generation_node(state: PipelineState) -> dict:
 
         for cluster in clusters:
             cluster_paper_ids = cluster.get("paper_ids", [])
-            cluster_papers = [paper_map.get(pid, {}) for pid in cluster_paper_ids if pid in paper_map]
+            cluster_papers = [
+                paper_map.get(pid, {}) for pid in cluster_paper_ids if pid in paper_map
+            ]
             # 附加实体信息
             for p in cluster_papers:
                 pid = p.get("id", "")
@@ -424,17 +516,24 @@ async def outline_generation_node(state: PipelineState) -> dict:
             ]
 
         await send_progress(
-            state.project_id, "outline_generation",
+            state.project_id,
+            "outline_generation",
             "大纲生成中，正在规划章节结构...",
         )
 
         # 构建社区摘要（从 evidence cards 聚合每个聚类的关键发现和代表性方法）
-        community_memories = await db.get_community_memories_by_ids(state.community_memory_ids)
+        community_memories = await db.get_community_memories_by_ids(
+            state.community_memory_ids
+        )
         if not community_memories:
-            community_memories = await db.get_community_memories_by_project(state.project_id)
+            community_memories = await db.get_community_memories_by_project(
+                state.project_id
+            )
         community_summaries = _community_memories_to_summaries(community_memories)
         if not community_summaries:
-            community_summaries = _build_community_summaries(clusters, evidence_cards_raw)
+            community_summaries = _build_community_summaries(
+                clusters, evidence_cards_raw
+            )
 
         # 层次分类：Foundation / Development / Frontier
         cluster_layers = _classify_cluster_layers(
@@ -445,8 +544,10 @@ async def outline_generation_node(state: PipelineState) -> dict:
         )
         logger.info(
             "Cluster layer classification completed",
-            layers={v: sum(1 for x in cluster_layers.values() if x == v)
-                    for v in ("foundation", "development", "frontier")},
+            layers={
+                v: sum(1 for x in cluster_layers.values() if x == v)
+                for v in ("foundation", "development", "frontier")
+            },
         )
 
         # 生成大纲
@@ -489,7 +590,8 @@ async def outline_generation_node(state: PipelineState) -> dict:
 
         section_count = len(outline_data.get("sections", []))
         await send_progress(
-            state.project_id, "outline_generation",
+            state.project_id,
+            "outline_generation",
             f"大纲生成完成，规划 {section_count} 个章节",
             detail={"section_count": section_count, "outline_id": outline_id},
         )
@@ -501,17 +603,24 @@ async def outline_generation_node(state: PipelineState) -> dict:
         }
 
         if tracker:
-            await tracker.end_node("outline_generation", "succeeded", output_summary={
-                "outline_id": outline_id,
-                "section_count": len(outline_data.get("sections", [])),
-            })
+            await tracker.end_node(
+                "outline_generation",
+                "succeeded",
+                output_summary={
+                    "outline_id": outline_id,
+                    "section_count": len(outline_data.get("sections", [])),
+                },
+            )
         return result
 
     except Exception as e:
         if tracker:
-            await tracker.end_node("outline_generation", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "outline_generation",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         logger.error("Outline generation failed", error=str(e))
         raise  # 不再 fallback，直接抛出异常
 
@@ -559,13 +668,15 @@ def _build_community_summaries(
                 break
 
         if key_findings or methods:
-            summaries.append({
-                "cluster_id": cid,
-                "cluster_label": cluster.get("label", cluster.get("name", cid)),
-                "paper_count": len(cluster.get("paper_ids", [])),
-                "key_findings": key_findings,
-                "representative_methods": methods,
-            })
+            summaries.append(
+                {
+                    "cluster_id": cid,
+                    "cluster_label": cluster.get("label", cluster.get("name", cid)),
+                    "paper_count": len(cluster.get("paper_ids", [])),
+                    "key_findings": key_findings,
+                    "representative_methods": methods,
+                }
+            )
 
     return summaries
 

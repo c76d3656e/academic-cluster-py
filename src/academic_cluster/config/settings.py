@@ -12,6 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class LLMSettings(BaseModel):
     """LLM 配置"""
+
     provider: str = "openai"
     model: str = "gpt-4o-mini"
     base_url: str | None = None
@@ -22,6 +23,7 @@ class LLMSettings(BaseModel):
 
 class EmbeddingSettings(BaseModel):
     """Embedding 配置"""
+
     provider: str = "siliconflow"
     model: str = "BAAI/bge-m3"
     api_url: str = "https://api.siliconflow.cn/v1"
@@ -31,6 +33,7 @@ class EmbeddingSettings(BaseModel):
 
 class RerankSettings(BaseModel):
     """Rerank 配置"""
+
     provider: str = "siliconflow"
     model: str = "BAAI/bge-reranker-v2-m3"
     api_url: str = "https://api.siliconflow.cn/v1"
@@ -40,6 +43,7 @@ class RerankSettings(BaseModel):
 
 class RedisSettings(BaseModel):
     """Redis 配置"""
+
     host: str = "localhost"
     port: int = 6379
     password: str | None = None
@@ -54,6 +58,7 @@ class RedisSettings(BaseModel):
 
 class WritingSettings(BaseModel):
     """写作配置"""
+
     model: str = "gpt-4o"
     temperature: float = 0.7
     max_length: int = 50000
@@ -63,6 +68,7 @@ class WritingSettings(BaseModel):
 
 class Settings(BaseSettings):
     """主配置类"""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -144,7 +150,9 @@ class Settings(BaseSettings):
         """解析多 key（逗号分隔），返回有效 key 列表"""
         if not self.semantic_scholar_api_key:
             return []
-        return [k.strip() for k in self.semantic_scholar_api_key.split(",") if k.strip()]
+        return [
+            k.strip() for k in self.semantic_scholar_api_key.split(",") if k.strip()
+        ]
 
     # 聚类配置
     clustering_algorithm: str = "leiden"
@@ -190,7 +198,10 @@ class Settings(BaseSettings):
         if not self.is_production:
             return
         insecure_defaults = []
-        if self.jwt_secret_key in ("change-me-jwt-secret-in-production", "change-me-in-production"):
+        if self.jwt_secret_key in (
+            "change-me-jwt-secret-in-production",
+            "change-me-in-production",
+        ):
             insecure_defaults.append("jwt_secret_key")
         if self.app_secret_key == "change-me-in-production":  # nosec B105
             insecure_defaults.append("app_secret_key")

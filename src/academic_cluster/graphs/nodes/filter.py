@@ -59,7 +59,8 @@ async def filter_node(state: PipelineState) -> dict:
     )
 
     await send_progress(
-        state.project_id, "filter",
+        state.project_id,
+        "filter",
         f"筛选完成，保留 {len(filtered_ids)} 篇高质量论文",
         detail={"removed": len(state.paper_ids) - len(filtered_ids)},
     )

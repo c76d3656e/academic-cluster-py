@@ -20,6 +20,7 @@ from enum import StrEnum
 
 class CandidateSelectionSource(StrEnum):
     """候选文献的选取来源（优先级从高到低，对齐 Rust 版）"""
+
     COMMUNITY_CORE = "community_core"
     COMMUNITY_AUXILIARY = "community_auxiliary"
     HYBRID_NEIGHBOR_CORE = "hybrid_neighbor_core"
@@ -33,15 +34,17 @@ class CandidateSelectionSource(StrEnum):
 @dataclass
 class NearbyHybridCandidate:
     """混合图中的跨聚类邻居候选"""
-    index: int              # 论文在 papers 列表中的索引
-    anchor_index: int       # 锚点论文（社区内论文）的索引
-    weight: float           # 混合图边权重
-    rank: int               # 边的排名
+
+    index: int  # 论文在 papers 列表中的索引
+    anchor_index: int  # 锚点论文（社区内论文）的索引
+    weight: float  # 混合图边权重
+    rank: int  # 边的排名
 
 
 @dataclass
 class SectionCitationCandidate:
     """单篇候选文献的详细信息"""
+
     paper_id: str
     cluster_id: int | None
     is_core: bool
@@ -53,25 +56,22 @@ class SectionCitationCandidate:
 @dataclass
 class SectionCitationPlan:
     """一个章节的引用分配计划"""
+
     section_index: int
     section_title: str
     key_clusters: list[int]
-    candidate_paper_ids: list[str]       # 按优先级排序的论文 ID
-    candidate_details: list[dict]        # 论文详情，用于渲染
+    candidate_paper_ids: list[str]  # 按优先级排序的论文 ID
+    candidate_details: list[dict]  # 论文详情，用于渲染
 
     @property
     def primary_paper_ids(self) -> list[str]:
         """核心文献 ID 列表"""
-        return [
-            d["paper_id"] for d in self.candidate_details if d["is_core"]
-        ]
+        return [d["paper_id"] for d in self.candidate_details if d["is_core"]]
 
     @property
     def secondary_paper_ids(self) -> list[str]:
         """辅助文献 ID 列表"""
-        return [
-            d["paper_id"] for d in self.candidate_details if not d["is_core"]
-        ]
+        return [d["paper_id"] for d in self.candidate_details if not d["is_core"]]
 
 
 def _fallback_section_clusters(
@@ -90,7 +90,9 @@ def _fallback_section_clusters(
     if cluster_count == 0:
         return []
 
-    min_window_size = max(1, -(-cluster_count // max(1, section_count)))  # ceil division
+    min_window_size = max(
+        1, -(-cluster_count // max(1, section_count))
+    )  # ceil division
     if section_count <= cluster_count:
         start = section_index * cluster_count // max(1, section_count)
     else:
@@ -132,7 +134,9 @@ def _build_paper_cluster_map(
     return paper_to_cluster, cluster_to_papers
 
 
-def _get_ordered_clusters(papers: list[dict], paper_to_cluster: dict[str, int]) -> list[int]:
+def _get_ordered_clusters(
+    papers: list[dict], paper_to_cluster: dict[str, int]
+) -> list[int]:
     """按论文出现顺序返回去重的聚类 ID 列表（对齐 Rust 版 ordered_input_clusters）"""
     seen: set[int] = set()
     ordered: list[int] = []
@@ -198,8 +202,10 @@ def _nearby_hybrid_candidates(
             continue
 
         existing = candidates.get(target_idx)
-        if existing is None or weight > existing.weight or (
-            weight == existing.weight and rank < existing.rank
+        if (
+            existing is None
+            or weight > existing.weight
+            or (weight == existing.weight and rank < existing.rank)
         ):
             candidates[target_idx] = NearbyHybridCandidate(
                 index=target_idx,
@@ -208,7 +214,9 @@ def _nearby_hybrid_candidates(
                 rank=rank,
             )
 
-    result = sorted(candidates.values(), key=lambda c: (-c.weight, c.rank, c.anchor_index, c.index))
+    result = sorted(
+        candidates.values(), key=lambda c: (-c.weight, c.rank, c.anchor_index, c.index)
+    )
     return result
 
 
@@ -236,7 +244,9 @@ def plan_review_citations(
             SectionCitationPlan(
                 section_index=i,
                 section_title=sec.get("title", f"Section {i}"),
-                key_clusters=sec.get("target_communities") or sec.get("key_clusters", []) or [],
+                key_clusters=sec.get("target_communities")
+                or sec.get("key_clusters", [])
+                or [],
                 candidate_paper_ids=[],
                 candidate_details=[],
             )
@@ -297,7 +307,9 @@ def _plan_section_citations(
     Tier 8: GlobalAuxiliary        - 全局辅助论文（兜底）
     """
     title = section.get("title", f"Section {section_index}")
-    raw_key_clusters = section.get("target_communities") or section.get("key_clusters") or []
+    raw_key_clusters = (
+        section.get("target_communities") or section.get("key_clusters") or []
+    )
     core_end = min(core_reference_count, len(papers))
 
     # 确定主聚类集合（对齐 Rust 版 cluster_selection_for_section）
@@ -312,7 +324,9 @@ def _plan_section_citations(
         fallback_ids = _fallback_section_clusters(
             section_index, section_count, target, ordered_clusters, cluster_counts
         )
-        primary_clusters = {ordered_clusters[i] for i in fallback_ids if i < cluster_count}
+        primary_clusters = {
+            ordered_clusters[i] for i in fallback_ids if i < cluster_count
+        }
         key_clusters = sorted(primary_clusters)
         fills_remaining = True
 
@@ -332,7 +346,9 @@ def _plan_section_citations(
                 remaining_indices.append(i)
 
     # 计算混合图邻居候选（对齐 Rust 版 nearby_hybrid_candidates）
-    hybrid_candidates = _nearby_hybrid_candidates(community_indices, papers, hybrid_edges)
+    hybrid_candidates = _nearby_hybrid_candidates(
+        community_indices, papers, hybrid_edges
+    )
 
     # 按优先级选取（对齐 Rust 版 CandidateSelectionWriter）
     selected_ids: list[str] = []
@@ -347,16 +363,20 @@ def _plan_section_citations(
             return
         seen.add(paper_id)
         selected_ids.append(paper_id)
-        details.append({
-            "paper_id": paper_id,
-            "cluster_id": paper_to_cluster.get(paper_id),
-            "is_core": idx < core_end,
-            "source": source.value,
-            "hybrid_anchor_paper_id": None,
-            "hybrid_weight_basis_points": None,
-        })
+        details.append(
+            {
+                "paper_id": paper_id,
+                "cluster_id": paper_to_cluster.get(paper_id),
+                "is_core": idx < core_end,
+                "source": source.value,
+                "hybrid_anchor_paper_id": None,
+                "hybrid_weight_basis_points": None,
+            }
+        )
 
-    def _push_hybrid(candidate: NearbyHybridCandidate, source: CandidateSelectionSource) -> None:
+    def _push_hybrid(
+        candidate: NearbyHybridCandidate, source: CandidateSelectionSource
+    ) -> None:
         if len(selected_ids) >= target:
             return
         paper_id = papers[candidate.index]["id"]
@@ -364,15 +384,21 @@ def _plan_section_citations(
             return
         seen.add(paper_id)
         selected_ids.append(paper_id)
-        anchor_pid = papers[candidate.anchor_index]["id"] if candidate.anchor_index < len(papers) else None
-        details.append({
-            "paper_id": paper_id,
-            "cluster_id": paper_to_cluster.get(paper_id),
-            "is_core": candidate.index < core_end,
-            "source": source.value,
-            "hybrid_anchor_paper_id": anchor_pid,
-            "hybrid_weight_basis_points": int(candidate.weight * 10000),
-        })
+        anchor_pid = (
+            papers[candidate.anchor_index]["id"]
+            if candidate.anchor_index < len(papers)
+            else None
+        )
+        details.append(
+            {
+                "paper_id": paper_id,
+                "cluster_id": paper_to_cluster.get(paper_id),
+                "is_core": candidate.index < core_end,
+                "source": source.value,
+                "hybrid_anchor_paper_id": anchor_pid,
+                "hybrid_weight_basis_points": int(candidate.weight * 10000),
+            }
+        )
 
     # Tier 1: CommunityCore
     for idx in community_indices:
@@ -461,6 +487,7 @@ def citation_plan_summary(plans: list[SectionCitationPlan]) -> dict:
     返回:
         包含各章节和全局的候选来源计数统计字典
     """
+
     def _source_counts(details: list[dict]) -> dict[str, int]:
         counts: dict[str, int] = {}
         for d in details:
@@ -475,15 +502,17 @@ def citation_plan_summary(plans: list[SectionCitationPlan]) -> dict:
         section_counts = _source_counts(plan.candidate_details)
         for src, cnt in section_counts.items():
             global_counts[src] = global_counts.get(src, 0) + cnt
-        sections_summary.append({
-            "section_index": plan.section_index,
-            "section_title": plan.section_title,
-            "key_clusters": plan.key_clusters,
-            "candidate_reference_count": len(plan.candidate_paper_ids),
-            "primary_reference_count": len(plan.primary_paper_ids),
-            "secondary_reference_count": len(plan.secondary_paper_ids),
-            "candidate_source_counts": section_counts,
-        })
+        sections_summary.append(
+            {
+                "section_index": plan.section_index,
+                "section_title": plan.section_title,
+                "key_clusters": plan.key_clusters,
+                "candidate_reference_count": len(plan.candidate_paper_ids),
+                "primary_reference_count": len(plan.primary_paper_ids),
+                "secondary_reference_count": len(plan.secondary_paper_ids),
+                "candidate_source_counts": section_counts,
+            }
+        )
 
     return {
         "section_count": len(plans),

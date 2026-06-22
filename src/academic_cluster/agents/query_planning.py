@@ -21,6 +21,7 @@ logger = structlog.get_logger()
 # Tools - 被 Agent 调用的确定性函数
 # =============================================================================
 
+
 @tool
 def refine_search_query(query: str) -> str:
     """优化搜索查询，使其更适合学术搜索"""
@@ -122,6 +123,7 @@ def evaluate_search_results(papers: list[dict]) -> dict:
 # Agent 创建
 # =============================================================================
 
+
 def create_query_planning_agent(
     model: str | None = None,
     temperature: float = 0.3,
@@ -142,12 +144,14 @@ def create_query_planning_agent(
     llm = create_llm(temperature=temperature)
 
     # 绑定工具
-    agent = llm.bind_tools([
-        refine_search_query,
-        generate_search_queries,
-        select_search_sources,
-        evaluate_search_results,
-    ])
+    agent = llm.bind_tools(
+        [
+            refine_search_query,
+            generate_search_queries,
+            select_search_sources,
+            evaluate_search_results,
+        ]
+    )
 
     logger.info("Query planning agent created", model=model)
 
@@ -196,6 +200,7 @@ async def plan_queries(topic: str) -> dict:
     ]
 
     from ..services.llm_client import ainvoke_with_callbacks
+
     response = await ainvoke_with_callbacks(agent, messages)
 
     # LLM 响应 content 可能是 list（多模态格式）或 string

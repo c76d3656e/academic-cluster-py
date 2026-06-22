@@ -23,8 +23,10 @@ router = APIRouter()
 # 响应模型
 # =============================================================================
 
+
 class RecentProject(BaseModel):
     """最近项目"""
+
     id: str
     name: str
     status: str
@@ -33,6 +35,7 @@ class RecentProject(BaseModel):
 
 class DailyUsageItem(BaseModel):
     """每日用量"""
+
     date: str
     token_count: int = 0
     cost: float = 0.0
@@ -40,6 +43,7 @@ class DailyUsageItem(BaseModel):
 
 class DashboardOverview(BaseModel):
     """仪表盘概览响应"""
+
     project_count: int
     running_projects: int
     total_papers: int
@@ -52,6 +56,7 @@ class DashboardOverview(BaseModel):
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("/overview", response_model=DashboardOverview)
 async def get_dashboard_overview(

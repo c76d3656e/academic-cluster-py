@@ -100,7 +100,9 @@ def _quality_tier(score: float) -> str:
     return "noise"
 
 
-async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) -> list[dict]:
+async def rerank_papers(
+    query: str, papers: list[dict], timeout: float = 120.0
+) -> list[dict]:
     """
     使用 Rerank 模型对论文进行重排序
 
@@ -136,7 +138,9 @@ async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) 
             }
 
             async with httpx.AsyncClient() as client:
-                response = await client.post(url, json=payload, headers=headers, timeout=60)
+                response = await client.post(
+                    url, json=payload, headers=headers, timeout=60
+                )
                 response.raise_for_status()
                 data = response.json()
 
@@ -171,10 +175,15 @@ async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) 
 
     all_reranked = []
     for i in range(0, len(papers), BATCH_SIZE):
-        batch = papers[i:i + BATCH_SIZE]
+        batch = papers[i : i + BATCH_SIZE]
         batch_results = await _rerank_batch(batch, i // BATCH_SIZE)
         all_reranked.extend(batch_results)
-        logger.info("Rerank batch complete", batch=i // BATCH_SIZE, batch_size=len(batch), results=len(batch_results))
+        logger.info(
+            "Rerank batch complete",
+            batch=i // BATCH_SIZE,
+            batch_size=len(batch),
+            results=len(batch_results),
+        )
 
     # 应用质量评分（对齐 Rust 版 score_and_tier_papers）
     for paper in all_reranked:
@@ -202,7 +211,8 @@ async def rerank_node(state: PipelineState) -> dict:
     logger.info("Starting reranking", paper_count=len(state.paper_ids))
 
     await send_progress(
-        state.project_id, "rerank",
+        state.project_id,
+        "rerank",
         f"正在重排序 {len(state.paper_ids)} 篇论文...",
     )
 
@@ -221,12 +231,14 @@ async def rerank_node(state: PipelineState) -> dict:
     try:
         # 重排序（通过 Provider Pool 自动负载均衡）
         import time as _time
+
         _rerank_start = _time.monotonic()
         reranked_papers = await rerank_papers(state.query, papers)
         _rerank_elapsed = int((_time.monotonic() - _rerank_start) * 1000)
 
         # 记录 rerank 调用到 tracker 和 DB
         from ...services.observability import get_resolved_run_id
+
         run_id = get_resolved_run_id()
         if run_id:
             try:
@@ -236,14 +248,24 @@ async def rerank_node(state: PipelineState) -> dict:
                 db = get_database()
                 rerank_pool = get_rerank_pool()
                 # 获取当前使用的 provider 名称
-                provider_name = rerank_pool._providers[0].name if rerank_pool._providers else "unknown"
-                rerank_model = rerank_pool._providers[0].model if rerank_pool._providers else "unknown"
+                provider_name = (
+                    rerank_pool._providers[0].name
+                    if rerank_pool._providers
+                    else "unknown"
+                )
+                rerank_model = (
+                    rerank_pool._providers[0].model
+                    if rerank_pool._providers
+                    else "unknown"
+                )
 
                 # rerank 通常按文档数计费，这里用调用次数近似
                 prompt_tokens = len(papers)  # 每篇论文算 1 token
 
                 # 计算 cost（rerank 通常按调用次数计费，这里按 token 近似）
-                input_price, output_price = await get_provider_pricing(db, provider_name, rerank_model)
+                input_price, output_price = await get_provider_pricing(
+                    db, provider_name, rerank_model
+                )
                 cost = 0.0
                 if input_price:
                     cost = (prompt_tokens * input_price) / 1_000_000
@@ -261,7 +283,10 @@ async def rerank_node(state: PipelineState) -> dict:
                     )
 
                 from ...services.observability import get_current_project
-                project_id_for_call = getattr(tracker, "project_id", None) or get_current_project()
+
+                project_id_for_call = (
+                    getattr(tracker, "project_id", None) or get_current_project()
+                )
                 exec_id = await db.create_node_execution(run_id, "rerank", "rerank")
                 call_id = await db.create_llm_call(
                     pipeline_run_id=run_id,
@@ -303,7 +328,8 @@ async def rerank_node(state: PipelineState) -> dict:
         )
 
         await send_progress(
-            state.project_id, "rerank",
+            state.project_id,
+            "rerank",
             f"重排序完成，筛选出 {len(reranked_paper_ids)} 篇高质量论文",
         )
 
@@ -313,9 +339,13 @@ async def rerank_node(state: PipelineState) -> dict:
         }
 
         if tracker:
-            await tracker.end_node("rerank", "succeeded", output_summary={
-                "reranked_count": len(reranked_paper_ids),
-            })
+            await tracker.end_node(
+                "rerank",
+                "succeeded",
+                output_summary={
+                    "reranked_count": len(reranked_paper_ids),
+                },
+            )
         return result
 
     except TimeoutError:
@@ -328,8 +358,7 @@ async def rerank_node(state: PipelineState) -> dict:
             timeout_seconds=120,
         )
         if tracker:
-            await tracker.end_node("rerank", "failed",
-                                   error_message=error_msg)
+            await tracker.end_node("rerank", "failed", error_message=error_msg)
         raise TimeoutError(error_msg) from None
     except Exception as e:
         logger.error(
@@ -342,7 +371,10 @@ async def rerank_node(state: PipelineState) -> dict:
             traceback=traceback.format_exc(),
         )
         if tracker:
-            await tracker.end_node("rerank", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "rerank",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         raise

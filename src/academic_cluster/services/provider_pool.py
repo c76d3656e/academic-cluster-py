@@ -19,6 +19,7 @@ logger = structlog.get_logger()
 # LiteLLM Router Pool（用于 LLM 和 Embedding）
 # =============================================================================
 
+
 class LiteLLMPool:
     """
     基于 LiteLLM Router 的 Provider Pool。
@@ -105,9 +106,19 @@ class LiteLLMPool:
 # Rerank Pool（自定义，LiteLLM 不支持 SiliconFlow rerank）
 # =============================================================================
 
+
 class RerankProvider:
     """单个 Rerank 端点"""
-    def __init__(self, name: str, model: str, api_url: str, api_key: str, rpm_limit: int = 10, priority: int = 1):
+
+    def __init__(
+        self,
+        name: str,
+        model: str,
+        api_url: str,
+        api_key: str,
+        rpm_limit: int = 10,
+        priority: int = 1,
+    ):
         self.name = name
         self.model = model
         self.api_url = api_url
@@ -129,7 +140,9 @@ class RerankPool:
         if not providers:
             raise ValueError("RerankPool requires at least one provider")
 
-    async def execute(self, func: Callable[[RerankProvider], Any], max_retries: int | None = None) -> Any:
+    async def execute(
+        self, func: Callable[[RerankProvider], Any], max_retries: int | None = None
+    ) -> Any:
         """选一个 provider 执行 func(provider)，自动重试故障转移"""
         import random
 
@@ -165,9 +178,16 @@ class RerankPool:
                     provider.error_count += 1
                     if provider.error_count >= 3:
                         provider.is_healthy = False
-                        logger.warning("Rerank provider marked unhealthy", provider=provider.name)
+                        logger.warning(
+                            "Rerank provider marked unhealthy", provider=provider.name
+                        )
 
-                logger.warning("Rerank request failed", provider=provider.name, attempt=attempt + 1, error=str(e)[:200])
+                logger.warning(
+                    "Rerank request failed",
+                    provider=provider.name,
+                    attempt=attempt + 1,
+                    error=str(e)[:200],
+                )
 
         raise last_error
 
@@ -175,8 +195,13 @@ class RerankPool:
         return {
             "service": "rerank",
             "providers": [
-                {"name": p.name, "model": p.model, "healthy": p.is_healthy,
-                 "request_count": p.request_count, "error_count": p.error_count}
+                {
+                    "name": p.name,
+                    "model": p.model,
+                    "healthy": p.is_healthy,
+                    "request_count": p.request_count,
+                    "error_count": p.error_count,
+                }
                 for p in self._providers
             ],
         }
@@ -231,11 +256,13 @@ def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict]:
         # model_name 使用实际模型名（如 "Qwen3-8B"），同一模型的 provider 组成一个路由组
         # 原始别名（如 "gitee-1"）存入 model_info，供 create_llm 追踪使用
         group_name = model.replace("openai/", "", 1)
-        model_list.append({
-            "model_name": group_name,
-            "litellm_params": litellm_params,
-            "model_info": {"provider_alias": name},
-        })
+        model_list.append(
+            {
+                "model_name": group_name,
+                "litellm_params": litellm_params,
+                "model_info": {"provider_alias": name},
+            }
+        )
 
     return model_list
 
@@ -262,7 +289,9 @@ def _parse_rerank_providers(json_str: str) -> list[RerankProvider]:
     ]
 
 
-async def _load_enabled_provider_configs_from_db() -> tuple[dict[str, list[dict]], bool]:
+async def _load_enabled_provider_configs_from_db() -> tuple[
+    dict[str, list[dict]], bool
+]:
     """Load enabled provider configs from provider_registry.
 
     Returns (configs_by_kind, registry_has_rows). If the registry has rows, it is
@@ -275,7 +304,9 @@ async def _load_enabled_provider_configs_from_db() -> tuple[dict[str, list[dict]
 
     db = get_database()
     async with db.session() as session:
-        total_result = await session.execute(text("SELECT COUNT(*) FROM provider_registry"))
+        total_result = await session.execute(
+            text("SELECT COUNT(*) FROM provider_registry")
+        )
         registry_has_rows = bool(total_result.scalar() or 0)
         result = await session.execute(
             text("""
@@ -297,16 +328,22 @@ async def _load_enabled_provider_configs_from_db() -> tuple[dict[str, list[dict]
             try:
                 api_key = decrypt_key(row[4])
             except Exception as e:
-                logger.warning("Skipping provider with undecryptable key", provider=row[1], error=str(e))
+                logger.warning(
+                    "Skipping provider with undecryptable key",
+                    provider=row[1],
+                    error=str(e),
+                )
                 continue
-        configs[kind].append({
-            "name": row[1],
-            "model": row[3] or "",
-            "api_url": row[2] or "",
-            "api_key": api_key,
-            "rpm_limit": row[5] or 10,
-            "priority": row[6] or 100,
-        })
+        configs[kind].append(
+            {
+                "name": row[1],
+                "model": row[3] or "",
+                "api_url": row[2] or "",
+                "api_key": api_key,
+                "rpm_limit": row[5] or 10,
+                "priority": row[6] or 100,
+            }
+        )
 
     return configs, registry_has_rows
 
@@ -317,12 +354,18 @@ def _set_pools_from_configs(configs: dict[str, list[dict]]) -> int:
 
     reloaded = 0
 
-    llm_model_list = _parse_litellm_model_list(json.dumps(configs.get("llm", [])), "llm")
+    llm_model_list = _parse_litellm_model_list(
+        json.dumps(configs.get("llm", [])), "llm"
+    )
     _llm_pool = LiteLLMPool("llm", llm_model_list) if llm_model_list else None
     reloaded += len(llm_model_list)
 
-    emb_model_list = _parse_litellm_model_list(json.dumps(configs.get("embedding", [])), "embedding")
-    _embedding_pool = LiteLLMPool("embedding", emb_model_list) if emb_model_list else None
+    emb_model_list = _parse_litellm_model_list(
+        json.dumps(configs.get("embedding", [])), "embedding"
+    )
+    _embedding_pool = (
+        LiteLLMPool("embedding", emb_model_list) if emb_model_list else None
+    )
     reloaded += len(emb_model_list)
 
     rerank_providers = _parse_rerank_providers(json.dumps(configs.get("rerank", [])))
@@ -355,6 +398,7 @@ async def init_pools():
     global _llm_pool, _embedding_pool, _rerank_pool
 
     from ..config import get_settings
+
     settings = get_settings()
 
     try:
@@ -370,11 +414,14 @@ async def init_pools():
             )
             return
     except Exception as e:
-        logger.warning("Failed to initialize provider pools from DB, falling back to env", error=str(e))
+        logger.warning(
+            "Failed to initialize provider pools from DB, falling back to env",
+            error=str(e),
+        )
 
     # --- LLM Pool ---
     llm_model_list = _parse_litellm_model_list(
-        getattr(settings, 'llm_providers_json', None), "llm"
+        getattr(settings, "llm_providers_json", None), "llm"
     )
     if not llm_model_list and settings.llm_api_key:
         # 单 provider fallback：从现有 settings 构建
@@ -383,53 +430,59 @@ async def init_pools():
         if base.endswith("/v1"):
             base = base[:-3]
 
-        llm_model_list = [{
-            "model_name": settings.llm_model,
-            "litellm_params": {
-                "model": f"openai/{settings.llm_model}",
-                "api_key": settings.llm_api_key,
-                "api_base": base + "/v1",
-                "rpm": 10,
-            },
-            "model_info": {"provider_alias": settings.llm_provider},
-        }]
+        llm_model_list = [
+            {
+                "model_name": settings.llm_model,
+                "litellm_params": {
+                    "model": f"openai/{settings.llm_model}",
+                    "api_key": settings.llm_api_key,
+                    "api_base": base + "/v1",
+                    "rpm": 10,
+                },
+                "model_info": {"provider_alias": settings.llm_provider},
+            }
+        ]
     if llm_model_list:
         _llm_pool = LiteLLMPool("llm", llm_model_list)
 
     # --- Embedding Pool ---
     emb_model_list = _parse_litellm_model_list(
-        getattr(settings, 'embedding_providers_json', None), "embedding"
+        getattr(settings, "embedding_providers_json", None), "embedding"
     )
     if not emb_model_list and settings.embedding_api_key:
         base = settings.embedding_api_url.rstrip("/")
         if base.endswith("/v1"):
             base = base[:-3]
 
-        emb_model_list = [{
-            "model_name": settings.embedding_model,
-            "litellm_params": {
-                "model": f"openai/{settings.embedding_model}",
-                "api_key": settings.embedding_api_key,
-                "api_base": base + "/v1",
-                "rpm": 10,
-            },
-            "model_info": {"provider_alias": settings.embedding_provider},
-        }]
+        emb_model_list = [
+            {
+                "model_name": settings.embedding_model,
+                "litellm_params": {
+                    "model": f"openai/{settings.embedding_model}",
+                    "api_key": settings.embedding_api_key,
+                    "api_base": base + "/v1",
+                    "rpm": 10,
+                },
+                "model_info": {"provider_alias": settings.embedding_provider},
+            }
+        ]
     if emb_model_list:
         _embedding_pool = LiteLLMPool("embedding", emb_model_list)
 
     # --- Rerank Pool（自定义，不走 LiteLLM）---
     rerank_providers = _parse_rerank_providers(
-        getattr(settings, 'rerank_providers_json', None)
+        getattr(settings, "rerank_providers_json", None)
     )
     if not rerank_providers and settings.rerank_api_key:
-        rerank_providers = [RerankProvider(
-            name=settings.rerank_provider,
-            model=settings.rerank_model,
-            api_url=settings.rerank_api_url,
-            api_key=settings.rerank_api_key,
-            rpm_limit=10,
-        )]
+        rerank_providers = [
+            RerankProvider(
+                name=settings.rerank_provider,
+                model=settings.rerank_model,
+                api_url=settings.rerank_api_url,
+                api_key=settings.rerank_api_key,
+                rpm_limit=10,
+            )
+        ]
     if rerank_providers:
         _rerank_pool = RerankPool(rerank_providers)
 
@@ -453,6 +506,7 @@ async def close_pools():
 # =============================================================================
 # 便捷访问函数
 # =============================================================================
+
 
 def get_llm_pool() -> LiteLLMPool:
     if _llm_pool is None:

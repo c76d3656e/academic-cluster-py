@@ -21,8 +21,10 @@ router = APIRouter()
 # 请求/响应模型
 # =============================================================================
 
+
 class ProfileResponse(BaseModel):
     """用户个人资料响应"""
+
     id: str
     email: str
     full_name: str | None = None
@@ -32,11 +34,13 @@ class ProfileResponse(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     """更新个人资料请求"""
+
     full_name: str | None = Field(None, max_length=255)
 
 
 class PasswordChangeRequest(BaseModel):
     """修改密码请求"""
+
     current_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8, max_length=128)
 
@@ -44,6 +48,7 @@ class PasswordChangeRequest(BaseModel):
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("/profile", response_model=ProfileResponse)
 async def get_profile(
@@ -88,7 +93,9 @@ async def change_password(
 ):
     """修改密码"""
     # 验证当前密码
-    if not password_service.verify_password(body.current_password, current_user["hashed_password"]):
+    if not password_service.verify_password(
+        body.current_password, current_user["hashed_password"]
+    ):
         raise HTTPException(status_code=400, detail="当前密码错误")
 
     # 哈希新密码并更新

@@ -68,9 +68,12 @@ def select_community_balanced_papers(
         return [], []
 
     paper_by_id = {str(p.get("id")): p for p in reranked_papers if p.get("id")}
-    rerank_order = {str(p.get("id")): idx for idx, p in enumerate(reranked_papers) if p.get("id")}
+    rerank_order = {
+        str(p.get("id")): idx for idx, p in enumerate(reranked_papers) if p.get("id")
+    }
     eligible_clusters = [
-        c for c in clusters
+        c
+        for c in clusters
         if any(str(pid) in paper_by_id for pid in (c.get("paper_ids") or []))
     ]
 
@@ -85,7 +88,11 @@ def select_community_balanced_papers(
 
     centrality_by_paper: dict[str, float] = {}
     for cluster in eligible_clusters:
-        paper_ids = [str(pid) for pid in cluster.get("paper_ids") or [] if str(pid) in paper_by_id]
+        paper_ids = [
+            str(pid)
+            for pid in cluster.get("paper_ids") or []
+            if str(pid) in paper_by_id
+        ]
         size = max(1, len(paper_ids))
         for idx, pid in enumerate(paper_ids):
             centrality_by_paper[pid] = max(

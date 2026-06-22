@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class ProjectStatus(StrEnum):
     """项目状态枚举"""
+
     CREATED = "created"
     SEARCHING = "searching"
     FILTERING = "filtering"
@@ -28,11 +29,12 @@ class ProjectStatus(StrEnum):
 
 class ProjectConfig(BaseModel):
     """项目配置"""
+
     # 搜索配置
     max_papers: int = 500
-    sources: list[str] = Field(default_factory=lambda: [
-        "semantic_scholar", "pubmed", "arxiv"
-    ])
+    sources: list[str] = Field(
+        default_factory=lambda: ["semantic_scholar", "pubmed", "arxiv"]
+    )
 
     # 质量过滤
     min_citation_count: int = 0
@@ -56,6 +58,7 @@ class ProjectConfig(BaseModel):
 
 class Project(BaseModel):
     """项目模型"""
+
     id: str
     name: str
     description: str | None = None

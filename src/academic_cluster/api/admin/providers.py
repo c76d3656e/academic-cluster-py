@@ -22,6 +22,7 @@ async def _reload_runtime_pools() -> int:
     """Best-effort runtime provider pool reload from enabled DB rows."""
     try:
         from ...services.provider_pool import reload_pools_from_db
+
         return await reload_pools_from_db()
     except Exception as e:
         logger.warning("Failed to reload provider pools", error=str(e))
@@ -48,8 +49,10 @@ def _pricing_model_candidates(model_name: str | None) -> list[str]:
 # 请求/响应模型
 # =============================================================================
 
+
 class ProviderCreateRequest(BaseModel):
     """创建 Provider 请求"""
+
     kind: str = Field(..., pattern="^(llm|embedding|rerank)$")
     display_name: str = Field(..., min_length=1, max_length=100)
     base_url: str = Field(..., min_length=1)
@@ -60,16 +63,21 @@ class ProviderCreateRequest(BaseModel):
     rpm_limit: int = Field(default=10, ge=1)
     weight: int = Field(default=1, ge=1)
     extra_keys: list[str] | None = None
-    key_strategy: str = Field(default="round_robin", pattern="^(round_robin|random|priority)$")
+    key_strategy: str = Field(
+        default="round_robin", pattern="^(round_robin|random|priority)$"
+    )
     auto_ban: bool = True
     test_model: str | None = None
     input_price_per_m: float = Field(default=0, ge=0, description="输入价格 $/M tokens")
-    output_price_per_m: float = Field(default=0, ge=0, description="输出价格 $/M tokens")
+    output_price_per_m: float = Field(
+        default=0, ge=0, description="输出价格 $/M tokens"
+    )
     metadata: dict | None = None
 
 
 class ProviderUpdateRequest(BaseModel):
     """更新 Provider 请求"""
+
     display_name: str | None = None
     base_url: str | None = None
     model: str | None = None
@@ -89,6 +97,7 @@ class ProviderUpdateRequest(BaseModel):
 
 class ProviderResponse(BaseModel):
     """Provider 响应"""
+
     id: str
     kind: str
     display_name: str
@@ -118,12 +127,14 @@ class ProviderResponse(BaseModel):
 
 class ProviderListResponse(BaseModel):
     """Provider 列表响应"""
+
     providers: list[ProviderResponse]
     total: int
 
 
 class HealthTestResponse(BaseModel):
     """健康检查响应"""
+
     provider_id: str
     healthy: bool
     latency_ms: float | None = None
@@ -132,6 +143,7 @@ class HealthTestResponse(BaseModel):
 
 class ReloadResult(BaseModel):
     """热重载结果"""
+
     reloaded: int
     message: str
 
@@ -140,9 +152,10 @@ class ReloadResult(BaseModel):
 # 辅助函数
 # =============================================================================
 
+
 def _row_to_provider(row, extra_keys_raw=None) -> ProviderResponse:
     """将数据库行转换为 ProviderResponse（支持 tuple 或 RowMapping）"""
-    m = row._mapping if hasattr(row, '_mapping') else row
+    m = row._mapping if hasattr(row, "_mapping") else row
 
     api_key_hint = None
     if m["api_key_enc"]:
@@ -156,6 +169,7 @@ def _row_to_provider(row, extra_keys_raw=None) -> ProviderResponse:
     raw = extra_keys_raw if extra_keys_raw is not None else m.get("extra_keys")
     if raw:
         import json
+
         try:
             keys = json.loads(raw) if isinstance(raw, str) else raw
             extra_key_count = len(keys) if isinstance(keys, list) else 0
@@ -175,7 +189,9 @@ def _row_to_provider(row, extra_keys_raw=None) -> ProviderResponse:
         weight=m["weight"],
         key_strategy=m["key_strategy"] or "round_robin",
         health_status=m["health_status"] or "unknown",
-        last_health_check=str(m["last_health_check"]) if m["last_health_check"] else None,
+        last_health_check=str(m["last_health_check"])
+        if m["last_health_check"]
+        else None,
         last_error=m["last_error"],
         failure_count=m["failure_count"] or 0,
         auto_ban=m["auto_ban"] if m["auto_ban"] is not None else True,
@@ -194,6 +210,7 @@ def _row_to_provider(row, extra_keys_raw=None) -> ProviderResponse:
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("", response_model=ProviderListResponse)
 async def list_providers(
@@ -292,7 +309,12 @@ async def create_provider(
         row = result.fetchone()
         provider_id = str(row[0])
 
-    logger.info("Provider created", provider_id=provider_id, kind=body.kind, name=body.display_name)
+    logger.info(
+        "Provider created",
+        provider_id=provider_id,
+        kind=body.kind,
+        name=body.display_name,
+    )
     await _reload_runtime_pools()
 
     return ProviderResponse(
@@ -382,7 +404,7 @@ async def update_provider(
     async with db.session() as session:
         result = await session.execute(
             text(f"""
-                UPDATE provider_registry SET {', '.join(updates)}
+                UPDATE provider_registry SET {", ".join(updates)}
                 WHERE id = :id
                 RETURNING id, kind, display_name, base_url, model, api_key_enc,
                           is_enabled, priority, rpm_limit, weight, key_strategy,
@@ -454,13 +476,17 @@ async def test_provider(
 
     if not api_key_enc:
         await _update_health(db, provider_id_str, "error", "未配置 API Key")
-        return HealthTestResponse(provider_id=provider_id_str, healthy=False, message="未配置 API Key")
+        return HealthTestResponse(
+            provider_id=provider_id_str, healthy=False, message="未配置 API Key"
+        )
 
     try:
         api_key = decrypt_key(api_key_enc)
     except Exception as e:
         await _update_health(db, provider_id_str, "error", f"API Key 解密失败: {e}")
-        return HealthTestResponse(provider_id=provider_id_str, healthy=False, message="API Key 解密失败")
+        return HealthTestResponse(
+            provider_id=provider_id_str, healthy=False, message="API Key 解密失败"
+        )
 
     # 根据 kind 执行不同的健康检查
     start = time.time()
@@ -477,10 +503,16 @@ async def test_provider(
         latency_ms = (time.time() - start) * 1000
         await _update_health(db, provider_id_str, "healthy", None)
         await _reload_runtime_pools()
-        logger.info("Provider health test passed", provider_id=provider_id_str, latency_ms=round(latency_ms))
+        logger.info(
+            "Provider health test passed",
+            provider_id=provider_id_str,
+            latency_ms=round(latency_ms),
+        )
         return HealthTestResponse(
-            provider_id=provider_id_str, healthy=True,
-            latency_ms=round(latency_ms, 2), message="健康",
+            provider_id=provider_id_str,
+            healthy=True,
+            latency_ms=round(latency_ms, 2),
+            message="健康",
         )
 
     except Exception as e:
@@ -488,10 +520,14 @@ async def test_provider(
         error_msg = str(e)[:500]
         await _update_health(db, provider_id_str, "error", error_msg)
         await _reload_runtime_pools()
-        logger.warning("Provider health test failed", provider_id=provider_id_str, error=error_msg)
+        logger.warning(
+            "Provider health test failed", provider_id=provider_id_str, error=error_msg
+        )
         return HealthTestResponse(
-            provider_id=provider_id_str, healthy=False,
-            latency_ms=round(latency_ms, 2), message=error_msg,
+            provider_id=provider_id_str,
+            healthy=False,
+            latency_ms=round(latency_ms, 2),
+            message=error_msg,
         )
 
 
@@ -507,8 +543,15 @@ async def _test_llm(base_url: str, api_key: str, model: str):
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             url,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 1},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1,
+            },
         )
         if resp.status_code >= 400:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
@@ -526,7 +569,10 @@ async def _test_embedding(base_url: str, api_key: str, model: str):
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             url,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
             json={"model": model, "input": "test"},
         )
         if resp.status_code >= 400:
@@ -545,14 +591,19 @@ async def _test_rerank(base_url: str, api_key: str, model: str):
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             url,
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
             json={"model": model, "query": "test", "documents": ["hello world"]},
         )
         if resp.status_code >= 400:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
 
-async def _update_health(db: DatabaseService, provider_id: str, status: str, error: str | None):
+async def _update_health(
+    db: DatabaseService, provider_id: str, status: str, error: str | None
+):
     """更新 Provider 健康状态"""
     is_healthy = status == "healthy"
     async with db.session() as session:
@@ -587,6 +638,7 @@ async def _update_health(db: DatabaseService, provider_id: str, status: str, err
 
 
 # --- 定价查询（供其他模块调用） ---
+
 
 async def get_provider_pricing(
     db: DatabaseService,

@@ -41,6 +41,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # 公开端点
 # =============================================================================
 
+
 @router.post("/register", response_model=UserResponse)
 async def register(
     body: UserCreate,
@@ -56,15 +57,19 @@ async def register(
 
     hashed_password = password_service.hash_password(body.password)
 
-    user_id = await db.save_user({
-        "email": body.email,
-        "hashed_password": hashed_password,
-        "full_name": body.full_name,
-        "role": "user",
-        "is_active": True,
-    })
+    user_id = await db.save_user(
+        {
+            "email": body.email,
+            "hashed_password": hashed_password,
+            "full_name": body.full_name,
+            "role": "user",
+            "is_active": True,
+        }
+    )
 
-    await db.log_activity(user_id, "register", ip_address=request.client.host if request.client else None)
+    await db.log_activity(
+        user_id, "register", ip_address=request.client.host if request.client else None
+    )
 
     user = await db.get_user_by_id(user_id)
     logger.info("User registered", user_id=user_id, email=body.email)
@@ -115,7 +120,9 @@ async def login(
     # 更新最后登录时间
     await db.update_user(user["id"], {"last_login_at": datetime.now(UTC)})
 
-    await db.log_activity(user["id"], "login", ip_address=request.client.host if request.client else None)
+    await db.log_activity(
+        user["id"], "login", ip_address=request.client.host if request.client else None
+    )
 
     logger.info("User logged in", user_id=user["id"], email=body.email)
 
@@ -163,6 +170,7 @@ async def refresh_token(
 # =============================================================================
 # 需要认证的端点
 # =============================================================================
+
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
@@ -228,6 +236,7 @@ async def logout(
 # 管理员端点
 # =============================================================================
 
+
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
     skip: int = 0,
@@ -274,7 +283,9 @@ async def change_user_role(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     await db.set_user_role(user_id, role)
-    await db.log_activity(admin["id"], "change_role", "user", user_id, {"new_role": role})
+    await db.log_activity(
+        admin["id"], "change_role", "user", user_id, {"new_role": role}
+    )
 
     return {"message": f"用户角色已更新为 {role}"}
 
@@ -292,7 +303,9 @@ async def toggle_user_active(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     await db.set_user_active(user_id, is_active)
-    await db.log_activity(admin["id"], "toggle_active", "user", user_id, {"is_active": is_active})
+    await db.log_activity(
+        admin["id"], "toggle_active", "user", user_id, {"is_active": is_active}
+    )
 
     # 如果停用用户，撤销其所有 Token
     if not is_active:

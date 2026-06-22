@@ -58,7 +58,9 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 
-def _split_finalized_body_by_section(body_markdown: str, sections: list[dict]) -> list[str]:
+def _split_finalized_body_by_section(
+    body_markdown: str, sections: list[dict]
+) -> list[str]:
     """Split finalized review body back into section bodies for UI storage."""
     if not body_markdown or not sections:
         return []
@@ -93,11 +95,7 @@ def _split_finalized_body_by_section(body_markdown: str, sections: list[dict]) -
 
 
 def _paper_id_to_global_number(papers: list[dict]) -> dict[str, int]:
-    return {
-        str(p.get("id")): idx + 1
-        for idx, p in enumerate(papers)
-        if p.get("id")
-    }
+    return {str(p.get("id")): idx + 1 for idx, p in enumerate(papers) if p.get("id")}
 
 
 def _paper_year(paper: dict) -> str:
@@ -120,19 +118,21 @@ def _section_citation_payload(plan, paper_map: dict[str, dict]) -> dict:
     for local_number, paper_id in enumerate(plan.candidate_paper_ids, 1):
         paper = paper_map.get(paper_id, {})
         detail = details_by_id.get(paper_id, {})
-        papers.append({
-            "local_number": local_number,
-            "id": local_number,
-            "paper_id": local_number,
-            "title": paper.get("title", ""),
-            "abstract": paper.get("abstract", ""),
-            "authors": paper.get("authors", []),
-            "year": _paper_year(paper),
-            "venue": paper.get("journal", paper.get("venue", "")),
-            "cluster_id": detail.get("cluster_id"),
-            "source": detail.get("source", "unknown"),
-            "is_core": detail.get("is_core", False),
-        })
+        papers.append(
+            {
+                "local_number": local_number,
+                "id": local_number,
+                "paper_id": local_number,
+                "title": paper.get("title", ""),
+                "abstract": paper.get("abstract", ""),
+                "authors": paper.get("authors", []),
+                "year": _paper_year(paper),
+                "venue": paper.get("journal", paper.get("venue", "")),
+                "cluster_id": detail.get("cluster_id"),
+                "source": detail.get("source", "unknown"),
+                "is_core": detail.get("is_core", False),
+            }
+        )
 
     return {
         **asdict(plan),
@@ -140,11 +140,21 @@ def _section_citation_payload(plan, paper_map: dict[str, dict]) -> dict:
     }
 
 
-def _build_cluster_context(plan, section: dict, evidence_plan: dict, clusters: list[dict], kg_entities: list[dict]) -> str:
+def _build_cluster_context(
+    plan,
+    section: dict,
+    evidence_plan: dict,
+    clusters: list[dict],
+    kg_entities: list[dict],
+) -> str:
     # key_clusters 用数字索引代替 UUID
     cluster_id_to_idx = {str(c.get("id")): i + 1 for i, c in enumerate(clusters)}
-    key_cluster_labels = [str(cluster_id_to_idx.get(str(k), k)) for k in (plan.key_clusters or [])]
-    parts = [f"section: {section.get('title', '')}\nsection_name: {section.get('name', 'unnamed')}\nkey_clusters: {', '.join(key_cluster_labels) if key_cluster_labels else 'all available clusters'}"]
+    key_cluster_labels = [
+        str(cluster_id_to_idx.get(str(k), k)) for k in (plan.key_clusters or [])
+    ]
+    parts = [
+        f"section: {section.get('title', '')}\nsection_name: {section.get('name', 'unnamed')}\nkey_clusters: {', '.join(key_cluster_labels) if key_cluster_labels else 'all available clusters'}"
+    ]
     csum = _render_citation_plan_summary(plan, {})
     if csum:
         parts.append(csum)
@@ -156,7 +166,9 @@ def _build_cluster_context(plan, section: dict, evidence_plan: dict, clusters: l
         for item in sm[:10]:
             raw_pid = item.get("paper_id", "")
             local_num = pid_to_local.get(raw_pid, raw_pid)
-            lines.append(f"- paper_id=[{local_num}]; score={item.get('relevance_score')}; source={item.get('candidate_source')}; claim={item.get('claim', '')[:180]}")
+            lines.append(
+                f"- paper_id=[{local_num}]; score={item.get('relevance_score')}; source={item.get('candidate_source')}; claim={item.get('claim', '')[:180]}"
+            )
         parts.append("\n".join(lines))
     entity_map: dict[str, list[str]] = {}
     for ent in kg_entities:
@@ -165,7 +177,9 @@ def _build_cluster_context(plan, section: dict, evidence_plan: dict, clusters: l
     stat_lines = []
     for i, c in enumerate(clusters):
         c_papers = c.get("paper_ids") or []
-        ents = list(dict.fromkeys(e for pid in c_papers[:50] for e in entity_map.get(pid, [])))[:12]
+        ents = list(
+            dict.fromkeys(e for pid in c_papers[:50] for e in entity_map.get(pid, []))
+        )[:12]
         line = f"cluster{i + 1}: {len(c_papers)} papers"
         if ents:
             line += f"; entities: {', '.join(ents)}"
@@ -174,8 +188,10 @@ def _build_cluster_context(plan, section: dict, evidence_plan: dict, clusters: l
         parts.append("\n".join(stat_lines))
     return "\n".join(parts) or "暂无聚类数据"
 
+
 def _build_sample_context(plan, paper_map: dict, ec_by_paper: dict) -> str:
     import json as _json
+
     samples = []
     for idx, pid in enumerate(plan.candidate_paper_ids[:16], 1):
         p = paper_map.get(pid)
@@ -185,7 +201,9 @@ def _build_sample_context(plan, paper_map: dict, ec_by_paper: dict) -> str:
         card = card_list[0] if card_list else None
         if card:
             metric = card.get("metric")
-            metric_str = _json.dumps(metric) if isinstance(metric, dict) else (metric or "none")
+            metric_str = (
+                _json.dumps(metric) if isinstance(metric, dict) else (metric or "none")
+            )
             samples.append(
                 f"[{idx}] paper_id: [{idx}]\ntitle: {p.get('title', '')}\n"
                 f"evidence_card_id: evidence_card:[{idx}]\n"
@@ -203,8 +221,12 @@ def _build_sample_context(plan, paper_map: dict, ec_by_paper: dict) -> str:
             )
     return "\n".join(samples) or "暂无论文样本"
 
-async def _revise_section(content: str, evaluation: dict, section_outline: dict, references: str) -> str:
+
+async def _revise_section(
+    content: str, evaluation: dict, section_outline: dict, references: str
+) -> str:
     from ...agents.section_evaluator import revise_section as _do_revise
+
     return await _do_revise(content, evaluation, section_outline, references)
 
 
@@ -230,10 +252,15 @@ async def write_review_node(state: PipelineState) -> dict:
         outline = state.outline_data
         # 断点恢复时 outline_data 可能为空，从 DB 回退加载
         if not outline:
-            logger.info("outline_data missing in state, loading from DB", project_id=state.project_id)
+            logger.info(
+                "outline_data missing in state, loading from DB",
+                project_id=state.project_id,
+            )
             outline = await db.get_outline_by_project_id(state.project_id)
         if not outline:
-            raise ValueError("No outline data available - outline_generation must complete first")
+            raise ValueError(
+                "No outline data available - outline_generation must complete first"
+            )
 
         review_title = outline.get("title", "综述")
         sections = outline.get("sections", [])
@@ -241,9 +268,11 @@ async def write_review_node(state: PipelineState) -> dict:
             raise ValueError("Outline has no sections")
 
         # 获取核心论文详情
-        review_paper_ids = list(dict.fromkeys(
-            list(state.core_paper_ids or []) + list(state.auxiliary_paper_ids or [])
-        ))
+        review_paper_ids = list(
+            dict.fromkeys(
+                list(state.core_paper_ids or []) + list(state.auxiliary_paper_ids or [])
+            )
+        )
         papers = await db.get_papers_by_ids(review_paper_ids or state.core_paper_ids)
         if not papers:
             raise ValueError("No core papers available for writing")
@@ -265,13 +294,16 @@ async def write_review_node(state: PipelineState) -> dict:
         hybrid_edges = []
         try:
             from ...services.vector_store import get_vector_store
+
             vector_store = get_vector_store()
             all_paper_ids = state.reranked_paper_ids or state.core_paper_ids
             hybrid_edges = await vector_store.get_knn_graph(
                 paper_ids=all_paper_ids, k=10, threshold=0.3
             )
         except Exception as e:
-            logger.warning("Failed to load hybrid edges for citation planning", error=str(e))
+            logger.warning(
+                "Failed to load hybrid edges for citation planning", error=str(e)
+            )
 
         # === Step 1: 引用规划（对齐 Rust 版 citation_planner，8 层优先级） ===
         config = state.config or {}
@@ -311,11 +343,17 @@ async def write_review_node(state: PipelineState) -> dict:
         community_memories = []
         try:
             if state.community_memory_ids:
-                community_memories = await db.get_community_memories_by_ids(state.community_memory_ids)
+                community_memories = await db.get_community_memories_by_ids(
+                    state.community_memory_ids
+                )
             if not community_memories:
-                community_memories = await db.get_community_memories_by_project(state.project_id)
+                community_memories = await db.get_community_memories_by_project(
+                    state.project_id
+                )
         except Exception as e:
-            logger.warning("Failed to load community memories for evidence planning", error=str(e))
+            logger.warning(
+                "Failed to load community memories for evidence planning", error=str(e)
+            )
 
         # 获取 KG 实体（用于社区上下文的 top_entities）
         kg_entities = []
@@ -359,9 +397,12 @@ async def write_review_node(state: PipelineState) -> dict:
             try:
                 async with db.session() as session:
                     from sqlalchemy import text
+
                     result = await session.execute(
-                        text("SELECT id, section_id, content FROM written_content WHERE outline_id = :oid"),
-                        {"oid": state.outline_id}
+                        text(
+                            "SELECT id, section_id, content FROM written_content WHERE outline_id = :oid"
+                        ),
+                        {"oid": state.outline_id},
                     )
                     for row in result.fetchall():
                         existing_sections[str(row[1])] = {
@@ -401,23 +442,42 @@ async def write_review_node(state: PipelineState) -> dict:
                 for pid in plan.candidate_paper_ids[:10]:
                     section_evidence.extend(ec_by_paper.get(pid, []))
 
-            section_contexts.append({
-                "plan_idx": plan_idx, "plan": plan, "section": section,
-                "next_section": next_section_data, "si": si,
-                "section_evidence": section_evidence,
-                "section_evidence_plan": section_evidence_plan,
-                "section_refs": render_section_references(plan, paper_map),
-                "section_citation": _section_citation_payload(plan, paper_map),
-                "cluster_data": _build_cluster_context(plan, section, section_evidence_plan, clusters, kg_entities),
-                "sample_papers": _build_sample_context(plan, paper_map, ec_by_paper),
-                "community_context": section_evidence_plan.get("community_context") or render_section_community_context(
-                    section_plan=section, clusters=clusters, papers=papers,
-                    evidence_cards=evidence_cards, kg_entities=kg_entities,
-                ) or None,
-                "evidence_limitations": section_evidence_plan.get("evidence_limitations") or render_section_evidence_limitations(
-                    section_plan=section, evidence_cards=evidence_cards,
-                ) or None,
-            })
+            section_contexts.append(
+                {
+                    "plan_idx": plan_idx,
+                    "plan": plan,
+                    "section": section,
+                    "next_section": next_section_data,
+                    "si": si,
+                    "section_evidence": section_evidence,
+                    "section_evidence_plan": section_evidence_plan,
+                    "section_refs": render_section_references(plan, paper_map),
+                    "section_citation": _section_citation_payload(plan, paper_map),
+                    "cluster_data": _build_cluster_context(
+                        plan, section, section_evidence_plan, clusters, kg_entities
+                    ),
+                    "sample_papers": _build_sample_context(
+                        plan, paper_map, ec_by_paper
+                    ),
+                    "community_context": section_evidence_plan.get("community_context")
+                    or render_section_community_context(
+                        section_plan=section,
+                        clusters=clusters,
+                        papers=papers,
+                        evidence_cards=evidence_cards,
+                        kg_entities=kg_entities,
+                    )
+                    or None,
+                    "evidence_limitations": section_evidence_plan.get(
+                        "evidence_limitations"
+                    )
+                    or render_section_evidence_limitations(
+                        section_plan=section,
+                        evidence_cards=evidence_cards,
+                    )
+                    or None,
+                }
+            )
 
         # Phase 1: 并行生成所有章节大纲
         outline_concurrency = max(1, min(4, len(section_contexts)))
@@ -442,21 +502,36 @@ async def write_review_node(state: PipelineState) -> dict:
             *[_gen_outline(ctx, i) for i, ctx in enumerate(section_contexts)],
             return_exceptions=True,
         )
-        for i, (ctx, result) in enumerate(zip(section_contexts, outline_results, strict=False)):
+        for i, (ctx, result) in enumerate(
+            zip(section_contexts, outline_results, strict=False)
+        ):
             if isinstance(result, Exception):
-                logger.error("Section outline failed", title=ctx["section"].get("title"), error=str(result)[:200])
+                logger.error(
+                    "Section outline failed",
+                    title=ctx["section"].get("title"),
+                    error=str(result)[:200],
+                )
                 raise result
             section_outlines[i] = result
-            logger.info("Section outline planned", title=ctx["section"].get("title"),
-                        paragraphs=len(result.get("paragraphs", [])),
-                        core_question=result.get("core_question", "")[:80])
+            logger.info(
+                "Section outline planned",
+                title=ctx["section"].get("title"),
+                paragraphs=len(result.get("paragraphs", [])),
+                core_question=result.get("core_question", "")[:80],
+            )
 
         # 基于全部大纲构建 prev_summary
         prev_lines = []
         for so in section_outlines:
             if so:
-                prev_lines.append(f"- {so.get('core_question', '')}: {so.get('narrative_arc', '')}")
-        full_prev_summary = "前序章节已覆盖的内容（不要重复）:\n" + "\n".join(prev_lines) if prev_lines else ""
+                prev_lines.append(
+                    f"- {so.get('core_question', '')}: {so.get('narrative_arc', '')}"
+                )
+        full_prev_summary = (
+            "前序章节已覆盖的内容（不要重复）:\n" + "\n".join(prev_lines)
+            if prev_lines
+            else ""
+        )
 
         # Phase 2: 并行撰写 + 评估 + 保存
         write_concurrency = max(1, min(4, len(section_contexts)))
@@ -482,10 +557,13 @@ async def write_review_node(state: PipelineState) -> dict:
 
             if isinstance(content, list):
                 content = "".join(
-                    block.get("text", "") if isinstance(block, dict) else str(block) for block in content
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in content
                 )
             if not content or len(content.strip()) < 50:
-                raise ValueError(f"Section '{ctx['section'].get('title')}' produced insufficient content")
+                raise ValueError(
+                    f"Section '{ctx['section'].get('title')}' produced insufficient content"
+                )
 
             content = strip_section_reference_block(content)
             content = clean_filler_phrases(content)
@@ -494,7 +572,9 @@ async def write_review_node(state: PipelineState) -> dict:
             content = strip_revision_commentary(content)
             content = strip_body_structure_leakage(content)
             content = strip_author_year_citations(content)
-            content = strip_unsupported_precise_metrics(content, ctx["section_evidence"])
+            content = strip_unsupported_precise_metrics(
+                content, ctx["section_evidence"]
+            )
             content = normalize_citation_surface(content)
 
             target_chars = ctx["section"].get("target_words", 2000) * 2
@@ -516,7 +596,9 @@ async def write_review_node(state: PipelineState) -> dict:
 
             for ref_attempt in range(max_refinement + 1):
                 evaluation = await evaluate_section(
-                    section_title=ctx["section"].get("title", f"章节 {ctx['plan_idx'] + 1}"),
+                    section_title=ctx["section"].get(
+                        "title", f"章节 {ctx['plan_idx'] + 1}"
+                    ),
                     section_draft=content,
                     section_outline=outline,
                     target_words=ctx["section"].get("target_words", 2000),
@@ -525,22 +607,28 @@ async def write_review_node(state: PipelineState) -> dict:
                     references=ctx["section_refs"],
                 )
                 if ref_attempt < max_refinement and evaluation.get("score", 0) < 70:
-                    content = await _revise_section(content, evaluation, outline, ctx["section_refs"])
+                    content = await _revise_section(
+                        content, evaluation, outline, ctx["section_refs"]
+                    )
                 else:
                     break
 
             # 保存到 DB
             section_data = {
                 "outline_id": state.outline_id,
-                "section_id": str(ctx["section"].get("name", ctx["section"].get("number", 0))),
+                "section_id": str(
+                    ctx["section"].get("name", ctx["section"].get("number", 0))
+                ),
                 "content": content,
                 "word_count": len(content),
             }
             section_id = await db.save_written_section(section_data)
 
             return {
-                "content": content, "section_id": section_id,
-                "evaluation": evaluation, "ctx": ctx,
+                "content": content,
+                "section_id": section_id,
+                "evaluation": evaluation,
+                "ctx": ctx,
                 "outline": outline,
             }
 
@@ -566,17 +654,26 @@ async def write_review_node(state: PipelineState) -> dict:
                 result = write_results[write_idx]
                 write_idx += 1
                 if isinstance(result, Exception):
-                    logger.error("Section write failed", title=section.get("title"), error=str(result)[:200])
+                    logger.error(
+                        "Section write failed",
+                        title=section.get("title"),
+                        error=str(result)[:200],
+                    )
                     raise result
                 written_sections.append(result["content"])
                 written_section_ids.append(result["section_id"])
                 section_evaluations.append(result["evaluation"])
 
-        logger.info("All sections written", total=total_sections,
-                     written=len(written_sections), skipped=len(existing_sections))
+        logger.info(
+            "All sections written",
+            total=total_sections,
+            written=len(written_sections),
+            skipped=len(existing_sections),
+        )
 
         await send_progress(
-            state.project_id, "write_review",
+            state.project_id,
+            "write_review",
             f"章节撰写完成，共 {len(written_sections)} 章，正在校验引用...",
         )
 
@@ -595,20 +692,25 @@ async def write_review_node(state: PipelineState) -> dict:
                         invalid=result["invalid_numbers"],
                     )
         except Exception as e:
-            logger.error("Citation validation failed", error=str(e), step="validate_citations")
+            logger.error(
+                "Citation validation failed", error=str(e), step="validate_citations"
+            )
             raise
 
         # 如果有无效引用，从所有章节中移除（对齐 Rust 版 deterministic_remove_invalid_citation_numbers）
         if all_invalid:
             try:
                 from ...services.citation_utils import strip_invalid_citations
+
                 revised = []
                 for content in written_sections:
                     revised.append(strip_invalid_citations(content, all_invalid))
                 written_sections = revised
                 logger.info("Stripped invalid citations", count=len(all_invalid))
             except Exception as e:
-                logger.error("Strip invalid citations failed", error=str(e), step="strip_invalid")
+                logger.error(
+                    "Strip invalid citations failed", error=str(e), step="strip_invalid"
+                )
                 raise
 
         # === Step 4: 重编号 + 组装 ===
@@ -629,7 +731,10 @@ async def write_review_node(state: PipelineState) -> dict:
                         invalid=sorted(invalid_local),
                     )
                     from ...services.citation_utils import strip_invalid_citations
-                    remapped_body = strip_invalid_citations(remapped_body, invalid_local)
+
+                    remapped_body = strip_invalid_citations(
+                        remapped_body, invalid_local
+                    )
                 remapped_section_bodies.append(remapped_body)
 
             finalization = finalize_review_markdown(
@@ -644,27 +749,35 @@ async def write_review_node(state: PipelineState) -> dict:
             )
             if len(displayed_section_bodies) == len(written_section_ids):
                 for idx, section_id in enumerate(written_section_ids):
-                    await db.save_written_section({
-                        "id": section_id,
-                        "outline_id": state.outline_id,
-                        "section_id": str(sections[idx].get("name", sections[idx].get("number", idx))),
-                        "content": displayed_section_bodies[idx],
-                        "word_count": len(displayed_section_bodies[idx]),
-                    })
+                    await db.save_written_section(
+                        {
+                            "id": section_id,
+                            "outline_id": state.outline_id,
+                            "section_id": str(
+                                sections[idx].get(
+                                    "name", sections[idx].get("number", idx)
+                                )
+                            ),
+                            "content": displayed_section_bodies[idx],
+                            "word_count": len(displayed_section_bodies[idx]),
+                        }
+                    )
             assembled_review = finalization.body_markdown
             final_review = finalization.markdown
             ref_mappings = finalization.reference_mappings
-            await db.save_pipeline_checkpoint({
-                "project_id": state.project_id,
-                "node_name": "final_review_artifact",
-                "state_snapshot": {
-                    "final_review": final_review,
-                    "body_markdown": finalization.body_markdown,
-                    "references": ref_mappings,
-                    "assembly_report": asdict(finalization.assembly_report),
-                },
-                "status": "completed",
-            })
+            await db.save_pipeline_checkpoint(
+                {
+                    "project_id": state.project_id,
+                    "node_name": "final_review_artifact",
+                    "state_snapshot": {
+                        "final_review": final_review,
+                        "body_markdown": finalization.body_markdown,
+                        "references": ref_mappings,
+                        "assembly_report": asdict(finalization.assembly_report),
+                    },
+                    "status": "completed",
+                }
+            )
             logger.info(
                 "Step 4a: deterministic assembly completed",
                 length=len(assembled_review),
@@ -691,7 +804,9 @@ async def write_review_node(state: PipelineState) -> dict:
                 section_citations.append(cited_nums)
 
             cited_paper_ids: set[str] = set()
-            global_number_to_paper = {idx + 1: paper.get("id", "") for idx, paper in enumerate(papers)}
+            global_number_to_paper = {
+                idx + 1: paper.get("id", "") for idx, paper in enumerate(papers)
+            }
             for body in remapped_section_bodies:
                 for match in _CITATION_RE.finditer(body):
                     if _YEAR_BRACKET_RE.fullmatch(match.group(0)):
@@ -702,14 +817,13 @@ async def write_review_node(state: PipelineState) -> dict:
                             cited_paper_ids.add(paper_id)
 
             cluster_paper_map = {
-                str(c.get("id", "")): c.get("paper_ids", [])
-                for c in clusters
+                str(c.get("id", "")): c.get("paper_ids", []) for c in clusters
             }
-            planned_candidate_ids = list(dict.fromkeys(
-                pid
-                for plan in citation_plans
-                for pid in plan.candidate_paper_ids
-            ))
+            planned_candidate_ids = list(
+                dict.fromkeys(
+                    pid for plan in citation_plans for pid in plan.candidate_paper_ids
+                )
+            )
             final_validation = validate_citations(
                 finalization.body_markdown,
                 len(ref_mappings),
@@ -745,7 +859,10 @@ async def write_review_node(state: PipelineState) -> dict:
                     orphan_clusters=coverage_result.orphan_clusters,
                 )
         except Exception as e:
-            logger.warning("Final coverage audit errored; preserving generated review", error=str(e))
+            logger.warning(
+                "Final coverage audit errored; preserving generated review",
+                error=str(e),
+            )
             coverage_result = None
             route = "audit_error"
 
@@ -766,29 +883,45 @@ async def write_review_node(state: PipelineState) -> dict:
             "final_review_id": final_review_id,
             "final_review": final_review,
             "bibtex": bibtex,
-            "coverage_score": coverage_result.candidate_coverage_bp / 10000 if coverage_result is not None else 0.0,
-            "weighted_coverage_bp": coverage_result.weighted_coverage_bp if coverage_result is not None else 0,
-            "coverage_route": route if 'route' in locals() else "unknown",
-            "invalid_citation_count": final_validation["invalid_count"] if 'final_validation' in locals() else 0,
+            "coverage_score": coverage_result.candidate_coverage_bp / 10000
+            if coverage_result is not None
+            else 0.0,
+            "weighted_coverage_bp": coverage_result.weighted_coverage_bp
+            if coverage_result is not None
+            else 0,
+            "coverage_route": route if "route" in locals() else "unknown",
+            "invalid_citation_count": final_validation["invalid_count"]
+            if "final_validation" in locals()
+            else 0,
             "weak_citation_support_count": 0,
             "status": "written",
         }
 
         if tracker:
-            await tracker.end_node("write_review", "succeeded", output_summary={
-                "section_count": len(written_sections),
-                "total_chars": len(final_review),
-                "references": len(ref_mappings),
-            })
+            await tracker.end_node(
+                "write_review",
+                "succeeded",
+                output_summary={
+                    "section_count": len(written_sections),
+                    "total_chars": len(final_review),
+                    "references": len(ref_mappings),
+                },
+            )
         return result
 
     except Exception as e:
         import traceback as tb_mod
+
         if tracker:
-            await tracker.end_node("write_review", "failed",
-                                   error_message=str(e),
-                                   error_traceback=tb_mod.format_exc())
-        logger.error("Review writing failed", error=str(e), traceback=tb_mod.format_exc())
+            await tracker.end_node(
+                "write_review",
+                "failed",
+                error_message=str(e),
+                error_traceback=tb_mod.format_exc(),
+            )
+        logger.error(
+            "Review writing failed", error=str(e), traceback=tb_mod.format_exc()
+        )
         raise
 
 
@@ -818,9 +951,7 @@ def _render_citation_plan_summary(plan, paper_map: dict) -> str:
         src = d.get("source", "unknown")
         if hasattr(src, "value"):
             src = src.value
-        candidate_lines.append(
-            f"[{i + 1}] cluster={cluster}; source={src}"
-        )
+        candidate_lines.append(f"[{i + 1}] cluster={cluster}; source={src}")
 
     return (
         f"citation_candidate_policy: section community papers first, then hybrid graph neighbors, "
@@ -835,11 +966,13 @@ def _generate_bibtex(papers: list[dict]) -> str:
     entries = []
     for i, paper in enumerate(papers):
         authors = paper.get("authors", [])
-        author_str = " and ".join(
-            a.get("name", "Unknown") for a in authors[:3]
-        ) or "Unknown"
+        author_str = (
+            " and ".join(a.get("name", "Unknown") for a in authors[:3]) or "Unknown"
+        )
         year = paper.get("year") or "2024"
-        first_author = authors[0].get("name", "Unknown").split()[-1] if authors else "Unknown"
+        first_author = (
+            authors[0].get("name", "Unknown").split()[-1] if authors else "Unknown"
+        )
         key = f"{first_author}{year}_{i}"
         journal = paper.get("journal") or paper.get("venue") or ""
         doi = paper.get("doi") or ""

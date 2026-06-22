@@ -31,7 +31,8 @@ async def finalize_node(state: PipelineState) -> dict:
     )
 
     await send_progress(
-        state.project_id, "finalize",
+        state.project_id,
+        "finalize",
         "生成最终产出...",
     )
 
@@ -86,7 +87,8 @@ async def finalize_node(state: PipelineState) -> dict:
         logger.info("Pipeline completed successfully", stats=stats)
 
         await send_progress(
-            state.project_id, "finalize",
+            state.project_id,
+            "finalize",
             "Pipeline 执行完成",
             progress=1.0,
         )

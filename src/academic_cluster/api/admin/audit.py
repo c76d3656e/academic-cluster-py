@@ -21,8 +21,10 @@ router = APIRouter(tags=["admin-audit"])
 # 响应模型
 # =============================================================================
 
+
 class AuditLogItem(BaseModel):
     """审计日志条目"""
+
     id: str
     user_id: str
     action: str
@@ -35,6 +37,7 @@ class AuditLogItem(BaseModel):
 
 class AuditLogListResponse(BaseModel):
     """审计日志列表响应"""
+
     logs: list[AuditLogItem]
     total: int
 
@@ -42,6 +45,7 @@ class AuditLogListResponse(BaseModel):
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("/logs", response_model=AuditLogListResponse)
 async def get_audit_logs(
@@ -105,15 +109,17 @@ async def get_audit_logs(
             except (json.JSONDecodeError, TypeError):
                 details = None
 
-        logs.append(AuditLogItem(
-            id=str(row[0]),
-            user_id=str(row[1]),
-            action=row[2],
-            resource_type=row[3],
-            resource_id=str(row[4]) if row[4] else None,
-            details=details,
-            ip_address=row[6],
-            created_at=str(row[7]) if row[7] else None,
-        ))
+        logs.append(
+            AuditLogItem(
+                id=str(row[0]),
+                user_id=str(row[1]),
+                action=row[2],
+                resource_type=row[3],
+                resource_id=str(row[4]) if row[4] else None,
+                details=details,
+                ip_address=row[6],
+                created_at=str(row[7]) if row[7] else None,
+            )
+        )
 
     return AuditLogListResponse(logs=logs, total=total)

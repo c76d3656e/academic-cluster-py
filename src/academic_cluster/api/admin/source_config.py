@@ -39,12 +39,18 @@ class SourceConfigListResponse(BaseModel):
 
 
 class UpdateSourceConfigRequest(BaseModel):
-    value: str = Field(default="", description="Raw source value. Empty value clears the DB override.")
+    value: str = Field(
+        default="", description="Raw source value. Empty value clears the DB override."
+    )
     is_enabled: bool = True
 
 
 class AppendSourceConfigRequest(BaseModel):
-    value: str = Field(..., min_length=1, description="One or more new values. Multi-key sources accept comma-separated values.")
+    value: str = Field(
+        ...,
+        min_length=1,
+        description="One or more new values. Multi-key sources accept comma-separated values.",
+    )
 
 
 @router.get("/sources", response_model=SourceConfigListResponse)
@@ -53,7 +59,9 @@ async def list_source_configs(
     db: DatabaseService = Depends(get_database),
 ):
     configs = await list_source_configs_service(db)
-    return SourceConfigListResponse(configs=[SourceConfigItem(**item) for item in configs])
+    return SourceConfigListResponse(
+        configs=[SourceConfigItem(**item) for item in configs]
+    )
 
 
 @router.put("/sources/{key}", response_model=SourceConfigItem)

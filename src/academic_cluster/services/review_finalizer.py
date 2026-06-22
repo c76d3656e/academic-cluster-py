@@ -41,7 +41,9 @@ class FinalizedReview:
     assembly_report: AssemblyReport
 
 
-def citation_reference_numbers(markdown: str, max_reference_count: int | None = None) -> set[int]:
+def citation_reference_numbers(
+    markdown: str, max_reference_count: int | None = None
+) -> set[int]:
     """Return citation numbers used in markdown, excluding year-like brackets."""
     numbers: set[int] = set()
     for match in _CITATION_RE.finditer(markdown):
@@ -113,12 +115,16 @@ def assemble_review_deterministic(
         rendered_sections.append(f"## {title}\n\n{body}")
 
     markdown = f"# {review_title.strip()}\n\n" + "\n\n".join(rendered_sections)
-    draft_refs = set().union(
-        *[
-            citation_reference_numbers(body, max_reference_count)
-            for body in section_bodies
-        ]
-    ) if section_bodies else set()
+    draft_refs = (
+        set().union(
+            *[
+                citation_reference_numbers(body, max_reference_count)
+                for body in section_bodies
+            ]
+        )
+        if section_bodies
+        else set()
+    )
     assembled_refs = citation_reference_numbers(markdown, max_reference_count)
     dropped = len(draft_refs - assembled_refs)
     retention = _ratio_basis_points(len(assembled_refs & draft_refs), len(draft_refs))
@@ -176,7 +182,11 @@ def render_reference_list_from_mappings(mappings: list[dict[str, Any]]) -> str:
             )
         else:
             authors = str(raw_authors).strip()
-        author_parts = [part.strip() for part in re.split(r";|,\s*(?=[A-Z])", authors) if part.strip()]
+        author_parts = [
+            part.strip()
+            for part in re.split(r";|,\s*(?=[A-Z])", authors)
+            if part.strip()
+        ]
         if len(author_parts) > 3:
             authors = ", ".join(author_parts[:3]) + " et al."
         title = str(mapping.get("title") or "").strip()

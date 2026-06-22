@@ -34,6 +34,7 @@ def _plain_int(value, default: int = 0) -> int:
 # 混合图构建
 # =============================================================================
 
+
 def build_hybrid_graph(
     knn_edges: list[dict],
     kg_relations: list[dict],
@@ -104,13 +105,15 @@ def build_hybrid_graph(
 
         # 通过共享关系连接论文
         for i, paper_a in enumerate(paper_ids):
-            for paper_b in paper_ids[i + 1:]:
+            for paper_b in paper_ids[i + 1 :]:
                 if G.has_node(paper_a) and G.has_node(paper_b):
                     weight = weights["kg_relation"]
                     if G.has_edge(paper_a, paper_b):
                         G[paper_a][paper_b]["weight"] += weight
                     else:
-                        G.add_edge(paper_a, paper_b, weight=weight, types=["kg_relation"])
+                        G.add_edge(
+                            paper_a, paper_b, weight=weight, types=["kg_relation"]
+                        )
 
     # 3. 添加共享实体边
     entity_to_papers = defaultdict(list)
@@ -136,13 +139,15 @@ def build_hybrid_graph(
         paper_ids = entity.get("paper_ids") or []
 
         for i, paper_a in enumerate(paper_ids):
-            for paper_b in paper_ids[i + 1:]:
+            for paper_b in paper_ids[i + 1 :]:
                 if G.has_node(paper_a) and G.has_node(paper_b):
                     weight = weights["shared_entity"] * type_weight
                     if G.has_edge(paper_a, paper_b):
                         G[paper_a][paper_b]["weight"] += weight
                     else:
-                        G.add_edge(paper_a, paper_b, weight=weight, types=["shared_entity"])
+                        G.add_edge(
+                            paper_a, paper_b, weight=weight, types=["shared_entity"]
+                        )
 
     # 4. 添加证据边
     evidence_to_papers = defaultdict(list)
@@ -155,7 +160,7 @@ def build_hybrid_graph(
 
     for _evidence_key, paper_ids in evidence_to_papers.items():
         for i, paper_a in enumerate(paper_ids):
-            for paper_b in paper_ids[i + 1:]:
+            for paper_b in paper_ids[i + 1 :]:
                 if G.has_node(paper_a) and G.has_node(paper_b):
                     weight = weights["evidence"]
                     if G.has_edge(paper_a, paper_b):
@@ -165,7 +170,7 @@ def build_hybrid_graph(
 
     # 5. 质量先验（核心论文之间的边）
     for i, paper_a in enumerate(core_paper_ids[:20]):  # Top 20 核心论文
-        for paper_b in core_paper_ids[i + 1:20]:
+        for paper_b in core_paper_ids[i + 1 : 20]:
             if G.has_node(paper_a) and G.has_node(paper_b):
                 weight = weights["quality"]
                 if G.has_edge(paper_a, paper_b):
@@ -185,6 +190,7 @@ def build_hybrid_graph(
 # =============================================================================
 # 社区检测（igraph 原生 API，支持 Leiden / Walktrap）
 # =============================================================================
+
 
 def community_detection(
     graph: nx.Graph,
@@ -267,12 +273,14 @@ def _run_leiden(
     clusters = []
     for i, cluster_nodes in enumerate(partition):
         paper_ids = [nodes[idx] for idx in cluster_nodes]
-        clusters.append({
-            "id": str(uuid.uuid4()),
-            "name": f"cluster_{i}",
-            "paper_ids": paper_ids,
-            "size": len(paper_ids),
-        })
+        clusters.append(
+            {
+                "id": str(uuid.uuid4()),
+                "name": f"cluster_{i}",
+                "paper_ids": paper_ids,
+                "size": len(paper_ids),
+            }
+        )
     return clusters
 
 
@@ -284,12 +292,14 @@ def _run_walktrap(ig_graph, nodes: list) -> list[dict]:
     clusters = []
     for i, cluster_nodes in enumerate(partition):
         paper_ids = [nodes[idx] for idx in cluster_nodes]
-        clusters.append({
-            "id": str(uuid.uuid4()),
-            "name": f"cluster_{i}",
-            "paper_ids": paper_ids,
-            "size": len(paper_ids),
-        })
+        clusters.append(
+            {
+                "id": str(uuid.uuid4()),
+                "name": f"cluster_{i}",
+                "paper_ids": paper_ids,
+                "size": len(paper_ids),
+            }
+        )
     return clusters
 
 
@@ -297,18 +307,21 @@ def _fallback_clustering(graph: nx.Graph) -> list[dict]:
     """备用聚类：连通分量（无边或 igraph 不可用时使用）。"""
     clusters = []
     for i, component in enumerate(nx.connected_components(graph)):
-        clusters.append({
-            "id": str(uuid.uuid4()),
-            "name": f"cluster_{i}",
-            "paper_ids": list(component),
-            "size": len(component),
-        })
+        clusters.append(
+            {
+                "id": str(uuid.uuid4()),
+                "name": f"cluster_{i}",
+                "paper_ids": list(component),
+                "size": len(component),
+            }
+        )
     return clusters
 
 
 # =============================================================================
 # 可视化生成
 # =============================================================================
+
 
 def generate_community_visualization(
     graph: nx.Graph,
@@ -340,15 +353,16 @@ def generate_community_visualization(
     # 生成颜色
     cluster_colors = _generate_colors(len(clusters))
     cluster_color_map = {
-        cluster["id"]: cluster_colors[i]
-        for i, cluster in enumerate(clusters)
+        cluster["id"]: cluster_colors[i] for i, cluster in enumerate(clusters)
     }
 
     # 计算布局
     if graph.number_of_nodes() == 0:
         pos = {}
     elif layout == "force":
-        pos = nx.spring_layout(graph, k=1/math.sqrt(graph.number_of_nodes()), iterations=50)
+        pos = nx.spring_layout(
+            graph, k=1 / math.sqrt(graph.number_of_nodes()), iterations=50
+        )
     elif layout == "circular":
         pos = nx.circular_layout(graph)
     else:
@@ -360,50 +374,57 @@ def generate_community_visualization(
         paper = paper_map.get(node_id, {})
         cluster_id = paper_to_cluster.get(node_id, "unknown")
 
-        nodes.append({
-            "id": node_id,
-            "label": paper.get("title", "")[:50],
-            "x": _plain_float(pos[node_id][0]) if node_id in pos else 0.0,
-            "y": _plain_float(pos[node_id][1]) if node_id in pos else 0.0,
-            "cluster": cluster_id,
-            "color": cluster_color_map.get(cluster_id, "#999999"),
-            "size": _plain_float(math.log(paper.get("citation_count", 0) + 1) * 3 + 5),
-            "title": paper.get("title", ""),
-            "citation_count": _plain_int(paper.get("citation_count", 0)),
-        })
+        nodes.append(
+            {
+                "id": node_id,
+                "label": paper.get("title", "")[:50],
+                "x": _plain_float(pos[node_id][0]) if node_id in pos else 0.0,
+                "y": _plain_float(pos[node_id][1]) if node_id in pos else 0.0,
+                "cluster": cluster_id,
+                "color": cluster_color_map.get(cluster_id, "#999999"),
+                "size": _plain_float(
+                    math.log(paper.get("citation_count", 0) + 1) * 3 + 5
+                ),
+                "title": paper.get("title", ""),
+                "citation_count": _plain_int(paper.get("citation_count", 0)),
+            }
+        )
 
     # 生成边数据
     edges = []
     for u, v, data in graph.edges(data=True):
         weight = data.get("weight", 0.0)
         if weight > 0.05:  # 只显示权重较大的边
-            edges.append({
-                "source": u,
-                "target": v,
-                "weight": _plain_float(weight),
-                "width": _plain_float(weight * 3),
-            })
+            edges.append(
+                {
+                    "source": u,
+                    "target": v,
+                    "weight": _plain_float(weight),
+                    "width": _plain_float(weight * 3),
+                }
+            )
 
     # 生成聚类摘要
     cluster_summaries = []
     for cluster in clusters:
         cluster_papers = [
-            paper_map.get(pid, {})
-            for pid in cluster.get("paper_ids") or []
+            paper_map.get(pid, {}) for pid in cluster.get("paper_ids") or []
         ]
 
-        cluster_summaries.append({
-            "id": cluster["id"],
-            "size": _plain_int(cluster["size"]),
-            "color": cluster_color_map.get(cluster["id"], "#999999"),
-            "papers": [
-                {
-                    "id": p.get("id"),
-                    "title": p.get("title", "")[:80],
-                }
-                for p in cluster_papers[:5]  # 只显示前 5 篇
-            ],
-        })
+        cluster_summaries.append(
+            {
+                "id": cluster["id"],
+                "size": _plain_int(cluster["size"]),
+                "color": cluster_color_map.get(cluster["id"], "#999999"),
+                "papers": [
+                    {
+                        "id": p.get("id"),
+                        "title": p.get("title", "")[:80],
+                    }
+                    for p in cluster_papers[:5]  # 只显示前 5 篇
+                ],
+            }
+        )
 
     visualization = {
         "nodes": nodes,
@@ -430,10 +451,26 @@ def generate_community_visualization(
 def _generate_colors(n: int) -> list[str]:
     """生成 N 个不同的颜色"""
     colors = [
-        "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7",
-        "#DDA0DD", "#98D8C8", "#F7DC6F", "#BB8FCE", "#85C1E9",
-        "#F8C471", "#82E0AA", "#F1948A", "#AED6F1", "#D7BDE2",
-        "#A3E4D7", "#FAD7A0", "#D5F5E3", "#FADBD8", "#D4E6F1",
+        "#FF6B6B",
+        "#4ECDC4",
+        "#45B7D1",
+        "#96CEB4",
+        "#FFEAA7",
+        "#DDA0DD",
+        "#98D8C8",
+        "#F7DC6F",
+        "#BB8FCE",
+        "#85C1E9",
+        "#F8C471",
+        "#82E0AA",
+        "#F1948A",
+        "#AED6F1",
+        "#D7BDE2",
+        "#A3E4D7",
+        "#FAD7A0",
+        "#D5F5E3",
+        "#FADBD8",
+        "#D4E6F1",
     ]
 
     if n <= len(colors):
@@ -441,10 +478,11 @@ def _generate_colors(n: int) -> list[str]:
 
     # 生成更多颜色
     import colorsys
+
     extra_colors = []
     for i in range(n - len(colors)):
         hue = i / (n - len(colors))
         r, g, b = colorsys.hsv_to_rgb(hue, 0.7, 0.9)
-        extra_colors.append(f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}")
+        extra_colors.append(f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}")
 
     return colors + extra_colors

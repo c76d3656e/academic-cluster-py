@@ -27,7 +27,9 @@ async def get_features(db: DatabaseService = Depends(get_database)):
     """获取 UI 功能开关（无需登录）"""
     try:
         async with db.session() as session:
-            r = await session.execute(text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'"))
+            r = await session.execute(
+                text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'")
+            )
             rows = r.fetchall()
         return {row[0].replace("ui.", ""): (row[1] == "true") for row in rows}
     except Exception:
@@ -38,8 +40,10 @@ async def get_features(db: DatabaseService = Depends(get_database)):
 # 请求/响应模型
 # =============================================================================
 
+
 class CreateProjectRequest(BaseModel):
     """创建项目请求"""
+
     name: str = Field(..., min_length=1, max_length=255)
     query: str = Field(..., min_length=1, max_length=2000)
     description: str | None = Field(None, max_length=5000)
@@ -48,6 +52,7 @@ class CreateProjectRequest(BaseModel):
 
 class ProjectResponse(BaseModel):
     """项目响应"""
+
     id: str
     name: str
     query: str
@@ -57,6 +62,7 @@ class ProjectResponse(BaseModel):
 
 class PipelineStatusResponse(BaseModel):
     """Pipeline 状态响应"""
+
     project_id: str
     status: str
     current_node: str | None = None
@@ -65,6 +71,7 @@ class PipelineStatusResponse(BaseModel):
 
 class OutlineConfirmRequest(BaseModel):
     """大纲确认请求"""
+
     project_id: str
     approved: bool
     edited_outline: dict | None = None
@@ -72,6 +79,7 @@ class OutlineConfirmRequest(BaseModel):
 
 class ProjectListItem(BaseModel):
     """项目列表项"""
+
     id: str
     name: str
     query: str
@@ -81,6 +89,7 @@ class ProjectListItem(BaseModel):
 
 class ProjectListResponse(BaseModel):
     """项目列表响应"""
+
     projects: list[ProjectListItem]
     total: int
 
@@ -88,6 +97,7 @@ class ProjectListResponse(BaseModel):
 # =============================================================================
 # 项目路由
 # =============================================================================
+
 
 @router.post("/projects", response_model=ProjectResponse)
 async def create_project(
@@ -106,15 +116,17 @@ async def create_project(
         user_id=current_user["id"],
     )
 
-    await db.save_project({
-        "id": project_id,
-        "user_id": current_user["id"],
-        "name": request.name,
-        "query": request.query,
-        "description": request.description,
-        "config": request.config,
-        "status": "created",
-    })
+    await db.save_project(
+        {
+            "id": project_id,
+            "user_id": current_user["id"],
+            "name": request.name,
+            "query": request.query,
+            "description": request.description,
+            "config": request.config,
+            "status": "created",
+        }
+    )
 
     return ProjectResponse(
         id=project_id,
@@ -140,7 +152,9 @@ async def list_projects(
     if current_user.get("role") == "admin":
         projects, total = await db.list_all_projects(skip, limit)
     else:
-        projects, total = await db.list_projects_by_user(current_user["id"], skip, limit)
+        projects, total = await db.list_projects_by_user(
+            current_user["id"], skip, limit
+        )
 
     return ProjectListResponse(
         projects=[
@@ -169,7 +183,10 @@ async def get_project_detail(
         raise HTTPException(status_code=404, detail="Project not found")
 
     # 权限检查：只有项目所有者或管理员可以查看
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     return project
@@ -186,12 +203,18 @@ async def delete_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     from sqlalchemy import text
+
     async with db.session() as session:
-        await session.execute(text("DELETE FROM projects WHERE id = :pid"), {"pid": project_id})
+        await session.execute(
+            text("DELETE FROM projects WHERE id = :pid"), {"pid": project_id}
+        )
 
     return {"message": "Project deleted"}
 
@@ -207,7 +230,10 @@ async def get_project_status(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     return PipelineStatusResponse(
@@ -229,7 +255,10 @@ async def get_project_progress(
     project = await db.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     async with db.session() as session:
@@ -259,6 +288,7 @@ async def get_project_progress(
 # Pipeline 路由
 # =============================================================================
 
+
 @router.post("/pipeline/{project_id}/start")
 async def start_pipeline(
     project_id: str,
@@ -270,7 +300,10 @@ async def start_pipeline(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     logger.info("Starting pipeline", project_id=project_id)
@@ -286,6 +319,7 @@ async def start_pipeline(
                 build_node_config,
                 get_pipeline_config_dict,
             )
+
             raw_config = await get_pipeline_config_dict()
             pipeline_config = build_node_config(raw_config)
             project_config = project.get("config") or {}
@@ -340,7 +374,10 @@ async def resume_pipeline(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     logger.info("Resuming pipeline from checkpoint", project_id=project_id)
@@ -357,6 +394,7 @@ async def resume_pipeline(
                 build_node_config,
                 get_pipeline_config_dict,
             )
+
             raw_config = await get_pipeline_config_dict()
             pipeline_config = build_node_config(raw_config)
             project_config = project.get("config") or {}
@@ -381,6 +419,7 @@ async def resume_pipeline(
 # 大纲确认路由
 # =============================================================================
 
+
 @router.get("/projects/{project_id}/outline")
 async def get_outline(
     project_id: str,
@@ -392,7 +431,10 @@ async def get_outline(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     outline = await db.get_outline_by_project_id(project_id)
@@ -427,6 +469,7 @@ async def confirm_outline(
 # 结果路由
 # =============================================================================
 
+
 @router.get("/projects/{project_id}/review")
 async def get_review(
     project_id: str,
@@ -438,7 +481,10 @@ async def get_review(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # 获取大纲
@@ -453,6 +499,7 @@ async def get_review(
         # 获取该项目的证据卡片
         async with db.session() as session:
             from sqlalchemy import text
+
             result = await session.execute(
                 text("""
                     SELECT DISTINCT ON (ec.id) ec.*
@@ -462,12 +509,14 @@ async def get_review(
                     ORDER BY ec.id, ec.created_at
                     LIMIT 200
                 """),
-                {"project_id": project_id}
+                {"project_id": project_id},
             )
             rows = result.fetchall()
             evidence_cards = [dict(row._mapping) for row in rows]
 
-    final_artifact = await db.get_pipeline_checkpoint(project_id, "final_review_artifact")
+    final_artifact = await db.get_pipeline_checkpoint(
+        project_id, "final_review_artifact"
+    )
     final_review = None
     abstract = None
     references = []
@@ -475,6 +524,7 @@ async def get_review(
         snapshot = final_artifact.get("state_snapshot") or {}
         if isinstance(snapshot, str):
             import json as _json
+
             try:
                 snapshot = _json.loads(snapshot)
             except (_json.JSONDecodeError, TypeError):
@@ -507,7 +557,10 @@ async def get_visualization(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if project.get("user_id") != current_user["id"] and current_user.get("role") != "admin":
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
         raise HTTPException(status_code=403, detail="Access denied")
 
     visualization = await db.get_visualization_by_project_id(project_id)
@@ -521,6 +574,7 @@ async def get_visualization(
 # =============================================================================
 # 可观测性路由
 # =============================================================================
+
 
 @router.get("/runs/{run_id}/stats")
 async def get_run_stats(
@@ -585,6 +639,7 @@ async def get_usage_summary(
 # WebSocket 路由（实时更新）
 # =============================================================================
 
+
 class ConnectionManager:
     """WebSocket 连接管理"""
 
@@ -612,10 +667,13 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws/{project_id}")
-async def websocket_endpoint(websocket: WebSocket, project_id: str, token: str | None = None):
+async def websocket_endpoint(
+    websocket: WebSocket, project_id: str, token: str | None = None
+):
     """WebSocket 端点，用于实时更新"""
     # 安全修复: WebSocket 连接必须携带有效 token（通过 query 参数传递）
     from ..services.auth import get_token_service
+
     if not token:
         await websocket.close(code=4001, reason="Missing authentication token")
         return

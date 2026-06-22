@@ -73,7 +73,7 @@ def _parse_json_object(content: Any) -> dict:
         end = text.rfind("}")
         if start < 0 or end <= start:
             raise
-        value = json.loads(text[start:end + 1])
+        value = json.loads(text[start : end + 1])
     if not isinstance(value, dict):
         raise ValueError("LLM response is not a JSON object")
     return value
@@ -117,13 +117,17 @@ def _normalize_memory_enrichment(raw: dict, fallback: dict) -> dict:
                 claim = _json_text(item.get("claim"), 600)
                 if not claim:
                     continue
-                normalized_claims.append({
-                    "paper_id": str(item.get("paper_id") or ""),
-                    "claim": claim,
-                    "evidence_card_id": str(item.get("evidence_card_id") or ""),
-                    "support": _json_text(item.get("support") or item.get("evidence_span"), 500),
-                    "synthesis_role": _json_text(item.get("synthesis_role"), 200),
-                })
+                normalized_claims.append(
+                    {
+                        "paper_id": str(item.get("paper_id") or ""),
+                        "claim": claim,
+                        "evidence_card_id": str(item.get("evidence_card_id") or ""),
+                        "support": _json_text(
+                            item.get("support") or item.get("evidence_span"), 500
+                        ),
+                        "synthesis_role": _json_text(item.get("synthesis_role"), 200),
+                    }
+                )
             else:
                 text = _json_text(item, 600)
                 if text:
@@ -138,7 +142,9 @@ def _normalize_memory_enrichment(raw: dict, fallback: dict) -> dict:
             "rationale": _json_text(cohesion.get("rationale"), 500),
             "outlier_paper_ids": [
                 str(pid) for pid in cohesion.get("outlier_paper_ids", [])[:12]
-            ] if isinstance(cohesion.get("outlier_paper_ids"), list) else [],
+            ]
+            if isinstance(cohesion.get("outlier_paper_ids"), list)
+            else [],
         }
 
     topic_relevance = raw.get("topic_relevance")
@@ -195,7 +201,9 @@ def _compute_cross_community_links(
     links: dict[str, list[dict]] = {}
     for cluster in clusters:
         cid = str(cluster.get("id"))
-        neighbor_counts: dict[str, list[str]] = {}  # neighbor_cid → [shared entity names]
+        neighbor_counts: dict[
+            str, list[str]
+        ] = {}  # neighbor_cid → [shared entity names]
         for eid, cluster_set in entity_to_clusters.items():
             if cid not in cluster_set:
                 continue
@@ -237,22 +245,30 @@ def synthesize_community_memory(
     cluster_id = str(cluster.get("id"))
     paper_by_id = {str(p.get("id")): p for p in papers if p.get("id")}
     cluster_paper_ids = [str(pid) for pid in cluster.get("paper_ids") or []]
-    cluster_papers = [paper_by_id[pid] for pid in cluster_paper_ids if pid in paper_by_id]
+    cluster_papers = [
+        paper_by_id[pid] for pid in cluster_paper_ids if pid in paper_by_id
+    ]
 
-    cards = [c for c in evidence_cards if str(c.get("paper_id")) in set(cluster_paper_ids)]
+    cards = [
+        c for c in evidence_cards if str(c.get("paper_id")) in set(cluster_paper_ids)
+    ]
     entities = [
-        e for e in kg_entities
+        e
+        for e in kg_entities
         if {str(pid) for pid in _as_list(e.get("paper_ids"))} & set(cluster_paper_ids)
     ]
     relations = [
-        r for r in kg_relations
+        r
+        for r in kg_relations
         if {str(pid) for pid in _as_list(r.get("paper_ids"))} & set(cluster_paper_ids)
     ]
 
     method_values = [c.get("method") for c in cards]
     method_values.extend(
-        e.get("name") for e in entities
-        if str(e.get("entity_type", "")).lower() in {"method", "model", "framework", "algorithm", "technique", "approach"}
+        e.get("name")
+        for e in entities
+        if str(e.get("entity_type", "")).lower()
+        in {"method", "model", "framework", "algorithm", "technique", "approach"}
     )
     method_families = _top_unique(method_values, 10)
 
@@ -268,13 +284,15 @@ def synthesize_community_memory(
     limitations = _top_unique([c.get("limitation") for c in cards], 10)
     if not limitations:
         limitations = _top_unique(
-            e.get("name") for e in entities
-            if str(e.get("entity_type", "")).lower() in {"limitation", "open_problem", "open problem"}
+            e.get("name")
+            for e in entities
+            if str(e.get("entity_type", "")).lower()
+            in {"limitation", "open_problem", "open problem"}
         )
 
-    future_directions = [
-        f"Address limitation: {item}" for item in limitations[:5]
-    ] or ["Clarify open problems through stronger comparative evidence."]
+    future_directions = [f"Address limitation: {item}" for item in limitations[:5]] or [
+        "Clarify open problems through stronger comparative evidence."
+    ]
 
     sorted_papers = sorted(
         cluster_papers,
@@ -283,15 +301,18 @@ def synthesize_community_memory(
     )
     current_year = datetime.now().year
     foundation = [
-        str(p.get("id")) for p in sorted_papers
+        str(p.get("id"))
+        for p in sorted_papers
         if _paper_year(p) and _paper_year(p) <= current_year - 8
     ][:8]
     frontier = [
-        str(p.get("id")) for p in sorted_papers
+        str(p.get("id"))
+        for p in sorted_papers
         if _paper_year(p) and _paper_year(p) >= current_year - 3
     ][:8]
     development = [
-        str(p.get("id")) for p in sorted_papers
+        str(p.get("id"))
+        for p in sorted_papers
         if str(p.get("id")) not in set(foundation + frontier)
     ][:8]
     representative = [str(p.get("id")) for p in sorted_papers[:12]]
@@ -299,12 +320,22 @@ def synthesize_community_memory(
     proof_ids = []
     for card in cards:
         if card.get("id"):
-            proof_ids.append({"type": "evidence_card", "id": str(card["id"]), "paper_id": str(card.get("paper_id"))})
+            proof_ids.append(
+                {
+                    "type": "evidence_card",
+                    "id": str(card["id"]),
+                    "paper_id": str(card.get("paper_id")),
+                }
+            )
     for pid in representative:
         proof_ids.append({"type": "paper", "id": pid})
 
-    relation_counts = Counter(str(r.get("relation_type")) for r in relations if r.get("relation_type"))
-    entity_counts = Counter(str(e.get("entity_type")) for e in entities if e.get("entity_type"))
+    relation_counts = Counter(
+        str(r.get("relation_type")) for r in relations if r.get("relation_type")
+    )
+    entity_counts = Counter(
+        str(e.get("entity_type")) for e in entities if e.get("entity_type")
+    )
     top_titles = _top_unique([p.get("title") for p in sorted_papers], 3)
     summary = (
         f"Community with {len(cluster_paper_ids)} papers. "
@@ -352,37 +383,45 @@ async def enrich_community_memory_with_llm(
     """Produce SurveyG-style community synthesis from KG and evidence cards."""
     cluster_paper_ids = {str(pid) for pid in cluster.get("paper_ids") or []}
     cluster_papers = [p for p in papers if str(p.get("id")) in cluster_paper_ids][:24]
-    cards = [c for c in evidence_cards if str(c.get("paper_id")) in cluster_paper_ids][:24]
+    cards = [c for c in evidence_cards if str(c.get("paper_id")) in cluster_paper_ids][
+        :24
+    ]
     entities = [
-        e for e in kg_entities
+        e
+        for e in kg_entities
         if {str(pid) for pid in _as_list(e.get("paper_ids"))} & cluster_paper_ids
     ][:40]
     relations = [
-        r for r in kg_relations
+        r
+        for r in kg_relations
         if {str(pid) for pid in _as_list(r.get("paper_ids"))} & cluster_paper_ids
     ][:30]
 
     paper_lines = []
     for p in cluster_papers:
-        paper_lines.append({
-            "paper_id": str(p.get("id")),
-            "title": _json_text(p.get("title"), 180),
-            "year": _paper_year(p) or None,
-            "abstract": _json_text(p.get("abstract"), 450),
-            "citation_count": p.get("citation_count"),
-        })
+        paper_lines.append(
+            {
+                "paper_id": str(p.get("id")),
+                "title": _json_text(p.get("title"), 180),
+                "year": _paper_year(p) or None,
+                "abstract": _json_text(p.get("abstract"), 450),
+                "citation_count": p.get("citation_count"),
+            }
+        )
     card_lines = []
     for c in cards:
-        card_lines.append({
-            "evidence_card_id": str(c.get("id") or ""),
-            "paper_id": str(c.get("paper_id") or ""),
-            "claim": _json_text(c.get("claim"), 450),
-            "evidence_span": _json_text(c.get("evidence_span"), 450),
-            "method": _json_text(c.get("method"), 220),
-            "metric": _json_text(c.get("metric"), 220),
-            "limitation": _json_text(c.get("limitation"), 220),
-            "confidence": c.get("confidence"),
-        })
+        card_lines.append(
+            {
+                "evidence_card_id": str(c.get("id") or ""),
+                "paper_id": str(c.get("paper_id") or ""),
+                "claim": _json_text(c.get("claim"), 450),
+                "evidence_span": _json_text(c.get("evidence_span"), 450),
+                "method": _json_text(c.get("method"), 220),
+                "metric": _json_text(c.get("metric"), 220),
+                "limitation": _json_text(c.get("limitation"), 220),
+                "confidence": c.get("confidence"),
+            }
+        )
     entity_lines = [
         {
             "name": _json_text(e.get("name"), 120),
@@ -442,7 +481,9 @@ Return strict JSON:
     response = await ainvoke_with_callbacks(
         llm,
         [
-            SystemMessage(content="You synthesize academic literature communities. Return only strict JSON."),
+            SystemMessage(
+                content="You synthesize academic literature communities. Return only strict JSON."
+            ),
             HumanMessage(content=prompt),
         ],
         timeout=240,
@@ -466,7 +507,8 @@ async def community_memory_node(state: PipelineState) -> dict:
         existing_memory_ids = [str(m["id"]) for m in existing_memories if m.get("id")]
         cluster_id_set = {str(c.get("id")) for c in clusters if c.get("id")}
         already_done_cluster_ids = {
-            str(m["cluster_id"]) for m in existing_memories
+            str(m["cluster_id"])
+            for m in existing_memories
             if m.get("cluster_id") and str(m["cluster_id"]) in cluster_id_set
         }
         if already_done_cluster_ids:
@@ -476,11 +518,15 @@ async def community_memory_node(state: PipelineState) -> dict:
                 total=len(clusters),
             )
     except Exception as e:
-        logger.warning("Failed to check existing community memories, processing all", error=str(e))
+        logger.warning(
+            "Failed to check existing community memories, processing all", error=str(e)
+        )
         already_done_cluster_ids = set()
 
     # 过滤掉已处理的 cluster
-    remaining_clusters = [c for c in clusters if str(c.get("id")) not in already_done_cluster_ids]
+    remaining_clusters = [
+        c for c in clusters if str(c.get("id")) not in already_done_cluster_ids
+    ]
     if not remaining_clusters:
         logger.info("All clusters already have community memories, skipping")
         return {
@@ -488,7 +534,9 @@ async def community_memory_node(state: PipelineState) -> dict:
             "status": "community_memory_synthesized",
         }
 
-    all_paper_ids = list(dict.fromkeys((state.core_paper_ids or []) + (state.auxiliary_paper_ids or [])))
+    all_paper_ids = list(
+        dict.fromkeys((state.core_paper_ids or []) + (state.auxiliary_paper_ids or []))
+    )
     papers = await db.get_papers_by_ids(all_paper_ids)
     evidence_cards = await db.get_evidence_cards_by_ids(state.evidence_card_ids)
     kg_entities = await db.get_kg_entities_by_ids(state.kg_entity_ids)
@@ -569,7 +617,9 @@ async def community_memory_node(state: PipelineState) -> dict:
             )
             return fallback
 
-    requested_concurrency = _int_config(state.config, "community_memory_concurrency", -1)
+    requested_concurrency = _int_config(
+        state.config, "community_memory_concurrency", -1
+    )
     provider_slots = get_llm_available_slots(default=10)
     if requested_concurrency <= 0:
         concurrency = min(provider_slots, DEFAULT_COMMUNITY_MEMORY_CONCURRENCY_CAP)
@@ -596,13 +646,18 @@ async def community_memory_node(state: PipelineState) -> dict:
         async with completed_lock:
             completed_count += 1
             await send_progress(
-                state.project_id, "community_memory",
+                state.project_id,
+                "community_memory",
                 f"社区记忆聚合中 {completed_count}/{total_to_process}...",
-                progress=completed_count / total_to_process if total_to_process > 0 else 0,
+                progress=completed_count / total_to_process
+                if total_to_process > 0
+                else 0,
             )
         return result
 
-    memories = await asyncio.gather(*[_bounded(i, cluster) for i, cluster in enumerate(remaining_clusters)])
+    memories = await asyncio.gather(
+        *[_bounded(i, cluster) for i, cluster in enumerate(remaining_clusters)]
+    )
 
     # === 跨聚类关联计算（确定性，基于共享 KG 实体） ===
     cross_links = _compute_cross_community_links(clusters, kg_entities)
@@ -627,12 +682,17 @@ async def community_memory_node(state: PipelineState) -> dict:
         all_memories = await db.get_community_memories_by_project(state.project_id)
         backfilled = 0
         for mem in all_memories:
-            if str(mem.get("cluster_id")) in cross_links and not mem.get("cross_community_links"):
+            if str(mem.get("cluster_id")) in cross_links and not mem.get(
+                "cross_community_links"
+            ):
                 mem["cross_community_links"] = cross_links[str(mem["cluster_id"])]
                 await db.save_community_memory(mem)
                 backfilled += 1
         if backfilled:
-            logger.info("Backfilled cross_community_links for existing memories", count=backfilled)
+            logger.info(
+                "Backfilled cross_community_links for existing memories",
+                count=backfilled,
+            )
 
     await send_progress(
         state.project_id,

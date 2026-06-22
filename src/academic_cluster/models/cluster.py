@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class Cluster(BaseModel):
     """聚类/社区模型"""
+
     id: str
     name: str | None = None
     description: str | None = None
@@ -28,6 +29,7 @@ class Cluster(BaseModel):
 
 class ClusterAssignment(BaseModel):
     """聚类分配"""
+
     id: str
     cluster_id: str
     paper_id: str
@@ -38,6 +40,7 @@ class ClusterAssignment(BaseModel):
 
 class HybridGraphEdge(BaseModel):
     """混合图边"""
+
     source_paper_id: str
     target_paper_id: str
     edge_type: str  # 'knn', 'kg_relation', 'shared_entity', 'evidence', 'quality'
@@ -47,14 +50,17 @@ class HybridGraphEdge(BaseModel):
 
 class HybridGraph(BaseModel):
     """混合图"""
+
     edges: list[HybridGraphEdge] = Field(default_factory=list)
-    weights: dict = Field(default_factory=lambda: {
-        "knn": 0.45,
-        "kg_relation": 0.25,
-        "shared_entity": 0.15,
-        "evidence": 0.10,
-        "quality": 0.05,
-    })
+    weights: dict = Field(
+        default_factory=lambda: {
+            "knn": 0.45,
+            "kg_relation": 0.25,
+            "shared_entity": 0.15,
+            "evidence": 0.10,
+            "quality": 0.05,
+        }
+    )
     adjacency: dict[str, dict[str, float]] = Field(default_factory=dict)
 
     def add_edge(self, edge: HybridGraphEdge):
@@ -73,6 +79,7 @@ class HybridGraph(BaseModel):
 
 class CommunityVisualization(BaseModel):
     """社区可视化数据"""
+
     nodes: list[dict] = Field(default_factory=list)
     edges: list[dict] = Field(default_factory=list)
     clusters: list[dict] = Field(default_factory=list)

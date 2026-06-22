@@ -92,12 +92,14 @@ def _compute_cluster_coverage(
         else:
             orphan_cluster_ids.append(cid)
 
-        cluster_details.append({
-            "cluster_id": cid,
-            "paper_count": len(cluster_paper_ids),
-            "cited_count": len(covered),
-            "coverage": len(covered) / max(len(cluster_paper_ids), 1),
-        })
+        cluster_details.append(
+            {
+                "cluster_id": cid,
+                "paper_count": len(cluster_paper_ids),
+                "cited_count": len(covered),
+                "coverage": len(covered) / max(len(cluster_paper_ids), 1),
+            }
+        )
 
     equal_weight_bp = (covered_clusters * 10000) // max(eligible_clusters, 1)
 
@@ -161,7 +163,8 @@ async def coverage_audit_node(state: PipelineState) -> dict:
     logger.info("Starting coverage audit")
 
     await send_progress(
-        state.project_id, "coverage_audit",
+        state.project_id,
+        "coverage_audit",
         "覆盖率审计中...",
     )
 
@@ -169,9 +172,13 @@ async def coverage_audit_node(state: PipelineState) -> dict:
 
     try:
         # 获取已写章节
-        written_sections = await db.get_written_sections_by_ids(state.written_section_ids)
+        written_sections = await db.get_written_sections_by_ids(
+            state.written_section_ids
+        )
         if not written_sections:
-            raise ValueError("No written sections to audit - write_review must complete first")
+            raise ValueError(
+                "No written sections to audit - write_review must complete first"
+            )
 
         valid_paper_count = len(state.core_paper_ids)
         total_papers = valid_paper_count + len(state.auxiliary_paper_ids)
@@ -201,13 +208,16 @@ async def coverage_audit_node(state: PipelineState) -> dict:
         # === 3. 聚类级覆盖率 ===
         clusters = await db.get_clusters_by_ids(state.cluster_ids)
         cluster_cov = _compute_cluster_coverage(
-            written_sections, clusters,
-            state.core_paper_ids, state.auxiliary_paper_ids,
+            written_sections,
+            clusters,
+            state.core_paper_ids,
+            state.auxiliary_paper_ids,
         )
 
         # === 4. 弱引用支撑检测 ===
         weak_support_count = _detect_weak_citation_support(
-            written_sections, valid_paper_count,
+            written_sections,
+            valid_paper_count,
         )
 
         # === 5. 综合判断 ===
@@ -233,8 +243,9 @@ async def coverage_audit_node(state: PipelineState) -> dict:
         )
 
         await send_progress(
-            state.project_id, "coverage_audit",
-            f"覆盖率审计完成：引用 {citation_coverage:.0%}，聚类 {weighted_bp/100:.0f}%，"
+            state.project_id,
+            "coverage_audit",
+            f"覆盖率审计完成：引用 {citation_coverage:.0%}，聚类 {weighted_bp / 100:.0f}%，"
             f"无效 {total_invalid}，弱支撑 {weak_support_count}",
             detail={
                 "citation_coverage": citation_coverage,
@@ -256,17 +267,24 @@ async def coverage_audit_node(state: PipelineState) -> dict:
             "status": "audited",
         }
         if tracker:
-            await tracker.end_node("coverage_audit", "succeeded", output_summary={
-                "coverage_score": citation_coverage,
-                "weighted_coverage_bp": weighted_bp,
-                "invalid_citations": total_invalid,
-            })
+            await tracker.end_node(
+                "coverage_audit",
+                "succeeded",
+                output_summary={
+                    "coverage_score": citation_coverage,
+                    "weighted_coverage_bp": weighted_bp,
+                    "invalid_citations": total_invalid,
+                },
+            )
         return result
 
     except Exception as e:
         if tracker:
-            await tracker.end_node("coverage_audit", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "coverage_audit",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         logger.error("Coverage audit failed", error=str(e))
         raise

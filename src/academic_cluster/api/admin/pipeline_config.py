@@ -5,7 +5,6 @@ Pipeline 配置管理 API
 参数存储在数据库中，pipeline 运行时实时读取。
 """
 
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -104,7 +103,6 @@ DEFAULT_CONFIG = {
         "group": "搜索",
         "type": "int",
     },
-
     # 过滤阶段
     "filter.min_citation_count": {
         "value": "0",
@@ -120,7 +118,6 @@ DEFAULT_CONFIG = {
         "group": "过滤",
         "type": "bool",
     },
-
     # BM25 阶段
     "bm25.min_score": {
         "value": "0.5",
@@ -136,7 +133,6 @@ DEFAULT_CONFIG = {
         "group": "过滤",
         "type": "int",
     },
-
     # 嵌入阶段
     "embedding.max_papers": {
         "value": "1000",
@@ -145,7 +141,6 @@ DEFAULT_CONFIG = {
         "group": "嵌入",
         "type": "int",
     },
-
     # 重排序阶段
     "rerank.max_papers": {
         "value": "500",
@@ -168,7 +163,6 @@ DEFAULT_CONFIG = {
         "group": "重排序",
         "type": "int",
     },
-
     # 聚类阶段
     "kg.concurrency": {
         "value": "-1",
@@ -184,7 +178,6 @@ DEFAULT_CONFIG = {
         "group": "证据卡片",
         "type": "int",
     },
-
     "community_memory.concurrency": {
         "value": "-1",
         "label": "\u793e\u533a\u8bb0\u5fc6\u5e76\u53d1\u5ea6",
@@ -220,7 +213,6 @@ DEFAULT_CONFIG = {
         "group": "缺口分析",
         "type": "int",
     },
-
     "clustering.algorithm": {
         "value": "leiden",
         "label": "社区检测算法",
@@ -270,7 +262,6 @@ DEFAULT_CONFIG = {
         "group": "聚类",
         "type": "float",
     },
-
     # 写作阶段
     "writing.total_target_words": {
         "value": "12000",
@@ -300,11 +291,13 @@ DEFAULT_CONFIG = {
 # 数据库初始化
 # =============================================================================
 
+
 async def init_pipeline_config_table():
     """创建 pipeline_config 表（如果不存在）"""
     db = get_database()
     async with db.session() as session:
-        await session.execute(text("""
+        await session.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS pipeline_config (
                 key VARCHAR(100) PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -314,7 +307,8 @@ async def init_pipeline_config_table():
                 value_type VARCHAR(20) NOT NULL DEFAULT 'string',
                 updated_at TIMESTAMP DEFAULT NOW()
             )
-        """))
+        """)
+        )
         await session.commit()
 
 
@@ -323,23 +317,28 @@ async def _ensure_defaults():
     db = get_database()
     async with db.session() as session:
         for key, cfg in DEFAULT_CONFIG.items():
-            await session.execute(text("""
+            await session.execute(
+                text("""
                 INSERT INTO pipeline_config (key, value, label, description, group_name, value_type)
                 VALUES (:key, :value, :label, :desc, :group, :vtype)
                 ON CONFLICT (key) DO NOTHING
-            """), {
-                "key": key,
-                "value": cfg["value"],
-                "label": cfg["label"],
-                "desc": cfg["description"],
-                "group": cfg["group"],
-                "vtype": cfg["type"],
-            })
-        await session.execute(text("""
+            """),
+                {
+                    "key": key,
+                    "value": cfg["value"],
+                    "label": cfg["label"],
+                    "desc": cfg["description"],
+                    "group": cfg["group"],
+                    "vtype": cfg["type"],
+                },
+            )
+        await session.execute(
+            text("""
             UPDATE pipeline_config
             SET value = '160', updated_at = NOW()
             WHERE key = 'rerank.core_count' AND value = '80'
-        """))
+        """)
+        )
         # 迁移：更新旧的超时默认值
         timeout_migrations = {
             "gap_analysis.timeout_s": ("45", "180"),
@@ -347,26 +346,43 @@ async def _ensure_defaults():
             "community_memory.timeout_s": ("90", "180"),
         }
         for key, (old_val, new_val) in timeout_migrations.items():
-            await session.execute(text("""
+            await session.execute(
+                text("""
                 UPDATE pipeline_config
                 SET value = :new_val, updated_at = NOW()
                 WHERE key = :key AND value = :old_val
-            """), {"key": key, "old_val": old_val, "new_val": new_val})
+            """),
+                {"key": key, "old_val": old_val, "new_val": new_val},
+            )
         # 中文化迁移：更新旧版英文标签/描述/分组
         cn_migrations = [
             ("evidence.timeout_s", "label", "证据卡片超时"),
-            ("evidence.timeout_s", "description", "单篇证据卡片 LLM 调用的最长等待秒数，超时后使用确定性 fallback 卡片以保证批次完成"),
+            (
+                "evidence.timeout_s",
+                "description",
+                "单篇证据卡片 LLM 调用的最长等待秒数，超时后使用确定性 fallback 卡片以保证批次完成",
+            ),
             ("evidence.timeout_s", "group_name", "证据卡片"),
             ("gap_analysis.timeout_s", "label", "缺口分析超时"),
-            ("gap_analysis.timeout_s", "description", "缺口分析 LLM judge 的最长等待秒数，超时后使用确定性 gap 判定继续流程"),
+            (
+                "gap_analysis.timeout_s",
+                "description",
+                "缺口分析 LLM judge 的最长等待秒数，超时后使用确定性 gap 判定继续流程",
+            ),
             ("gap_analysis.timeout_s", "group_name", "缺口分析"),
             ("ui.show_usage", "label", "显示调用明细"),
-            ("ui.show_usage", "description", "开启后用户可在项目详情页查看 LLM 调用明细，并在控制台查看个人用量页面"),
+            (
+                "ui.show_usage",
+                "description",
+                "开启后用户可在项目详情页查看 LLM 调用明细，并在控制台查看个人用量页面",
+            ),
             ("ui.show_usage", "group_name", "系统"),
         ]
         for key, col, cn_val in cn_migrations:
             await session.execute(
-                text(f"UPDATE pipeline_config SET {col} = :val, updated_at = NOW() WHERE key = :key"),  # nosec B608
+                text(
+                    f"UPDATE pipeline_config SET {col} = :val, updated_at = NOW() WHERE key = :key"
+                ),  # nosec B608
                 {"key": key, "val": cn_val},
             )
         await session.commit()
@@ -375,6 +391,7 @@ async def _ensure_defaults():
 # =============================================================================
 # 读取配置
 # =============================================================================
+
 
 async def get_pipeline_config_dict() -> dict[str, str]:
     """读取所有 pipeline 配置为 dict"""
@@ -403,6 +420,7 @@ def build_node_config(raw: dict[str, str]) -> dict:
 
     返回的 dict 可直接传入 PipelineState.config。
     """
+
     def _int(key: str, default: int) -> int:
         v = raw.get(key, str(default))
         try:
@@ -430,29 +448,27 @@ def build_node_config(raw: dict[str, str]) -> dict:
     return {
         # search
         "limit_per_source": _int("search.limit_per_source", 200),
-        "sources": _list("search.sources", ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"]),
+        "sources": _list(
+            "search.sources",
+            ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"],
+        ),
         "search.max_rounds": _int("search.max_rounds", 3),
         "search.initial_query_limit": _int("search.initial_query_limit", 12),
         "search.refine_query_limit": _int("search.refine_query_limit", 8),
         "search.target_relevant": _int("search.target_relevant", 50),
         "search.min_relevant": _int("search.min_relevant", 20),
-
         # filter
         "min_citation_count": _int("filter.min_citation_count", 0),
         "require_abstract": _bool("filter.require_abstract", True),
-
         # bm25
         "bm25.min_score": _float("bm25.min_score", 0.5),
         "bm25.max_papers": _int("bm25.max_papers", 2000),
-
         # embedding
         "max_embedding_papers": _int("embedding.max_papers", 1000),
-
         # rerank
         "rerank.max_papers": _int("rerank.max_papers", 500),
         "core_reference_count": _int("rerank.core_count", 160),
         "auxiliary_reference_count": _int("rerank.auxiliary_count", 160),
-
         # kg
         "kg_concurrency": _int("kg.concurrency", -1),
         "evidence_concurrency": _int("evidence.concurrency", -1),
@@ -461,7 +477,6 @@ def build_node_config(raw: dict[str, str]) -> dict:
         "community_memory_timeout_s": _int("community_memory.timeout_s", 180),
         "community_memory_llm_limit": _int("community_memory.llm_limit", 16),
         "gap_analysis_timeout_s": _int("gap_analysis.timeout_s", 180),
-
         # clustering
         "clustering_algorithm": raw.get("clustering.algorithm", "leiden"),
         "clustering_resolution": _float("clustering.resolution", 1.0),
@@ -472,7 +487,6 @@ def build_node_config(raw: dict[str, str]) -> dict:
             "evidence": _float("clustering.weight_evidence", 0.10),
             "quality": _float("clustering.weight_quality", 0.05),
         },
-
         # writing
         "total_target_words": _int("writing.total_target_words", 12000),
         "section_reference_target": _int("writing.section_reference_target", 30),
@@ -482,6 +496,7 @@ def build_node_config(raw: dict[str, str]) -> dict:
 # =============================================================================
 # API 路由
 # =============================================================================
+
 
 class PipelineConfigItem(BaseModel):
     key: str
@@ -502,7 +517,10 @@ async def get_features():
     db = get_database()
     async with db.session() as session:
         from sqlalchemy import text
-        r = await session.execute(text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'"))
+
+        r = await session.execute(
+            text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'")
+        )
         rows = r.fetchall()
     features = {row[0].replace("ui.", ""): row[1] == "true" for row in rows}
     return features
@@ -514,16 +532,22 @@ async def list_pipeline_config():
     await _ensure_defaults()
     db = get_database()
     async with db.session() as session:
-        result = await session.execute(text(
-            "SELECT key, value, label, description, group_name, value_type "
-            "FROM pipeline_config ORDER BY group_name, key"
-        ))
+        result = await session.execute(
+            text(
+                "SELECT key, value, label, description, group_name, value_type "
+                "FROM pipeline_config ORDER BY group_name, key"
+            )
+        )
         rows = result.fetchall()
 
     return [
         PipelineConfigItem(
-            key=row[0], value=row[1], label=row[2],
-            description=row[3], group=row[4], type=row[5],
+            key=row[0],
+            value=row[1],
+            label=row[2],
+            description=row[3],
+            group=row[4],
+            type=row[5],
         )
         for row in rows
     ]
@@ -542,12 +566,18 @@ async def update_pipeline_config(key: str, body: PipelineConfigUpdate):
             raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
 
         await session.execute(
-            text("UPDATE pipeline_config SET value = :value, updated_at = NOW() WHERE key = :key"),
+            text(
+                "UPDATE pipeline_config SET value = :value, updated_at = NOW() WHERE key = :key"
+            ),
             {"key": key, "value": body.value},
         )
         await session.commit()
 
-    return {"key": key, "value": body.value, "message": "配置已更新，新 pipeline 运行时生效"}
+    return {
+        "key": key,
+        "value": body.value,
+        "message": "配置已更新，新 pipeline 运行时生效",
+    }
 
 
 @router.post("/reset")
@@ -557,7 +587,9 @@ async def reset_pipeline_config():
     async with db.session() as session:
         for key, cfg in DEFAULT_CONFIG.items():
             await session.execute(
-                text("UPDATE pipeline_config SET value = :value, updated_at = NOW() WHERE key = :key"),
+                text(
+                    "UPDATE pipeline_config SET value = :value, updated_at = NOW() WHERE key = :key"
+                ),
                 {"key": key, "value": cfg["value"]},
             )
         await session.commit()

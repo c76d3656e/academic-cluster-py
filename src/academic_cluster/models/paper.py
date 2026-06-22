@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class Paper(BaseModel):
     """论文模型"""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     external_id: str | None = None
     source: str  # 'semantic_scholar', 'pubmed', 'arxiv', 'openalex', 'crossref'
@@ -39,6 +40,7 @@ class Paper(BaseModel):
 
 class KGEntity(BaseModel):
     """知识图谱实体"""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     entity_type: str  # 'ResearchProblem', 'Method', 'Dataset', 'Metric', 'Material', 'Concept', 'Domain'
@@ -49,6 +51,7 @@ class KGEntity(BaseModel):
 
 class KGRelation(BaseModel):
     """知识图谱关系"""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     source_entity_id: str
     target_entity_id: str
@@ -60,6 +63,7 @@ class KGRelation(BaseModel):
 
 class Embedding(BaseModel):
     """嵌入向量模型"""
+
     id: str = Field(default_factory=lambda: str(uuid4()))
     paper_id: str
     model_name: str
@@ -71,6 +75,7 @@ class Embedding(BaseModel):
 
 class PaperQuality(BaseModel):
     """论文质量评估"""
+
     paper_id: str
     jcr_quartile: str | None = None  # 'Q1', 'Q2', 'Q3', 'Q4'
     ccf_rank: str | None = None  # 'A', 'B', 'C'
@@ -81,6 +86,7 @@ class PaperQuality(BaseModel):
 
 class RerankResult(BaseModel):
     """重排序结果"""
+
     paper_id: str
     score: float
     rank: int

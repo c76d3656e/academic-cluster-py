@@ -183,7 +183,9 @@ async def stream_events(
     try:
         payload = token_service.decode_access_token(token)
     except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token") from None
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired token"
+        ) from None
 
     db = get_database()
     user = await db.get_user_by_id(payload["sub"])

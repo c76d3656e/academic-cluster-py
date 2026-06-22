@@ -10,18 +10,50 @@
 # =============================================================================
 
 AI_WORDS_EN = [
-    "delve", "crucial", "tapestry", "paradigm", "nuanced", "pivotal",
-    "intricate", "multifaceted", "holistic", "comprehensive", "endeavor",
-    "foster", "mitigate", "leverage", "streamline", "robust", "innovative",
-    "cutting-edge", "state-of-the-art", "groundbreaking", "transformative",
-    "revolutionary", "unprecedented", "unparalleled", "meticulous", "bespoke",
-    "myriad", "plethora",
+    "delve",
+    "crucial",
+    "tapestry",
+    "paradigm",
+    "nuanced",
+    "pivotal",
+    "intricate",
+    "multifaceted",
+    "holistic",
+    "comprehensive",
+    "endeavor",
+    "foster",
+    "mitigate",
+    "leverage",
+    "streamline",
+    "robust",
+    "innovative",
+    "cutting-edge",
+    "state-of-the-art",
+    "groundbreaking",
+    "transformative",
+    "revolutionary",
+    "unprecedented",
+    "unparalleled",
+    "meticulous",
+    "bespoke",
+    "myriad",
+    "plethora",
 ]
 
 AI_WORDS_ZH = [
-    "深入探讨", "值得注意的是", "综上所述", "总而言之", "不容忽视",
-    "至关重要", "显而易见", "不言而喻", "作为一种", "在当今",
-    "具有重要意义", "发挥着重要作用", "扮演着重要角色",
+    "深入探讨",
+    "值得注意的是",
+    "综上所述",
+    "总而言之",
+    "不容忽视",
+    "至关重要",
+    "显而易见",
+    "不言而喻",
+    "作为一种",
+    "在当今",
+    "具有重要意义",
+    "发挥着重要作用",
+    "扮演着重要角色",
 ]
 
 
@@ -60,8 +92,14 @@ THROAT_CLEARING_ZH = [
 # =============================================================================
 
 BANNED_SUMMARY_CONNECTORS = [
-    "综上所述", "总之", "总而言之", "综上", "概括而言",
-    "总的来说", "整体而言", "由此可见",
+    "综上所述",
+    "总之",
+    "总而言之",
+    "综上",
+    "概括而言",
+    "总的来说",
+    "整体而言",
+    "由此可见",
 ]
 
 
@@ -70,11 +108,24 @@ BANNED_SUMMARY_CONNECTORS = [
 # =============================================================================
 
 BANNED_FILLER_PHRASES_ZH = [
-    "从方法论角度", "从技术演进角度", "从理论角度", "从应用角度",
-    "从宏观层面", "从微观层面", "在理论层面", "在实践层面",
-    "在技术层面", "在方法层面", "在应用层面", "在模型层面",
-    "在数据层面", "在性能层面", "在效率层面", "在架构层面",
-    "在算法层面", "在系统层面",
+    "从方法论角度",
+    "从技术演进角度",
+    "从理论角度",
+    "从应用角度",
+    "从宏观层面",
+    "从微观层面",
+    "在理论层面",
+    "在实践层面",
+    "在技术层面",
+    "在方法层面",
+    "在应用层面",
+    "在模型层面",
+    "在数据层面",
+    "在性能层面",
+    "在效率层面",
+    "在架构层面",
+    "在算法层面",
+    "在系统层面",
 ]
 
 
@@ -122,10 +173,7 @@ SYNTHESIS_STRATEGIES = {
 
 def get_all_banned_phrases() -> list[str]:
     """获取所有禁止短语（用于 prompt 注入）"""
-    return (
-        BANNED_FILLER_PHRASES_ZH
-        + BANNED_SUMMARY_CONNECTORS
-    )
+    return BANNED_FILLER_PHRASES_ZH + BANNED_SUMMARY_CONNECTORS
 
 
 def format_banned_phrases_for_prompt() -> str:

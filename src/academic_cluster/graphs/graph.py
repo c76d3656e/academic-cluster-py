@@ -1,4 +1,4 @@
-﻿"""
+"""
 LangGraph 图定义
 定义 Pipeline 图、子图，以及节点间的边和条件路由。
 使用 AsyncPostgresSaver 实现持久化 checkpoint，支持断点恢复。
@@ -69,7 +69,8 @@ async def get_checkpointer():
         try:
             import ormsgpack
             from langgraph.checkpoint.serde import jsonplus as _serde_mod
-            if hasattr(_serde_mod, '_option'):
+
+            if hasattr(_serde_mod, "_option"):
                 _serde_mod._option = _serde_mod._option | ormsgpack.OPT_SERIALIZE_NUMPY
                 logger.info("Patched msgpack options: OPT_SERIALIZE_NUMPY enabled")
         except Exception as patch_error:
@@ -94,11 +95,18 @@ async def get_checkpointer():
         await checkpointer.setup()
         _default_checkpointer = checkpointer
 
-        logger.info("AsyncPostgresSaver initialized", host=settings.postgres_host, db=settings.postgres_db)
+        logger.info(
+            "AsyncPostgresSaver initialized",
+            host=settings.postgres_host,
+            db=settings.postgres_db,
+        )
         return checkpointer
     except Exception as e:
-        logger.warning("AsyncPostgresSaver unavailable, using MemorySaver fallback", error=str(e))
+        logger.warning(
+            "AsyncPostgresSaver unavailable, using MemorySaver fallback", error=str(e)
+        )
         from langgraph.checkpoint.memory import MemorySaver
+
         _default_checkpointer = MemorySaver()
         return _default_checkpointer
 
@@ -108,8 +116,8 @@ async def close_checkpointer():
     global _default_checkpointer
     if _default_checkpointer is not None:
         try:
-            conn = getattr(_default_checkpointer, 'conn', None)
-            if conn is not None and hasattr(conn, 'close'):
+            conn = getattr(_default_checkpointer, "conn", None)
+            if conn is not None and hasattr(conn, "close"):
                 await conn.close()
         except Exception:  # nosec B110
             pass
@@ -121,9 +129,13 @@ async def close_checkpointer():
 # 鏉′欢璺敱鍑芥暟
 # =============================================================================
 
+
 def should_continue_to_writing(state: PipelineState) -> str:
     """Route from gap analysis."""
-    if state.needs_targeted_refinement and state.refinement_attempt < state.max_refinement_attempts:
+    if (
+        state.needs_targeted_refinement
+        and state.refinement_attempt < state.max_refinement_attempts
+    ):
         logger.info(
             "Gaps detected, starting targeted refinement",
             attempt=state.refinement_attempt + 1,
@@ -195,6 +207,7 @@ def should_retry_on_error(state: PipelineState) -> str:
 # =============================================================================
 # 鍥炬瀯寤?# =============================================================================
 
+
 def create_pipeline_graph() -> StateGraph:
     """Create the review-generation pipeline graph."""
     workflow = StateGraph(PipelineState)
@@ -206,20 +219,43 @@ def create_pipeline_graph() -> StateGraph:
     workflow.add_node("embedding", with_audit("embedding")(embedding_node))
     workflow.add_node("pgvector_knn", with_audit("pgvector_knn")(pgvector_knn_node))
     workflow.add_node("rerank", with_audit("rerank")(rerank_node))
-    workflow.add_node("community_detection", with_audit("community_detection")(community_detection_node))
-    workflow.add_node("visualize_community", with_audit("visualize_community")(visualize_community_node))
-    workflow.add_node("evidence_cards", with_audit("evidence_cards")(evidence_cards_node))
+    workflow.add_node(
+        "community_detection",
+        with_audit("community_detection")(community_detection_node),
+    )
+    workflow.add_node(
+        "visualize_community",
+        with_audit("visualize_community")(visualize_community_node),
+    )
+    workflow.add_node(
+        "evidence_cards", with_audit("evidence_cards")(evidence_cards_node)
+    )
     workflow.add_node("kg_extraction", with_audit("kg_extraction")(kg_extraction_node))
-    workflow.add_node("community_memory", with_audit("community_memory")(community_memory_node))
+    workflow.add_node(
+        "community_memory", with_audit("community_memory")(community_memory_node)
+    )
     workflow.add_node("gap_analysis", with_audit("gap_analysis")(gap_analysis_node))
-    workflow.add_node("targeted_refine", with_audit("targeted_refine")(targeted_refine_node))
-    workflow.add_node("outline_generation", with_audit("outline_generation")(outline_generation_node))
+    workflow.add_node(
+        "targeted_refine", with_audit("targeted_refine")(targeted_refine_node)
+    )
+    workflow.add_node(
+        "outline_generation", with_audit("outline_generation")(outline_generation_node)
+    )
     workflow.add_node("user_confirm", with_audit("user_confirm")(user_confirm_node))
     workflow.add_node("write_review", with_audit("write_review")(write_review_node))
-    workflow.add_node("coverage_audit", with_audit("coverage_audit")(coverage_audit_node))
-    workflow.add_node("section_revision", with_audit("section_revision")(section_revision_node))
-    workflow.add_node("abstract_generation", with_audit("abstract_generation")(generate_abstract_node))
-    workflow.add_node("artifact_registration", with_audit("artifact_registration")(artifact_registration_node))
+    workflow.add_node(
+        "coverage_audit", with_audit("coverage_audit")(coverage_audit_node)
+    )
+    workflow.add_node(
+        "section_revision", with_audit("section_revision")(section_revision_node)
+    )
+    workflow.add_node(
+        "abstract_generation", with_audit("abstract_generation")(generate_abstract_node)
+    )
+    workflow.add_node(
+        "artifact_registration",
+        with_audit("artifact_registration")(artifact_registration_node),
+    )
     workflow.add_node("finalize", with_audit("finalize")(finalize_node))
 
     workflow.set_entry_point("search")
@@ -272,7 +308,6 @@ def compile_graph(
     interrupt_after: list[str] | None = None,
     callbacks: list | None = None,
 ):
-
     """Compile the pipeline graph."""
     if interrupt_before is None:
         interrupt_before = ["user_confirm"]
@@ -302,9 +337,11 @@ def compile_graph(
 # 渚挎嵎鍑芥暟
 # =============================================================================
 
+
 def get_default_graph():
     """Get the default graph for tests."""
     from langgraph.checkpoint.memory import MemorySaver
+
     return compile_graph(checkpointer=MemorySaver(), debug=True)
 
 
@@ -316,9 +353,9 @@ async def run_pipeline(
     auto_confirm: bool = True,
     resume: bool = False,
 ):
-
     """Run or resume a pipeline."""
     from ..services.database import get_database
+
     db = get_database()
 
     # 鑾峰彇鎸佷箙鍖?checkpointer
@@ -329,8 +366,12 @@ async def run_pipeline(
 
     # 鍒涘缓 llm_call DB 鎸佷箙鍖?wrapper
     async def _persist_llm_call(
-        node_name: str, provider_name: str, model_name: str,
-        call_type: str, prompt_tokens: int, completion_tokens: int,
+        node_name: str,
+        provider_name: str,
+        model_name: str,
+        call_type: str,
+        prompt_tokens: int,
+        completion_tokens: int,
         latency_ms: int,
     ):
         """Persist one LLM call record."""
@@ -350,8 +391,14 @@ async def run_pipeline(
             cost = 0.0
             try:
                 from ..api.admin.providers import get_provider_pricing
-                input_price_per_m, output_price_per_m = await get_provider_pricing(db, provider_name, model_name)
-                cost = (prompt_tokens * input_price_per_m + completion_tokens * output_price_per_m) / 1_000_000
+
+                input_price_per_m, output_price_per_m = await get_provider_pricing(
+                    db, provider_name, model_name
+                )
+                cost = (
+                    prompt_tokens * input_price_per_m
+                    + completion_tokens * output_price_per_m
+                ) / 1_000_000
             except Exception:  # nosec B110
                 pass
             call_id = await db.create_llm_call(
@@ -381,9 +428,12 @@ async def run_pipeline(
         except Exception as e:
             logger.warning("Failed to persist llm_call", error=str(e))
 
-    llm_callback = LLMCallbackHandler(tracker.token_tracker, db_caller=_persist_llm_call)
+    llm_callback = LLMCallbackHandler(
+        tracker.token_tracker, db_caller=_persist_llm_call
+    )
 
     from ..services.observability import PipelineStatusCallback
+
     status_callback = PipelineStatusCallback(project_id, db.update_project_status)
 
     interrupt_before = [] if auto_confirm else ["user_confirm"]
@@ -436,15 +486,27 @@ async def run_pipeline(
                 # 安全处理 node_output
                 if isinstance(node_output, dict):
                     result = {**(result or {}), **node_output}
-                elif isinstance(node_output, tuple) and len(node_output) > 0 and isinstance(node_output[0], dict):
+                elif (
+                    isinstance(node_output, tuple)
+                    and len(node_output) > 0
+                    and isinstance(node_output[0], dict)
+                ):
                     result = {**(result or {}), **node_output[0]}
                 else:
-                    logger.warning("Unexpected node output type", node=node_name, type=type(node_output).__name__)
+                    logger.warning(
+                        "Unexpected node output type",
+                        node=node_name,
+                        type=type(node_output).__name__,
+                    )
                     continue
 
                 # 发送 SSE 进度事件
                 if sse_manager:
-                    status = node_output.get("status", "processing") if isinstance(node_output, dict) else "processing"
+                    status = (
+                        node_output.get("status", "processing")
+                        if isinstance(node_output, dict)
+                        else "processing"
+                    )
                     detail_msg = _build_progress_message(node_name, result)
                     await sse_manager.send_progress(
                         project_id=project_id,
@@ -461,10 +523,13 @@ async def run_pipeline(
         await db.update_project_status(project_id, "completed")
 
         if sse_manager and result:
-            await sse_manager.send_complete(project_id, {
-                "paper_count": len(result.get("paper_ids", [])),
-                "status": result.get("status", "completed"),
-            })
+            await sse_manager.send_complete(
+                project_id,
+                {
+                    "paper_count": len(result.get("paper_ids", [])),
+                    "status": result.get("status", "completed"),
+                },
+            )
 
     except Exception as e:
         with contextlib.suppress(Exception):
@@ -485,7 +550,6 @@ async def run_pipeline(
         set_current_llm_callback(None)
 
     return result
-
 
 
 def _build_progress_message(node_name: str, state: dict) -> str:

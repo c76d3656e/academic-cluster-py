@@ -1,4 +1,4 @@
-﻿"""
+"""
 知识图谱提取节点 - 从论文中提取实体和关系
 并发模式：同时发出 K 个请求，每个请求处理 1 篇论文。
 配合幂等恢复，中断后只处理未完成的论文。
@@ -30,6 +30,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
         await tracker.begin_node("kg_extraction", "llm", index=3)
 
     from ...config import get_settings
+
     get_settings()
     config = state.config or {}
     project_id = state.project_id
@@ -52,6 +53,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
     except (TypeError, ValueError):
         requested_concurrency = -1
     from ...services.provider_pool import get_llm_available_slots
+
     provider_slots = get_llm_available_slots(default=10)
     if requested_concurrency <= 0:
         concurrency = provider_slots
@@ -89,11 +91,12 @@ async def kg_extraction_node(state: PipelineState) -> dict:
         paper_ids_to_check = [p["id"] for p in papers]
         async with db.session() as session:
             from sqlalchemy import text
+
             result = await session.execute(
                 text("""SELECT DISTINCT unnest(paper_ids) as pid
                         FROM kg_entities
                         WHERE paper_ids && :pids"""),
-                {"pids": paper_ids_to_check}
+                {"pids": paper_ids_to_check},
             )
             already_extracted_paper_ids = {str(row[0]) for row in result.fetchall()}
 
@@ -103,14 +106,14 @@ async def kg_extraction_node(state: PipelineState) -> dict:
                 result = await session.execute(
                     text("""SELECT id FROM kg_entities
                             WHERE paper_ids && :pids"""),
-                    {"pids": paper_ids_to_check}
+                    {"pids": paper_ids_to_check},
                 )
                 existing_entity_ids = [str(row[0]) for row in result.fetchall()]
 
                 result = await session.execute(
                     text("""SELECT id FROM kg_relations
                             WHERE paper_ids && :pids"""),
-                    {"pids": paper_ids_to_check}
+                    {"pids": paper_ids_to_check},
                 )
                 existing_relation_ids = [str(row[0]) for row in result.fetchall()]
 
@@ -121,13 +124,14 @@ async def kg_extraction_node(state: PipelineState) -> dict:
                 existing_entities=len(existing_entity_ids),
             )
     except Exception as e:
-        logger.warning("Failed to check existing KG, processing all papers", error=str(e))
+        logger.warning(
+            "Failed to check existing KG, processing all papers", error=str(e)
+        )
         already_extracted_paper_ids = set()
 
     # Skip papers that already have KG rows for idempotent resume.
     remaining_papers = [
-        p for p in papers
-        if str(p.get("id")) not in already_extracted_paper_ids
+        p for p in papers if str(p.get("id")) not in already_extracted_paper_ids
     ]
     if not remaining_papers:
         logger.info("All papers already have KG, skipping extraction")
@@ -137,11 +141,15 @@ async def kg_extraction_node(state: PipelineState) -> dict:
             "status": "kg_extracted",
         }
         if tracker:
-            await tracker.end_node("kg_extraction", "succeeded", output_summary={
-                "entities": len(existing_entity_ids),
-                "relations": len(existing_relation_ids),
-                "skipped": True,
-            })
+            await tracker.end_node(
+                "kg_extraction",
+                "succeeded",
+                output_summary={
+                    "entities": len(existing_entity_ids),
+                    "relations": len(existing_relation_ids),
+                    "skipped": True,
+                },
+            )
         return result
 
     try:
@@ -182,21 +190,32 @@ async def kg_extraction_node(state: PipelineState) -> dict:
 
                         # 鏋勫缓瀹炰綋鍚嶇О鍒?ID 鏄犲皠
                         entity_name_to_id = {}
-                        for entity, eid in zip(entities, saved_entity_ids, strict=False):
+                        for entity, eid in zip(
+                            entities, saved_entity_ids, strict=False
+                        ):
                             entity_name_to_id[entity.get("normalized_name", "")] = eid
 
                         # 鏇存柊鍏崇郴鐨勫疄浣?ID
                         for relation in relations:
                             source_key = relation.get("source", "")
                             target_key = relation.get("target", "")
-                            relation["source_entity_id"] = entity_name_to_id.get(norm_name(source_key))
-                            relation["target_entity_id"] = entity_name_to_id.get(norm_name(target_key))
+                            relation["source_entity_id"] = entity_name_to_id.get(
+                                norm_name(source_key)
+                            )
+                            relation["target_entity_id"] = entity_name_to_id.get(
+                                norm_name(target_key)
+                            )
 
                         valid_relations = [
-                            r for r in relations
+                            r
+                            for r in relations
                             if r.get("source_entity_id") and r.get("target_entity_id")
                         ]
-                        saved_relation_ids = await db.save_kg_relations(valid_relations) if valid_relations else []
+                        saved_relation_ids = (
+                            await db.save_kg_relations(valid_relations)
+                            if valid_relations
+                            else []
+                        )
 
                         async with completed_lock:
                             new_entity_ids.extend(saved_entity_ids)
@@ -205,17 +224,21 @@ async def kg_extraction_node(state: PipelineState) -> dict:
                     async with completed_lock:
                         completed_count += 1
                         await send_progress(
-                            project_id, "kg_extraction",
+                            project_id,
+                            "kg_extraction",
                             f"知识图谱抽取中 {completed_count}/{total}...",
                             progress=completed_count / total if total > 0 else 0,
                         )
 
                 except Exception as e:
-                    logger.error("KG extraction failed for paper", paper_idx=idx, error=str(e))
+                    logger.error(
+                        "KG extraction failed for paper", paper_idx=idx, error=str(e)
+                    )
                     async with completed_lock:
                         completed_count += 1
                         await send_progress(
-                            project_id, "kg_extraction",
+                            project_id,
+                            "kg_extraction",
                             f"知识图谱抽取中 {completed_count}/{total}...",
                             progress=completed_count / total if total > 0 else 0,
                         )
@@ -237,7 +260,8 @@ async def kg_extraction_node(state: PipelineState) -> dict:
         )
 
         await send_progress(
-            project_id, "kg_extraction",
+            project_id,
+            "kg_extraction",
             f"知识图谱抽取完成，{len(all_entity_ids)} 个实体，{len(all_relation_ids)} 条关系",
             progress=1.0,
         )
@@ -248,17 +272,24 @@ async def kg_extraction_node(state: PipelineState) -> dict:
             "status": "kg_extracted",
         }
         if tracker:
-            await tracker.end_node("kg_extraction", "succeeded", output_summary={
-                "entities": len(all_entity_ids),
-                "relations": len(all_relation_ids),
-            })
+            await tracker.end_node(
+                "kg_extraction",
+                "succeeded",
+                output_summary={
+                    "entities": len(all_entity_ids),
+                    "relations": len(all_relation_ids),
+                },
+            )
         return result
 
     except Exception as e:
         if tracker:
-            await tracker.end_node("kg_extraction", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "kg_extraction",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         logger.error("KG extraction failed", error=str(e))
         return {
             "kg_entity_ids": existing_entity_ids,
@@ -266,4 +297,3 @@ async def kg_extraction_node(state: PipelineState) -> dict:
             "status": "kg_extracted",
             "errors": [f"KG extraction failed: {e!s}"],
         }
-

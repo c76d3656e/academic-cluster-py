@@ -23,6 +23,7 @@ logger = structlog.get_logger()
 # Token 用量追踪
 # =============================================================================
 
+
 class TokenUsageTracker:
     """累计追踪 LLM token 用量"""
 
@@ -214,93 +215,97 @@ _ENTITY_TYPE_MAP: dict[str, str] = {}
 for _canonical in ENTITY_TYPES:
     _ENTITY_TYPE_MAP[_canonical.lower()] = _canonical
 # 常见变体映射
-_ENTITY_TYPE_MAP.update({
-    "research problem": "ResearchProblem",
-    "task": "ResearchProblem",
-    "problem": "ResearchProblem",
-    "challenge": "ResearchProblem",
-    "objective": "ResearchProblem",
-    "application task": "ResearchProblem",
-    "methodology": "Method",
-    "technique": "Method",
-    "algorithm": "Method",
-    "approach": "Method",
-    "framework": "Method",
-    "model": "Method",
-    "workflow": "Method",
-    "benchmark": "Dataset",
-    "corpus": "Dataset",
-    "knowledge base": "Dataset",
-    "kb": "Dataset",
-    "collection": "Dataset",
-    "measure": "Metric",
-    "score": "Metric",
-    "indicator": "Metric",
-    "criterion": "Metric",
-    "substance": "Material",
-    "sample": "Material",
-    "tool": "Material",
-    "library": "Material",
-    "framework_sw": "Material",
-    "software": "Material",
-    "platform": "Material",
-    "instrument": "Material",
-    "resource": "Material",
-    "finding": "Concept",
-    "result": "Concept",
-    "observation": "Concept",
-    "discovery": "Concept",
-    "theory": "Concept",
-    "principle": "Concept",
-    "law": "Concept",
-    "limitation": "Concept",
-    "limitations": "Concept",
-    "shortcoming": "Concept",
-    "bottleneck": "Concept",
-    "application": "Domain",
-    "use case": "Domain",
-    "location": "Domain",
-    "region": "Domain",
-    "site": "Domain",
-    "geographic": "Domain",
-    "area": "Domain",
-    "basin": "Domain",
-    "field": "Domain",
-})
+_ENTITY_TYPE_MAP.update(
+    {
+        "research problem": "ResearchProblem",
+        "task": "ResearchProblem",
+        "problem": "ResearchProblem",
+        "challenge": "ResearchProblem",
+        "objective": "ResearchProblem",
+        "application task": "ResearchProblem",
+        "methodology": "Method",
+        "technique": "Method",
+        "algorithm": "Method",
+        "approach": "Method",
+        "framework": "Method",
+        "model": "Method",
+        "workflow": "Method",
+        "benchmark": "Dataset",
+        "corpus": "Dataset",
+        "knowledge base": "Dataset",
+        "kb": "Dataset",
+        "collection": "Dataset",
+        "measure": "Metric",
+        "score": "Metric",
+        "indicator": "Metric",
+        "criterion": "Metric",
+        "substance": "Material",
+        "sample": "Material",
+        "tool": "Material",
+        "library": "Material",
+        "framework_sw": "Material",
+        "software": "Material",
+        "platform": "Material",
+        "instrument": "Material",
+        "resource": "Material",
+        "finding": "Concept",
+        "result": "Concept",
+        "observation": "Concept",
+        "discovery": "Concept",
+        "theory": "Concept",
+        "principle": "Concept",
+        "law": "Concept",
+        "limitation": "Concept",
+        "limitations": "Concept",
+        "shortcoming": "Concept",
+        "bottleneck": "Concept",
+        "application": "Domain",
+        "use case": "Domain",
+        "location": "Domain",
+        "region": "Domain",
+        "site": "Domain",
+        "geographic": "Domain",
+        "area": "Domain",
+        "basin": "Domain",
+        "field": "Domain",
+    }
+)
 
 _RELATION_TYPE_MAP: dict[str, str] = {}
 for _canonical in RELATION_TYPES:
     _RELATION_TYPE_MAP[_canonical.lower()] = _canonical
 # 常见变体映射
-_RELATION_TYPE_MAP.update({
-    "uses_method": "uses",
-    "used_in": "uses",
-    "uses method": "uses",
-    "used": "uses",
-    "reports_metric": "evaluated_on",
-    "tested_on": "evaluated_on",
-    "evaluated on": "evaluated_on",
-    "evaluates_on": "evaluated_on",
-    "evaluates": "evaluated_on",
-    "reports metric": "evaluated_on",
-    "improves_over": "improves",
-    "outperforms": "improves",
-    "improves over": "improves",
-    "applies_to": "applied_to",
-    "applied to": "applied_to",
-    "applies to": "applied_to",
-    "supports_finding": "based_on",
-    "limited_by": "based_on",
-    "belongs_to_cluster": "based_on",
-    "based on": "based_on",
-    "supported_by": "based_on",
-    "derived_from": "based_on",
-    "introduces": "proposes",
-    "presents": "proposes",
-    "compared_with": "compares_with",
-    "compares with": "compares_with",
-    "related_to": "based_on",
-})
+_RELATION_TYPE_MAP.update(
+    {
+        "uses_method": "uses",
+        "used_in": "uses",
+        "uses method": "uses",
+        "used": "uses",
+        "reports_metric": "evaluated_on",
+        "tested_on": "evaluated_on",
+        "evaluated on": "evaluated_on",
+        "evaluates_on": "evaluated_on",
+        "evaluates": "evaluated_on",
+        "reports metric": "evaluated_on",
+        "improves_over": "improves",
+        "outperforms": "improves",
+        "improves over": "improves",
+        "applies_to": "applied_to",
+        "applied to": "applied_to",
+        "applies to": "applied_to",
+        "supports_finding": "based_on",
+        "limited_by": "based_on",
+        "belongs_to_cluster": "based_on",
+        "based on": "based_on",
+        "supported_by": "based_on",
+        "derived_from": "based_on",
+        "introduces": "proposes",
+        "presents": "proposes",
+        "compared_with": "compares_with",
+        "compares with": "compares_with",
+        "related_to": "based_on",
+    }
+)
 
 
 def canonical_entity_type(raw: str) -> str:
@@ -359,19 +364,20 @@ def clamp_confidence(value: float) -> float:
 # JSON 修复
 # =============================================================================
 
+
 def _extract_json_object(text: str) -> str | None:
     """从文本中提取 JSON 对象（对齐 Rust 版 extract_json_object）"""
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
-        return text[start:end + 1]
+        return text[start : end + 1]
     return None
 
 
 def _strip_markdown_fences(text: str) -> str:
     """去除 markdown 代码块标记"""
-    text = re.sub(r'```(?:json)?\s*', '', text)
-    text = re.sub(r'```\s*', '', text)
+    text = re.sub(r"```(?:json)?\s*", "", text)
+    text = re.sub(r"```\s*", "", text)
     return text.strip()
 
 
@@ -381,7 +387,7 @@ def _fix_illegal_escapes(text: str) -> str:
     # 将其他 \\X 替换为 X（去掉反斜杠）
     return re.sub(
         r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})',
-        '',
+        "",
         text,
     )
 
@@ -400,8 +406,8 @@ def fix_json(json_str: str) -> str:
     json_str = _fix_illegal_escapes(json_str)
 
     # 4. 修复尾随逗号
-    json_str = re.sub(r',\s*}', '}', json_str)
-    json_str = re.sub(r',\s*]', ']', json_str)
+    json_str = re.sub(r",\s*}", "}", json_str)
+    json_str = re.sub(r",\s*]", "]", json_str)
 
     return json_str
 
@@ -434,13 +440,18 @@ def parse_kg_response(response: str) -> dict:
         fixed = fix_json(response)
         return json.loads(fixed, strict=False)
     except json.JSONDecodeError as e:
-        logger.error("Failed to parse KG response", error=str(e), response=response[:500])
-        raise ValueError(f"LLM returned invalid JSON for KG extraction: {response[:200]}") from e
+        logger.error(
+            "Failed to parse KG response", error=str(e), response=response[:500]
+        )
+        raise ValueError(
+            f"LLM returned invalid JSON for KG extraction: {response[:200]}"
+        ) from e
 
 
 # =============================================================================
 # Agent 创建
 # =============================================================================
+
 
 def create_kg_extraction_agent(
     model: str | None = None,
@@ -457,6 +468,7 @@ def create_kg_extraction_agent(
 # =============================================================================
 # 提取函数
 # =============================================================================
+
 
 async def extract_kg_from_papers_batch(
     papers: list[dict],
@@ -498,17 +510,26 @@ async def extract_kg_from_papers_batch(
     ]
 
     from ..services.llm_client import ainvoke_with_callbacks
+
     response = await ainvoke_with_callbacks(agent, messages)
 
     # 追踪 token 用量
-    usage = getattr(response, "usage_metadata", None) or getattr(response, "response_metadata", {})
+    usage = getattr(response, "usage_metadata", None) or getattr(
+        response, "response_metadata", {}
+    )
     if usage:
         tracker = get_token_tracker()
-        tracker.add({
-            "prompt_tokens": usage.get("input_tokens", usage.get("prompt_tokens", 0)),
-            "completion_tokens": usage.get("output_tokens", usage.get("completion_tokens", 0)),
-            "total_tokens": usage.get("total_tokens", 0),
-        })
+        tracker.add(
+            {
+                "prompt_tokens": usage.get(
+                    "input_tokens", usage.get("prompt_tokens", 0)
+                ),
+                "completion_tokens": usage.get(
+                    "output_tokens", usage.get("completion_tokens", 0)
+                ),
+                "total_tokens": usage.get("total_tokens", 0),
+            }
+        )
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
     raw_content = response.content
@@ -533,6 +554,7 @@ async def extract_kg_from_papers_batch(
 # =============================================================================
 # 批量提取（带进度回调）
 # =============================================================================
+
 
 async def extract_kg_batch(
     papers: list[dict],
@@ -566,14 +588,14 @@ async def extract_kg_batch(
 
     # 分批处理
     for batch_start in range(0, total, batch_size):
-        batch = papers[batch_start:batch_start + batch_size]
+        batch = papers[batch_start : batch_start + batch_size]
         batch_end = min(batch_start + batch_size, total)
 
         if progress_callback:
             await progress_callback(
                 batch_start,
                 total,
-                f"KG extraction: papers {batch_start+1}-{batch_end}/{total}",
+                f"KG extraction: papers {batch_start + 1}-{batch_end}/{total}",
             )
 
         try:
@@ -598,7 +620,9 @@ async def extract_kg_batch(
             all_relations.extend(raw_relations)
 
         except Exception as e:
-            logger.error("KG batch extraction failed", batch_start=batch_start, error=str(e))
+            logger.error(
+                "KG batch extraction failed", batch_start=batch_start, error=str(e)
+            )
 
         if progress_callback:
             await progress_callback(
@@ -633,6 +657,7 @@ async def extract_kg_batch(
 # 规范化（对齐 Rust 版 normalize.rs）
 # =============================================================================
 
+
 def normalize_kg(
     raw_entities: list[dict],
     raw_relations: list[dict],
@@ -655,7 +680,9 @@ def normalize_kg(
         if not key:
             continue
 
-        entity_type = canonical_entity_type(raw.get("entity_type") or raw.get("type") or "")
+        entity_type = canonical_entity_type(
+            raw.get("entity_type") or raw.get("type") or ""
+        )
         confidence = clamp_confidence(raw.get("confidence", 0.5))
         raw_paper_ids = raw.get("paper_ids", [])
         paper_ids = [pid for pid in raw_paper_ids if pid and _is_valid_uuid(pid)]
@@ -743,14 +770,16 @@ def normalize_kg(
         confidence = clamp_confidence(raw.get("confidence", 0.5))
         evidence = (raw.get("evidence") or "").strip() or None
 
-        relations.append({
-            "source": source_name,
-            "target": target_name,
-            "relation_type": rel_type,
-            "paper_ids": paper_ids,
-            "confidence": confidence,
-            "evidence": evidence,
-        })
+        relations.append(
+            {
+                "source": source_name,
+                "target": target_name,
+                "relation_type": rel_type,
+                "paper_ids": paper_ids,
+                "confidence": confidence,
+                "evidence": evidence,
+            }
+        )
 
     # 按 confidence 降序排列
     relations.sort(key=lambda r: (-r["confidence"], r["source"], r["target"]))

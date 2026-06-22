@@ -54,10 +54,19 @@ _REVISION_THRESHOLD = 75
 _DEFAULT_BLIND_EVALUATION = {
     "score": 70,
     "dimensions": {
-        "outline_coherence": {"score": 70, "comment": "评估解析失败，请人工审查大纲连贯性"},
-        "reference_adequacy": {"score": 70, "comment": "评估解析失败，请人工审查引用充分性"},
+        "outline_coherence": {
+            "score": 70,
+            "comment": "评估解析失败，请人工审查大纲连贯性",
+        },
+        "reference_adequacy": {
+            "score": 70,
+            "comment": "评估解析失败，请人工审查引用充分性",
+        },
         "task_coverage": {"score": 70, "comment": "评估解析失败，请人工审查任务覆盖度"},
-        "scope_completeness": {"score": 70, "comment": "评估解析失败，请人工审查范围完整性"},
+        "scope_completeness": {
+            "score": 70,
+            "comment": "评估解析失败，请人工审查范围完整性",
+        },
     },
 }
 
@@ -77,6 +86,7 @@ _VISIBLE_WEIGHT = 0.7
 def _load_prompt_template() -> str:
     """加载 section_evaluator.md 中 visible 评估的 prompt 模板"""
     from ..prompts import _load_prompt
+
     content = _load_prompt("section_evaluator.md")
     # 提取 BLIND_EVALUATION 标记之前的内容（visible 评估模板）
     marker = "<!-- BLIND_EVALUATION -->"
@@ -88,6 +98,7 @@ def _load_prompt_template() -> str:
 def _load_blind_prompt_template() -> str:
     """加载 section_evaluator.md 中 blind 评估的 prompt 模板"""
     from ..prompts import _load_prompt
+
     content = _load_prompt("section_evaluator.md")
     marker = "<!-- BLIND_EVALUATION -->"
     if marker in content:
@@ -187,7 +198,9 @@ def _paragraph_plan_text(section_outline: dict) -> str:
             continue
 
         task_type = para.get("task_type", "")
-        direction = para.get("direction") or para.get("description") or para.get("goal", "")
+        direction = (
+            para.get("direction") or para.get("description") or para.get("goal", "")
+        )
         synthesis = para.get("synthesis_instruction", "")
         target_words = para.get("target_words", "")
         key_papers = para.get("key_papers", [])
@@ -224,22 +237,26 @@ def _check_ai_words(draft: str) -> list[dict]:
         pattern = r"\b" + re.escape(word) + r"\b"
         count = len(re.findall(pattern, draft_lower))
         if count > 0:
-            findings.append({
-                "word": word,
-                "count": count,
-                "language": "en",
-                "suggestion": f"替换为更具体的学术表述，避免 AI 套话 '{word}'",
-            })
+            findings.append(
+                {
+                    "word": word,
+                    "count": count,
+                    "language": "en",
+                    "suggestion": f"替换为更具体的学术表述，避免 AI 套话 '{word}'",
+                }
+            )
 
     for word in AI_WORDS_ZH:
         count = draft.count(word)
         if count > 0:
-            findings.append({
-                "word": word,
-                "count": count,
-                "language": "zh",
-                "suggestion": f"替换为更具体的学术表述，避免 AI 套话 '{word}'",
-            })
+            findings.append(
+                {
+                    "word": word,
+                    "count": count,
+                    "language": "zh",
+                    "suggestion": f"替换为更具体的学术表述，避免 AI 套话 '{word}'",
+                }
+            )
 
     return findings
 
@@ -260,21 +277,25 @@ def _check_throat_clearing(draft: str) -> list[dict]:
 
         for phrase in THROAT_CLEARING_EN:
             if sent_stripped.lower().startswith(phrase.lower()):
-                findings.append({
-                    "phrase": phrase,
-                    "language": "en",
-                    "location": f"字符位置 ~{offset}",
-                    "context": sent_stripped[:80],
-                })
+                findings.append(
+                    {
+                        "phrase": phrase,
+                        "language": "en",
+                        "location": f"字符位置 ~{offset}",
+                        "context": sent_stripped[:80],
+                    }
+                )
 
         for phrase in THROAT_CLEARING_ZH:
             if sent_stripped.startswith(phrase):
-                findings.append({
-                    "phrase": phrase,
-                    "language": "zh",
-                    "location": f"字符位置 ~{offset}",
-                    "context": sent_stripped[:80],
-                })
+                findings.append(
+                    {
+                        "phrase": phrase,
+                        "language": "zh",
+                        "location": f"字符位置 ~{offset}",
+                        "context": sent_stripped[:80],
+                    }
+                )
 
         offset += len(sent)
 
@@ -389,7 +410,9 @@ def _check_citation_format(draft: str) -> dict:
     author_year_matches = author_year_re.findall(draft)
 
     # UUID citations: [433802d1-ebf8-49f7-8efc-0183ef0170b8]
-    uuid_re = re.compile(r"\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]")
+    uuid_re = re.compile(
+        r"\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]"
+    )
     uuid_matches = uuid_re.findall(draft)
 
     adjacent_numeric_re = re.compile(r"(?:\[[0-9,\s;、，\-–—]+\]){2,}")
@@ -402,20 +425,28 @@ def _check_citation_format(draft: str) -> dict:
     meta_matches = meta_re.findall(draft)
 
     # Parenthesized citation prose: （文献[24][28]已证实...） or （[27][29]）
-    parenthesized_citation_re = re.compile(r"[（(]([^（）()]*\[[0-9][0-9,\s;、，\]\[]*\][^（）()]*)[）)]")
+    parenthesized_citation_re = re.compile(
+        r"[（(]([^（）()]*\[[0-9][0-9,\s;、，\]\[]*\][^（）()]*)[）)]"
+    )
     parenthesized_citation_matches = []
     for match in parenthesized_citation_re.finditer(draft):
         inner = match.group(1).strip()
-        if re.fullmatch(r"(?:\[[0-9,\s;、，\-–—]+\]\s*)+", inner) or re.search(r"[\u4e00-\u9fffA-Za-z]", inner):
+        if re.fullmatch(r"(?:\[[0-9,\s;、，\-–—]+\]\s*)+", inner) or re.search(
+            r"[\u4e00-\u9fffA-Za-z]", inner
+        ):
             parenthesized_citation_matches.append(match.group(0))
 
     issues = []
     if author_year_matches:
-        issues.append(f"author-year引用格式 {len(author_year_matches)} 处: {author_year_matches[:3]}")
+        issues.append(
+            f"author-year引用格式 {len(author_year_matches)} 处: {author_year_matches[:3]}"
+        )
     if uuid_matches:
         issues.append(f"UUID引用 {len(uuid_matches)} 处: {uuid_matches[:3]}")
     if adjacent_numeric_matches:
-        issues.append(f"相邻引用未合并 {len(adjacent_numeric_matches)} 处: {adjacent_numeric_matches[:3]}")
+        issues.append(
+            f"相邻引用未合并 {len(adjacent_numeric_matches)} 处: {adjacent_numeric_matches[:3]}"
+        )
     if meta_matches:
         issues.append(f"meta-commentary {len(meta_matches)} 处: {meta_matches[:3]}")
     if parenthesized_citation_matches:
@@ -552,7 +583,9 @@ async def evaluate_section_blind(
         }
     """
     # 提取 section_outline 中的关键字段
-    core_question = section_outline.get("core_question", section_outline.get("description", ""))
+    core_question = section_outline.get(
+        "core_question", section_outline.get("description", "")
+    )
     narrative_arc = section_outline.get("narrative_arc", "")
     paragraph_plan = _paragraph_plan_text(section_outline)
 
@@ -581,14 +614,18 @@ async def evaluate_section_blind(
         if isinstance(next_outline, dict):
             next_title = next_outline.get("title", "")
             next_desc = next_outline.get("description", "")
-            next_outline_text = f"{next_title}: {next_desc}" if next_desc else next_title
+            next_outline_text = (
+                f"{next_title}: {next_desc}" if next_desc else next_title
+            )
         else:
             next_outline_text = str(next_outline)
 
     # 加载 blind prompt 模板
     prompt_template = _load_blind_prompt_template()
     if not prompt_template:
-        logger.error("blind evaluation prompt template not found in section_evaluator.md")
+        logger.error(
+            "blind evaluation prompt template not found in section_evaluator.md"
+        )
         return _DEFAULT_BLIND_EVALUATION
 
     # 构建 prompt
@@ -607,7 +644,9 @@ async def evaluate_section_blind(
     llm = create_llm(temperature=0.0, max_tokens=4096)
 
     messages = [
-        SystemMessage(content="你是一个综述大纲评审专家。你只能看到大纲规划和引用列表，不能看到正文。请严格按照要求的 JSON 格式返回评估结果。"),
+        SystemMessage(
+            content="你是一个综述大纲评审专家。你只能看到大纲规划和引用列表，不能看到正文。请严格按照要求的 JSON 格式返回评估结果。"
+        ),
         HumanMessage(content=prompt),
     ]
 
@@ -672,7 +711,9 @@ async def evaluate_section_visible(
         }
     """
     # 提取 section_outline 中的关键字段
-    core_question = section_outline.get("core_question", section_outline.get("description", ""))
+    core_question = section_outline.get(
+        "core_question", section_outline.get("description", "")
+    )
     narrative_arc = section_outline.get("narrative_arc", "")
     paragraph_plan = _paragraph_plan_text(section_outline)
 
@@ -701,7 +742,9 @@ async def evaluate_section_visible(
         if isinstance(next_outline, dict):
             next_title = next_outline.get("title", "")
             next_desc = next_outline.get("description", "")
-            next_outline_text = f"{next_title}: {next_desc}" if next_desc else next_title
+            next_outline_text = (
+                f"{next_title}: {next_desc}" if next_desc else next_title
+            )
         else:
             next_outline_text = str(next_outline)
 
@@ -727,7 +770,9 @@ async def evaluate_section_visible(
     llm = create_llm(temperature=0.0, max_tokens=4096)
 
     messages = [
-        SystemMessage(content="你是一个严格的学术综述质量评审员。请严格按照要求的 JSON 格式返回评估结果。"),
+        SystemMessage(
+            content="你是一个严格的学术综述质量评审员。请严格按照要求的 JSON 格式返回评估结果。"
+        ),
         HumanMessage(content=prompt),
     ]
 
@@ -768,16 +813,16 @@ async def evaluate_section_visible(
         style_score = max(40, style_score - deduction)
         style_dim["score"] = style_score
         style_dim["comment"] = (
-            style_dim.get("comment", "") +
-            f" [写作质量自检严重问题: {writing_quality['summary']}]"
+            style_dim.get("comment", "")
+            + f" [写作质量自检严重问题: {writing_quality['summary']}]"
         )
     elif writing_quality["severity"] == "warning":
         deduction = min(8, style_score - 50)  # 最多扣 8 分，但不低于 50
         style_score = max(50, style_score - deduction)
         style_dim["score"] = style_score
         style_dim["comment"] = (
-            style_dim.get("comment", "") +
-            f" [写作质量自检警告: {writing_quality['summary']}]"
+            style_dim.get("comment", "")
+            + f" [写作质量自检警告: {writing_quality['summary']}]"
         )
 
     result["dimensions"]["style"] = style_dim
@@ -789,14 +834,16 @@ async def evaluate_section_visible(
     if writing_quality["severity"] == "critical":
         result["needs_revision"] = True
         result["revision_instructions"] = (
-            result.get("revision_instructions", "") +
-            "\n\n【写作质量自检要求】\n" + writing_quality["summary"]
+            result.get("revision_instructions", "")
+            + "\n\n【写作质量自检要求】\n"
+            + writing_quality["summary"]
         )
     elif writing_quality["severity"] == "warning" and not result["needs_revision"]:
         result["needs_revision"] = True
         result["revision_instructions"] = (
-            result.get("revision_instructions", "") +
-            "\n\n【写作质量自检建议】\n" + writing_quality["summary"]
+            result.get("revision_instructions", "")
+            + "\n\n【写作质量自检建议】\n"
+            + writing_quality["summary"]
         )
 
     logger.info(
@@ -938,7 +985,9 @@ async def revise_section(
                 plan_lines.append(f"段落 {i}: {para}")
         paragraph_plan = "\n".join(plan_lines)
 
-    core_question = section_outline.get("core_question", section_outline.get("description", ""))
+    core_question = section_outline.get(
+        "core_question", section_outline.get("description", "")
+    )
     section_title = section_outline.get("title", "")
 
     prompt = f"""请根据以下评估反馈修订章节内容。
@@ -978,7 +1027,9 @@ async def revise_section(
     llm = create_llm(temperature=0.3, max_tokens=8192)
 
     messages = [
-        SystemMessage(content="你是一个学术写作修订专家。请根据评估反馈精确修订章节内容，保持学术严谨性，并把所有引用写入正文句法。"),
+        SystemMessage(
+            content="你是一个学术写作修订专家。请根据评估反馈精确修订章节内容，保持学术严谨性，并把所有引用写入正文句法。"
+        ),
         HumanMessage(content=prompt),
     ]
 

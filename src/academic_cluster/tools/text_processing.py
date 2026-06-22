@@ -17,6 +17,7 @@ logger = structlog.get_logger()
 # BM25 检索
 # =============================================================================
 
+
 class BM25:
     """
     BM25 文本检索算法
@@ -37,7 +38,7 @@ class BM25:
     def _tokenize(self, text: str) -> list[str]:
         """简单分词"""
         text = text.lower()
-        text = re.sub(r'[^\w\s]', ' ', text)
+        text = re.sub(r"[^\w\s]", " ", text)
         return text.split()
 
     def fit(self, corpus: list[str]):
@@ -121,10 +122,7 @@ async def bm25_search(
         排序后的文档列表
     """
     # 构建文档文本
-    corpus = [
-        f"{doc.get('title', '')} {doc.get('abstract', '')}"
-        for doc in documents
-    ]
+    corpus = [f"{doc.get('title', '')} {doc.get('abstract', '')}" for doc in documents]
 
     # 创建 BM25 实例并搜索
     bm25 = BM25()
@@ -151,6 +149,7 @@ async def bm25_search(
 # =============================================================================
 # 相似度计算
 # =============================================================================
+
 
 def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     """计算余弦相似度"""
@@ -179,6 +178,7 @@ async def compute_similarity(
 # 关键词提取
 # =============================================================================
 
+
 def extract_keywords_tfidf(
     documents: list[str],
     top_k: int = 10,
@@ -194,10 +194,7 @@ def extract_keywords_tfidf(
         关键词列表
     """
     # 分词
-    tokenized_docs = [
-        re.sub(r'[^\w\s]', ' ', doc.lower()).split()
-        for doc in documents
-    ]
+    tokenized_docs = [re.sub(r"[^\w\s]", " ", doc.lower()).split() for doc in documents]
 
     # 计算 TF
     tf = Counter()
@@ -222,24 +219,122 @@ def extract_keywords_tfidf(
 
     # 过滤停用词
     stop_words = {
-        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-        "have", "has", "had", "do", "does", "did", "will", "would", "could",
-        "should", "may", "might", "shall", "can", "need", "dare", "ought",
-        "used", "to", "of", "in", "for", "on", "with", "at", "by", "from",
-        "as", "into", "through", "during", "before", "after", "above", "below",
-        "between", "out", "off", "over", "under", "again", "further", "then",
-        "once", "and", "but", "or", "nor", "not", "so", "yet", "both", "either",
-        "neither", "each", "every", "all", "any", "few", "more", "most", "other",
-        "some", "such", "no", "only", "own", "same", "than", "too", "very",
-        "just", "because", "if", "when", "where", "how", "what", "which", "who",
-        "whom", "this", "that", "these", "those", "i", "me", "my", "we", "our",
-        "you", "your", "he", "him", "his", "she", "her", "it", "its", "they",
-        "them", "their",
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "need",
+        "dare",
+        "ought",
+        "used",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "between",
+        "out",
+        "off",
+        "over",
+        "under",
+        "again",
+        "further",
+        "then",
+        "once",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "not",
+        "so",
+        "yet",
+        "both",
+        "either",
+        "neither",
+        "each",
+        "every",
+        "all",
+        "any",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "only",
+        "own",
+        "same",
+        "than",
+        "too",
+        "very",
+        "just",
+        "because",
+        "if",
+        "when",
+        "where",
+        "how",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "me",
+        "my",
+        "we",
+        "our",
+        "you",
+        "your",
+        "he",
+        "him",
+        "his",
+        "she",
+        "her",
+        "it",
+        "its",
+        "they",
+        "them",
+        "their",
     }
 
     keywords = [
-        term for term, _ in sorted_terms
-        if term not in stop_words and len(term) > 2
+        term for term, _ in sorted_terms if term not in stop_words and len(term) > 2
     ]
 
     return keywords[:top_k]

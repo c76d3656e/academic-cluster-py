@@ -21,8 +21,10 @@ router = APIRouter(tags=["admin-usage"])
 # 响应模型
 # =============================================================================
 
+
 class UsageTrendItem(BaseModel):
     """用量趋势项"""
+
     date: str
     call_count: int = 0
     total_tokens: int = 0
@@ -41,6 +43,7 @@ class UsageTrendItem(BaseModel):
 
 class ProviderUsageItem(BaseModel):
     """Provider 用量统计"""
+
     provider_name: str | None = None
     model_name: str | None = None
     call_type: str | None = None
@@ -56,6 +59,7 @@ class ProviderUsageItem(BaseModel):
 
 class RecentCallItem(BaseModel):
     """最近 LLM 调用记录"""
+
     id: str
     pipeline_run_id: str | None = None
     project_id: str | None = None
@@ -90,6 +94,7 @@ class RecentCallItem(BaseModel):
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("/trend", response_model=list[UsageTrendItem])
 async def get_usage_trend(
@@ -167,7 +172,9 @@ async def get_usage_by_provider(
             total_completion_tokens=item.get("total_completion_tokens", 0),
             total_tokens=item.get("total_tokens", 0),
             total_cost=float(item.get("total_cost", 0)),
-            avg_latency_ms=float(item["avg_latency_ms"]) if item.get("avg_latency_ms") else None,
+            avg_latency_ms=float(item["avg_latency_ms"])
+            if item.get("avg_latency_ms")
+            else None,
         )
         for item in summary
     ]

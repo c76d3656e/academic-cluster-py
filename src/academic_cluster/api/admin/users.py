@@ -22,8 +22,10 @@ router = APIRouter(tags=["admin-users"])
 # 请求模型
 # =============================================================================
 
+
 class AdminCreateUserRequest(BaseModel):
     """管理员创建用户请求"""
+
     email: str = Field(..., min_length=5, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str | None = Field(None, max_length=255)
@@ -32,11 +34,13 @@ class AdminCreateUserRequest(BaseModel):
 
 class ChangeRoleRequest(BaseModel):
     """修改角色请求"""
+
     role: str = Field(..., pattern="^(user|admin)$")
 
 
 class ToggleActiveRequest(BaseModel):
     """切换激活状态请求"""
+
     is_active: bool
 
 
@@ -44,8 +48,10 @@ class ToggleActiveRequest(BaseModel):
 # 响应模型
 # =============================================================================
 
+
 class UserUsageResponse(BaseModel):
     """用户用量响应"""
+
     user_id: str
     total_projects: int
     total_activities: int
@@ -54,6 +60,7 @@ class UserUsageResponse(BaseModel):
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("", response_model=UserListResponse)
 async def list_users(
@@ -99,16 +106,21 @@ async def create_user(
 
     hashed_password = password_service.hash_password(body.password)
 
-    user_id = await db.save_user({
-        "email": body.email,
-        "hashed_password": hashed_password,
-        "full_name": body.full_name,
-        "role": body.role,
-        "is_active": True,
-    })
+    user_id = await db.save_user(
+        {
+            "email": body.email,
+            "hashed_password": hashed_password,
+            "full_name": body.full_name,
+            "role": body.role,
+            "is_active": True,
+        }
+    )
 
     await db.log_activity(
-        admin["id"], "admin_create_user", "user", user_id,
+        admin["id"],
+        "admin_create_user",
+        "user",
+        user_id,
         {"email": body.email, "role": body.role},
         ip_address=request.client.host if request.client else None,
     )
@@ -147,6 +159,7 @@ async def delete_user(
 
     # 删除用户（使用原始 SQL，因为 DatabaseService 没有 delete_user 方法）
     from sqlalchemy import text
+
     async with db.session() as session:
         await session.execute(
             text("DELETE FROM users WHERE id = :id"),
@@ -154,7 +167,10 @@ async def delete_user(
         )
 
     await db.log_activity(
-        admin["id"], "admin_delete_user", "user", user_id,
+        admin["id"],
+        "admin_delete_user",
+        "user",
+        user_id,
         {"email": user["email"]},
         ip_address=request.client.host if request.client else None,
     )
@@ -179,12 +195,20 @@ async def change_user_role(
     await db.set_user_role(user_id, body.role)
 
     await db.log_activity(
-        admin["id"], "admin_change_role", "user", user_id,
+        admin["id"],
+        "admin_change_role",
+        "user",
+        user_id,
         {"old_role": user["role"], "new_role": body.role},
         ip_address=request.client.host if request.client else None,
     )
 
-    logger.info("Admin changed user role", admin_id=admin["id"], user_id=user_id, new_role=body.role)
+    logger.info(
+        "Admin changed user role",
+        admin_id=admin["id"],
+        user_id=user_id,
+        new_role=body.role,
+    )
     return {"message": f"用户角色已更新为 {body.role}"}
 
 
@@ -212,13 +236,21 @@ async def toggle_user_active(
         await db.revoke_all_user_tokens(user_id)
 
     await db.log_activity(
-        admin["id"], "admin_toggle_active", "user", user_id,
+        admin["id"],
+        "admin_toggle_active",
+        "user",
+        user_id,
         {"is_active": body.is_active},
         ip_address=request.client.host if request.client else None,
     )
 
     status = "激活" if body.is_active else "停用"
-    logger.info("Admin toggled user active", admin_id=admin["id"], user_id=user_id, is_active=body.is_active)
+    logger.info(
+        "Admin toggled user active",
+        admin_id=admin["id"],
+        user_id=user_id,
+        is_active=body.is_active,
+    )
     return {"message": f"用户已{status}"}
 
 
@@ -235,6 +267,7 @@ async def get_user_usage(
 
     # 查询用户的项目数和活动数
     from sqlalchemy import text
+
     async with db.session() as session:
         projects_result = await session.execute(
             text("SELECT COUNT(*) FROM projects WHERE user_id = :user_id"),

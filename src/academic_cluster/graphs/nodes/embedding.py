@@ -51,6 +51,7 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
 
     # 记录 embedding 调用到 tracker 和 DB
     from ...services.observability import get_resolved_run_id
+
     tracker = get_current_tracker()
     run_id = get_resolved_run_id()
     if run_id:
@@ -66,7 +67,9 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
             prompt_tokens = len(text) // 2  # 粗略估计
 
             # 计算 cost
-            input_price, output_price = await get_provider_pricing(db, provider_alias, "bge-m3")
+            input_price, output_price = await get_provider_pricing(
+                db, provider_alias, "bge-m3"
+            )
             cost = 0.0
             if input_price:
                 cost = (prompt_tokens * input_price) / 1_000_000
@@ -86,7 +89,10 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
 
             # 持久化到 DB
             from ...services.observability import get_current_project
-            project_id_for_call = getattr(tracker, "project_id", None) or get_current_project()
+
+            project_id_for_call = (
+                getattr(tracker, "project_id", None) or get_current_project()
+            )
             exec_id = await db.create_node_execution(run_id, node_name, "embedding")
             call_id = await db.create_llm_call(
                 pipeline_run_id=run_id,
@@ -141,7 +147,8 @@ async def embedding_node(state: PipelineState) -> dict:
         logger.info("Starting embedding generation", paper_count=len(paper_ids))
 
         await send_progress(
-            state.project_id, "embedding",
+            state.project_id,
+            "embedding",
             f"正在向量化 {len(paper_ids)} 篇论文...",
         )
 
@@ -177,15 +184,19 @@ async def embedding_node(state: PipelineState) -> dict:
                     except TimeoutError:
                         logger.error(
                             "Embedding generation timed out",
-                            paper_id=paper_id, title_length=len(title),
-                            abstract_length=len(abstract), timeout_seconds=30,
+                            paper_id=paper_id,
+                            title_length=len(title),
+                            abstract_length=len(abstract),
+                            timeout_seconds=30,
                         )
                         return None
                     except Exception as e:
                         logger.error(
                             "Failed to generate embedding",
-                            paper_id=paper_id, title=title[:100],
-                            error=str(e), error_type=type(e).__name__,
+                            paper_id=paper_id,
+                            title=title[:100],
+                            error=str(e),
+                            error_type=type(e).__name__,
                         )
                         return None
 
@@ -232,7 +243,8 @@ async def embedding_node(state: PipelineState) -> dict:
         )
 
         await send_progress(
-            state.project_id, "embedding",
+            state.project_id,
+            "embedding",
             f"向量化完成，共 {len(embedding_ids)} 篇",
         )
 
@@ -243,9 +255,13 @@ async def embedding_node(state: PipelineState) -> dict:
         }
 
         if tracker:
-            await tracker.end_node("embedding", "succeeded", output_summary={
-                "embedding_count": len(embedding_ids),
-            })
+            await tracker.end_node(
+                "embedding",
+                "succeeded",
+                output_summary={
+                    "embedding_count": len(embedding_ids),
+                },
+            )
         return result
 
     except Exception as e:
@@ -258,7 +274,10 @@ async def embedding_node(state: PipelineState) -> dict:
             traceback=traceback.format_exc(),
         )
         if tracker:
-            await tracker.end_node("embedding", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "embedding",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         raise

@@ -21,7 +21,9 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 
-def _select_evidence_paper_ids(state: PipelineState, target: int = CORE_EVIDENCE_CARD_TARGET) -> list[str]:
+def _select_evidence_paper_ids(
+    state: PipelineState, target: int = CORE_EVIDENCE_CARD_TARGET
+) -> list[str]:
     """Select core papers only for evidence cards, preserving core ranking order."""
     selected: list[str] = []
     seen: set[str] = set()
@@ -47,7 +49,9 @@ async def evidence_cards_node(state: PipelineState) -> dict:
 
     evidence_paper_ids = _select_evidence_paper_ids(state)
     if not evidence_paper_ids and state.reranked_paper_ids:
-        logger.warning("No core papers available for evidence cards; refusing to use reranked fallback")
+        logger.warning(
+            "No core papers available for evidence cards; refusing to use reranked fallback"
+        )
 
     logger.info(
         "Starting evidence card generation",
@@ -83,13 +87,14 @@ async def evidence_cards_node(state: PipelineState) -> dict:
         paper_ids_to_check = [p["id"] for p in papers]
         async with db.session() as session:
             from sqlalchemy import text
+
             result = await session.execute(
                 text("""
                     SELECT id, paper_id
                     FROM evidence_cards
                     WHERE project_id = :project_id AND paper_id = ANY(:pids)
                 """),
-                {"project_id": state.project_id, "pids": paper_ids_to_check}
+                {"project_id": state.project_id, "pids": paper_ids_to_check},
             )
             rows = result.fetchall()
             for row in rows:
@@ -104,7 +109,9 @@ async def evidence_cards_node(state: PipelineState) -> dict:
                 existing_cards=len(existing_card_ids),
             )
     except Exception as e:
-        logger.warning("Failed to check existing evidence cards, processing all", error=str(e))
+        logger.warning(
+            "Failed to check existing evidence cards, processing all", error=str(e)
+        )
         already_done_paper_ids = set()
 
     # 过滤掉已处理的论文
@@ -116,26 +123,38 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             "status": "evidence_generated",
         }
         if tracker:
-            await tracker.end_node("evidence_cards", "succeeded", output_summary={
-                "card_count": len(existing_card_ids),
-                "skipped": True,
-            })
+            await tracker.end_node(
+                "evidence_cards",
+                "succeeded",
+                output_summary={
+                    "card_count": len(existing_card_ids),
+                    "skipped": True,
+                },
+            )
         return result
 
     try:
         await send_progress(
-            state.project_id, "evidence_cards",
+            state.project_id,
+            "evidence_cards",
             f"为 {len(remaining_papers)} 篇论文生成证据卡片...",
         )
 
         # 批量生成证据卡片（只处理剩余论文）
         try:
-            requested_concurrency = int((state.config or {}).get("evidence_concurrency", -1))
+            requested_concurrency = int(
+                (state.config or {}).get("evidence_concurrency", -1)
+            )
         except (TypeError, ValueError):
             requested_concurrency = -1
         from ...services.provider_pool import get_llm_available_slots
+
         provider_slots = get_llm_available_slots(default=10)
-        concurrency = provider_slots if requested_concurrency <= 0 else min(requested_concurrency, provider_slots)
+        concurrency = (
+            provider_slots
+            if requested_concurrency <= 0
+            else min(requested_concurrency, provider_slots)
+        )
         concurrency = max(1, concurrency)
         logger.info(
             "Evidence card concurrency resolved",
@@ -151,11 +170,14 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             timeout_s = 120
 
         def _progress(completed: int, total: int):
-            _task = asyncio.ensure_future(send_progress(  # noqa: RUF006
-                state.project_id, "evidence_cards",
-                f"证据卡片生成中 {completed}/{total}...",
-                progress=completed / total if total > 0 else 0,
-            ))
+            _task = asyncio.ensure_future(
+                send_progress(  # noqa: RUF006
+                    state.project_id,
+                    "evidence_cards",
+                    f"证据卡片生成中 {completed}/{total}...",
+                    progress=completed / total if total > 0 else 0,
+                )
+            )
 
         evidence_cards = await generate_evidence_cards_batch(
             remaining_papers,
@@ -199,7 +221,8 @@ async def evidence_cards_node(state: PipelineState) -> dict:
         )
 
         await send_progress(
-            state.project_id, "evidence_cards",
+            state.project_id,
+            "evidence_cards",
             f"证据卡片生成完成，共 {len(all_card_ids)} 张",
         )
 
@@ -208,16 +231,23 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             "status": "evidence_generated",
         }
         if tracker:
-            await tracker.end_node("evidence_cards", "succeeded", output_summary={
-                "new_cards": len(new_card_ids),
-                "total_cards": len(all_card_ids),
-            })
+            await tracker.end_node(
+                "evidence_cards",
+                "succeeded",
+                output_summary={
+                    "new_cards": len(new_card_ids),
+                    "total_cards": len(all_card_ids),
+                },
+            )
         return result
 
     except Exception as e:
         if tracker:
-            await tracker.end_node("evidence_cards", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "evidence_cards",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         logger.error("Evidence generation failed", error=str(e))
         raise

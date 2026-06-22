@@ -24,18 +24,24 @@ def _convert_uuid_fields(row: dict) -> dict:
     """将 UUID 字段转换为字符串"""
     result = {}
     for key, value in row.items():
-        if isinstance(value, uuid.UUID) or (hasattr(value, '__class__') and 'UUID' in value.__class__.__name__):
+        if isinstance(value, uuid.UUID) or (
+            hasattr(value, "__class__") and "UUID" in value.__class__.__name__
+        ):
             result[key] = str(value)
         elif key.endswith("_ids") and value is None:
             result[key] = []
         elif key.endswith("_ids") and isinstance(value, (list, tuple, set)):
             result[key] = [
-                str(v) if isinstance(v, uuid.UUID) or (hasattr(v, '__class__') and 'UUID' in v.__class__.__name__) else v
+                str(v)
+                if isinstance(v, uuid.UUID)
+                or (hasattr(v, "__class__") and "UUID" in v.__class__.__name__)
+                else v
                 for v in value
             ]
         else:
             result[key] = value
     return result
+
 
 from ..config import get_settings  # noqa: E402
 
@@ -132,7 +138,9 @@ class DatabaseService:
         publication_date = paper_data.get("publication_date")
         if isinstance(publication_date, str):
             try:
-                publication_date = datetime.fromisoformat(publication_date.replace("Z", "+00:00")).date()
+                publication_date = datetime.fromisoformat(
+                    publication_date.replace("Z", "+00:00")
+                ).date()
             except ValueError:
                 publication_date = None
 
@@ -167,7 +175,7 @@ class DatabaseService:
                     "reference_count": paper_data.get("reference_count", 0),
                     "fields_of_study": fields_of_study,
                     "metadata": metadata,
-                }
+                },
             )
             row = result.fetchone()
             actual_id = str(row[0]) if row else str(paper_id)
@@ -179,8 +187,7 @@ class DatabaseService:
         """获取论文详情"""
         async with self.session() as session:
             result = await session.execute(
-                text("SELECT * FROM papers WHERE id = :id"),
-                {"id": paper_id}
+                text("SELECT * FROM papers WHERE id = :id"), {"id": paper_id}
             )
             row = result.fetchone()
 
@@ -206,8 +213,7 @@ class DatabaseService:
 
         async with self.session() as session:
             result = await session.execute(
-                text("SELECT * FROM papers WHERE id = ANY(:ids)"),
-                {"ids": paper_ids}
+                text("SELECT * FROM papers WHERE id = ANY(:ids)"), {"ids": paper_ids}
             )
             rows = result.fetchall()
 
@@ -239,7 +245,7 @@ class DatabaseService:
                     "model_name": model_name,
                     "vector": str(embedding),
                     "dimensions": len(embedding),
-                }
+                },
             )
 
         return embedding_id
@@ -265,7 +271,7 @@ class DatabaseService:
                     "parameters": _json_dumps(cluster_data.get("parameters"), {}),
                     "quality_score": cluster_data.get("quality_score", 0.0),
                     "size": cluster_data.get("size", 0),
-                }
+                },
             )
 
         logger.info("Saved cluster", cluster_id=cluster_id)
@@ -296,7 +302,7 @@ class DatabaseService:
                         "normalized_name": entity.get("normalized_name"),
                         "paper_ids": entity.get("paper_ids"),
                         "metadata": _json_dumps(entity.get("metadata"), {}),
-                    }
+                    },
                 )
                 row = result.fetchone()
                 entity_ids.append(str(row[0]) if row else entity_id)
@@ -329,7 +335,7 @@ class DatabaseService:
                         "paper_ids": relation.get("paper_ids"),
                         "confidence": relation.get("confidence", 1.0),
                         "metadata": _json_dumps(relation.get("metadata"), {}),
-                    }
+                    },
                 )
 
                 relation_ids.append(relation_id)
@@ -365,13 +371,18 @@ class DatabaseService:
                     "project_id": card_data.get("project_id"),
                     "paper_id": card_data.get("paper_id"),
                     "claim": card_data.get("claim") or "Claim not specified",
-                    "evidence_span": card_data.get("evidence_span") or card_data.get("source_span") or "",
+                    "evidence_span": card_data.get("evidence_span")
+                    or card_data.get("source_span")
+                    or "",
                     "method": card_data.get("method") or "Method not specified",
-                    "metric": _stringify_scalar(card_data.get("metric") or card_data.get("result") or ""),
-                    "limitation": card_data.get("limitation") or "Limitation not specified",
+                    "metric": _stringify_scalar(
+                        card_data.get("metric") or card_data.get("result") or ""
+                    ),
+                    "limitation": card_data.get("limitation")
+                    or "Limitation not specified",
                     "confidence": card_data.get("confidence", 0.0),
                     "cluster_id": card_data.get("cluster_id"),
-                }
+                },
             )
             row = result.fetchone()
 
@@ -422,15 +433,29 @@ class DatabaseService:
                     "project_id": memory_data.get("project_id"),
                     "cluster_id": memory_data.get("cluster_id"),
                     "summary": memory_data.get("summary", ""),
-                    "method_families": _json_dumps(memory_data.get("method_families"), []),
+                    "method_families": _json_dumps(
+                        memory_data.get("method_families"), []
+                    ),
                     "key_claims": _json_dumps(memory_data.get("key_claims"), []),
                     "limitations": _json_dumps(memory_data.get("limitations"), []),
-                    "future_directions": _json_dumps(memory_data.get("future_directions"), []),
-                    "foundation_papers": _json_dumps(memory_data.get("foundation_papers"), []),
-                    "development_papers": _json_dumps(memory_data.get("development_papers"), []),
-                    "frontier_papers": _json_dumps(memory_data.get("frontier_papers"), []),
-                    "representative_papers": _json_dumps(memory_data.get("representative_papers"), []),
-                    "cross_community_links": _json_dumps(memory_data.get("cross_community_links"), []),
+                    "future_directions": _json_dumps(
+                        memory_data.get("future_directions"), []
+                    ),
+                    "foundation_papers": _json_dumps(
+                        memory_data.get("foundation_papers"), []
+                    ),
+                    "development_papers": _json_dumps(
+                        memory_data.get("development_papers"), []
+                    ),
+                    "frontier_papers": _json_dumps(
+                        memory_data.get("frontier_papers"), []
+                    ),
+                    "representative_papers": _json_dumps(
+                        memory_data.get("representative_papers"), []
+                    ),
+                    "cross_community_links": _json_dumps(
+                        memory_data.get("cross_community_links"), []
+                    ),
                     "proof_ids": _json_dumps(memory_data.get("proof_ids"), []),
                     "metadata": _json_dumps(memory_data.get("metadata"), {}),
                 },
@@ -462,7 +487,9 @@ class DatabaseService:
         """Fetch all community memories for a project."""
         async with self.session() as session:
             result = await session.execute(
-                text("SELECT * FROM community_memories WHERE project_id = :project_id ORDER BY created_at"),
+                text(
+                    "SELECT * FROM community_memories WHERE project_id = :project_id ORDER BY created_at"
+                ),
                 {"project_id": project_id},
             )
             rows = result.fetchall()
@@ -490,7 +517,7 @@ class DatabaseService:
                     "sections": sections,
                     "status": outline_data.get("status", "draft"),
                     "version": outline_data.get("version", 1),
-                }
+                },
             )
 
         logger.info("Saved outline", outline_id=outline_id)
@@ -527,7 +554,7 @@ class DatabaseService:
                     "word_count": section_data.get("word_count", 0),
                     "quality_score": section_data.get("quality_score", 0.0),
                     "version": section_data.get("version", 1),
-                }
+                },
             )
 
         logger.debug("Saved written section", section_id=section_id)
@@ -550,7 +577,7 @@ class DatabaseService:
             # 获取聚类基本信息
             result = await session.execute(
                 text("SELECT * FROM clusters WHERE id = ANY(:ids)"),
-                {"ids": cluster_ids}
+                {"ids": cluster_ids},
             )
             rows = result.fetchall()
             clusters = [_convert_uuid_fields(dict(row._mapping)) for row in rows]
@@ -559,15 +586,19 @@ class DatabaseService:
             for cluster in clusters:
                 cluster_id = cluster.get("id")
                 assignments = await session.execute(
-                    text("SELECT paper_id FROM cluster_assignments WHERE cluster_id = :cluster_id"),
-                    {"cluster_id": cluster_id}
+                    text(
+                        "SELECT paper_id FROM cluster_assignments WHERE cluster_id = :cluster_id"
+                    ),
+                    {"cluster_id": cluster_id},
                 )
                 paper_rows = assignments.fetchall()
                 cluster["paper_ids"] = [str(row[0]) for row in paper_rows]
 
         return clusters
 
-    async def save_cluster_assignments(self, cluster_id: str, paper_ids: list[str], confidence: float = 1.0):
+    async def save_cluster_assignments(
+        self, cluster_id: str, paper_ids: list[str], confidence: float = 1.0
+    ):
         """保存聚类分配"""
         async with self.session() as session:
             for paper_id in paper_ids:
@@ -578,10 +609,18 @@ class DatabaseService:
                         ON CONFLICT (cluster_id, paper_id) DO UPDATE SET
                             confidence = EXCLUDED.confidence
                     """),
-                    {"cluster_id": cluster_id, "paper_id": paper_id, "confidence": confidence}
+                    {
+                        "cluster_id": cluster_id,
+                        "paper_id": paper_id,
+                        "confidence": confidence,
+                    },
                 )
 
-        logger.debug("Saved cluster assignments", cluster_id=cluster_id, paper_count=len(paper_ids))
+        logger.debug(
+            "Saved cluster assignments",
+            cluster_id=cluster_id,
+            paper_count=len(paper_ids),
+        )
 
     async def get_kg_entities_by_ids(self, entity_ids: list[str]) -> list[dict]:
         """批量获取知识图谱实体"""
@@ -591,7 +630,7 @@ class DatabaseService:
         async with self.session() as session:
             result = await session.execute(
                 text("SELECT * FROM kg_entities WHERE id = ANY(:ids)"),
-                {"ids": entity_ids}
+                {"ids": entity_ids},
             )
             rows = result.fetchall()
 
@@ -605,7 +644,7 @@ class DatabaseService:
         async with self.session() as session:
             result = await session.execute(
                 text("SELECT * FROM kg_relations WHERE id = ANY(:ids)"),
-                {"ids": relation_ids}
+                {"ids": relation_ids},
             )
             rows = result.fetchall()
 
@@ -619,7 +658,7 @@ class DatabaseService:
         async with self.session() as session:
             result = await session.execute(
                 text("SELECT * FROM evidence_cards WHERE id = ANY(:ids)"),
-                {"ids": card_ids}
+                {"ids": card_ids},
             )
             rows = result.fetchall()
 
@@ -633,7 +672,7 @@ class DatabaseService:
         async with self.session() as session:
             result = await session.execute(
                 text("SELECT * FROM written_content WHERE id = ANY(:ids)"),
-                {"ids": section_ids}
+                {"ids": section_ids},
             )
             rows = result.fetchall()
 
@@ -646,8 +685,7 @@ class DatabaseService:
 
         async with self.session() as session:
             result = await session.execute(
-                text("SELECT * FROM outlines WHERE id = :id"),
-                {"id": outline_id}
+                text("SELECT * FROM outlines WHERE id = :id"), {"id": outline_id}
             )
             row = result.fetchone()
 
@@ -660,8 +698,7 @@ class DatabaseService:
         """获取项目详情"""
         async with self.session() as session:
             result = await session.execute(
-                text("SELECT * FROM projects WHERE id = :id"),
-                {"id": project_id}
+                text("SELECT * FROM projects WHERE id = :id"), {"id": project_id}
             )
             row = result.fetchone()
 
@@ -688,15 +725,23 @@ class DatabaseService:
                     "id": checkpoint_id,
                     "project_id": checkpoint_data.get("project_id"),
                     "node_name": checkpoint_data.get("node_name"),
-                    "state_snapshot": json.dumps(checkpoint_data.get("state_snapshot", {})),
+                    "state_snapshot": json.dumps(
+                        checkpoint_data.get("state_snapshot", {})
+                    ),
                     "status": checkpoint_data.get("status", "in_progress"),
-                }
+                },
             )
 
-        logger.debug("Saved pipeline checkpoint", checkpoint_id=checkpoint_id, node=checkpoint_data.get("node_name"))
+        logger.debug(
+            "Saved pipeline checkpoint",
+            checkpoint_id=checkpoint_id,
+            node=checkpoint_data.get("node_name"),
+        )
         return checkpoint_id
 
-    async def get_pipeline_checkpoint(self, project_id: str, node_name: str) -> dict | None:
+    async def get_pipeline_checkpoint(
+        self, project_id: str, node_name: str
+    ) -> dict | None:
         """获取 Pipeline 检查点"""
         async with self.session() as session:
             result = await session.execute(
@@ -704,7 +749,7 @@ class DatabaseService:
                     SELECT * FROM pipeline_checkpoints
                     WHERE project_id = :project_id AND node_name = :node_name
                 """),
-                {"project_id": project_id, "node_name": node_name}
+                {"project_id": project_id, "node_name": node_name},
             )
             row = result.fetchone()
 
@@ -723,7 +768,7 @@ class DatabaseService:
                     ORDER BY created_at DESC
                     LIMIT 1
                 """),
-                {"project_id": project_id}
+                {"project_id": project_id},
             )
             row = result.fetchone()
 
@@ -741,7 +786,7 @@ class DatabaseService:
                     WHERE project_id = :project_id
                     ORDER BY created_at ASC
                 """),
-                {"project_id": project_id}
+                {"project_id": project_id},
             )
             rows = result.fetchall()
 
@@ -757,7 +802,7 @@ class DatabaseService:
                     ORDER BY created_at DESC
                     LIMIT 1
                 """),
-                {"project_id": project_id}
+                {"project_id": project_id},
             )
             row = result.fetchone()
 
@@ -789,12 +834,14 @@ class DatabaseService:
                     "event_type": audit_data.get("event_type"),
                     "event_data": json.dumps(audit_data.get("event_data", {})),
                     "duration_ms": audit_data.get("duration_ms"),
-                }
+                },
             )
 
         return audit_id
 
-    async def get_audit_logs(self, project_id: str, node_name: str | None = None) -> list[dict]:
+    async def get_audit_logs(
+        self, project_id: str, node_name: str | None = None
+    ) -> list[dict]:
         """获取审计日志"""
         async with self.session() as session:
             if node_name:
@@ -804,7 +851,7 @@ class DatabaseService:
                         WHERE project_id = :project_id AND node_name = :node_name
                         ORDER BY created_at DESC
                     """),
-                    {"project_id": project_id, "node_name": node_name}
+                    {"project_id": project_id, "node_name": node_name},
                 )
             else:
                 result = await session.execute(
@@ -813,7 +860,7 @@ class DatabaseService:
                         WHERE project_id = :project_id
                         ORDER BY created_at DESC
                     """),
-                    {"project_id": project_id}
+                    {"project_id": project_id},
                 )
             rows = result.fetchall()
 
@@ -822,6 +869,7 @@ class DatabaseService:
     async def save_project(self, project_data: dict) -> str:
         """保存项目"""
         import json
+
         project_id = project_data.get("id", str(uuid.uuid4()))
         user_id = project_data.get("user_id")
         config = project_data.get("config")
@@ -843,7 +891,7 @@ class DatabaseService:
                         "query": project_data.get("query"),
                         "status": project_data.get("status", "created"),
                         "config": config,
-                    }
+                    },
                 )
             else:
                 await session.execute(
@@ -858,7 +906,7 @@ class DatabaseService:
                         "query": project_data.get("query"),
                         "status": project_data.get("status", "created"),
                         "config": config,
-                    }
+                    },
                 )
 
         logger.info("Saved project", project_id=project_id)
@@ -886,7 +934,7 @@ class DatabaseService:
                     "full_name": user_data.get("full_name"),
                     "role": user_data.get("role", "user"),
                     "is_active": user_data.get("is_active", True),
-                }
+                },
             )
             row = result.fetchone()
             actual_id = str(row[0]) if row else str(user_id)
@@ -898,8 +946,7 @@ class DatabaseService:
         """根据 ID 获取用户"""
         async with self.session() as session:
             result = await session.execute(
-                text("SELECT * FROM users WHERE id = :id"),
-                {"id": user_id}
+                text("SELECT * FROM users WHERE id = :id"), {"id": user_id}
             )
             row = result.fetchone()
 
@@ -911,8 +958,7 @@ class DatabaseService:
         """根据邮箱获取用户"""
         async with self.session() as session:
             result = await session.execute(
-                text("SELECT * FROM users WHERE email = :email"),
-                {"email": email}
+                text("SELECT * FROM users WHERE email = :email"), {"email": email}
             )
             row = result.fetchone()
 
@@ -927,8 +973,12 @@ class DatabaseService:
 
         # 安全修复: 白名单验证列名，防止 SQL 注入
         _ALLOWED_USER_COLUMNS = {
-            "email", "hashed_password", "full_name", "role",
-            "is_active", "last_login_at",
+            "email",
+            "hashed_password",
+            "full_name",
+            "role",
+            "is_active",
+            "last_login_at",
         }
 
         set_clauses = []
@@ -942,22 +992,24 @@ class DatabaseService:
         async with self.session() as session:
             await session.execute(
                 text(f"UPDATE users SET {', '.join(set_clauses)} WHERE id = :id"),  # nosec B608
-                params
+                params,
             )
 
         logger.info("Updated user", user_id=user_id)
 
-    async def list_users(self, skip: int = 0, limit: int = 20) -> tuple[list[dict], int]:
+    async def list_users(
+        self, skip: int = 0, limit: int = 20
+    ) -> tuple[list[dict], int]:
         """列出所有用户"""
         async with self.session() as session:
-            count_result = await session.execute(
-                text("SELECT COUNT(*) FROM users")
-            )
+            count_result = await session.execute(text("SELECT COUNT(*) FROM users"))
             total = count_result.scalar()
 
             result = await session.execute(
-                text("SELECT * FROM users ORDER BY created_at DESC LIMIT :limit OFFSET :skip"),
-                {"limit": limit, "skip": skip}
+                text(
+                    "SELECT * FROM users ORDER BY created_at DESC LIMIT :limit OFFSET :skip"
+                ),
+                {"limit": limit, "skip": skip},
             )
             rows = result.fetchall()
 
@@ -969,7 +1021,7 @@ class DatabaseService:
         async with self.session() as session:
             await session.execute(
                 text("UPDATE users SET is_active = :is_active WHERE id = :id"),
-                {"id": user_id, "is_active": is_active}
+                {"id": user_id, "is_active": is_active},
             )
 
     async def set_user_role(self, user_id: str, role: str) -> None:
@@ -977,14 +1029,16 @@ class DatabaseService:
         async with self.session() as session:
             await session.execute(
                 text("UPDATE users SET role = :role WHERE id = :id"),
-                {"id": user_id, "role": role}
+                {"id": user_id, "role": role},
             )
 
     # =========================================================================
     # Refresh Token 相关方法
     # =========================================================================
 
-    async def save_refresh_token(self, token_hash: str, user_id: str, expires_at: datetime) -> str:
+    async def save_refresh_token(
+        self, token_hash: str, user_id: str, expires_at: datetime
+    ) -> str:
         """保存 Refresh Token"""
         token_id = str(uuid.uuid4())
 
@@ -999,7 +1053,7 @@ class DatabaseService:
                     "token_hash": token_hash,
                     "user_id": user_id,
                     "expires_at": expires_at,
-                }
+                },
             )
 
         return token_id
@@ -1014,7 +1068,7 @@ class DatabaseService:
                       AND is_revoked = FALSE
                       AND expires_at > NOW()
                 """),
-                {"token_hash": token_hash}
+                {"token_hash": token_hash},
             )
             row = result.fetchone()
 
@@ -1026,16 +1080,20 @@ class DatabaseService:
         """撤销 Refresh Token"""
         async with self.session() as session:
             await session.execute(
-                text("UPDATE refresh_tokens SET is_revoked = TRUE WHERE token_hash = :token_hash"),
-                {"token_hash": token_hash}
+                text(
+                    "UPDATE refresh_tokens SET is_revoked = TRUE WHERE token_hash = :token_hash"
+                ),
+                {"token_hash": token_hash},
             )
 
     async def revoke_all_user_tokens(self, user_id: str) -> None:
         """撤销用户的所有 Refresh Token"""
         async with self.session() as session:
             await session.execute(
-                text("UPDATE refresh_tokens SET is_revoked = TRUE WHERE user_id = :user_id"),
-                {"user_id": user_id}
+                text(
+                    "UPDATE refresh_tokens SET is_revoked = TRUE WHERE user_id = :user_id"
+                ),
+                {"user_id": user_id},
             )
 
     # =========================================================================
@@ -1068,12 +1126,14 @@ class DatabaseService:
                     "resource_id": resource_id,
                     "details": json.dumps(details) if details else None,
                     "ip_address": ip_address,
-                }
+                },
             )
 
         return activity_id
 
-    async def get_user_activities(self, user_id: str, skip: int = 0, limit: int = 20) -> list[dict]:
+    async def get_user_activities(
+        self, user_id: str, skip: int = 0, limit: int = 20
+    ) -> list[dict]:
         """获取用户活动记录"""
         async with self.session() as session:
             result = await session.execute(
@@ -1083,7 +1143,7 @@ class DatabaseService:
                     ORDER BY created_at DESC
                     LIMIT :limit OFFSET :skip
                 """),
-                {"user_id": user_id, "limit": limit, "skip": skip}
+                {"user_id": user_id, "limit": limit, "skip": skip},
             )
             rows = result.fetchall()
 
@@ -1093,12 +1153,14 @@ class DatabaseService:
     # 项目查询扩展
     # =========================================================================
 
-    async def list_projects_by_user(self, user_id: str, skip: int = 0, limit: int = 20) -> tuple[list[dict], int]:
+    async def list_projects_by_user(
+        self, user_id: str, skip: int = 0, limit: int = 20
+    ) -> tuple[list[dict], int]:
         """列出用户的项目"""
         async with self.session() as session:
             count_result = await session.execute(
                 text("SELECT COUNT(*) FROM projects WHERE user_id = :user_id"),
-                {"user_id": user_id}
+                {"user_id": user_id},
             )
             total = count_result.scalar()
 
@@ -1109,19 +1171,19 @@ class DatabaseService:
                     ORDER BY created_at DESC
                     LIMIT :limit OFFSET :skip
                 """),
-                {"user_id": user_id, "limit": limit, "skip": skip}
+                {"user_id": user_id, "limit": limit, "skip": skip},
             )
             rows = result.fetchall()
 
         projects = [_convert_uuid_fields(dict(row._mapping)) for row in rows]
         return projects, total
 
-    async def list_all_projects(self, skip: int = 0, limit: int = 20) -> tuple[list[dict], int]:
+    async def list_all_projects(
+        self, skip: int = 0, limit: int = 20
+    ) -> tuple[list[dict], int]:
         """列出所有项目（管理员用）"""
         async with self.session() as session:
-            count_result = await session.execute(
-                text("SELECT COUNT(*) FROM projects")
-            )
+            count_result = await session.execute(text("SELECT COUNT(*) FROM projects"))
             total = count_result.scalar()
 
             result = await session.execute(
@@ -1130,7 +1192,7 @@ class DatabaseService:
                     ORDER BY created_at DESC
                     LIMIT :limit OFFSET :skip
                 """),
-                {"limit": limit, "skip": skip}
+                {"limit": limit, "skip": skip},
             )
             rows = result.fetchall()
 
@@ -1148,14 +1210,18 @@ class DatabaseService:
             )
             active_users = active_result.scalar()
 
-            projects_result = await session.execute(text("SELECT COUNT(*) FROM projects"))
+            projects_result = await session.execute(
+                text("SELECT COUNT(*) FROM projects")
+            )
             total_projects = projects_result.scalar()
 
             papers_result = await session.execute(text("SELECT COUNT(*) FROM papers"))
             total_papers = papers_result.scalar()
 
             # Pipeline runs 统计
-            runs_result = await session.execute(text("SELECT COUNT(*) FROM pipeline_runs"))
+            runs_result = await session.execute(
+                text("SELECT COUNT(*) FROM pipeline_runs")
+            )
             total_runs = runs_result.scalar() or 0
 
             running_result = await session.execute(
@@ -1193,8 +1259,10 @@ class DatabaseService:
         """更新项目状态"""
         async with self.session() as session:
             await session.execute(
-                text("UPDATE projects SET status = :status, updated_at = NOW() WHERE id = :id"),
-                {"id": project_id, "status": status}
+                text(
+                    "UPDATE projects SET status = :status, updated_at = NOW() WHERE id = :id"
+                ),
+                {"id": project_id, "status": status},
             )
 
         logger.info("Updated project status", project_id=project_id, status=status)
@@ -1203,8 +1271,10 @@ class DatabaseService:
         """根据项目 ID 获取大纲"""
         async with self.session() as session:
             result = await session.execute(
-                text("SELECT * FROM outlines WHERE project_id = :project_id ORDER BY version DESC LIMIT 1"),
-                {"project_id": project_id}
+                text(
+                    "SELECT * FROM outlines WHERE project_id = :project_id ORDER BY version DESC LIMIT 1"
+                ),
+                {"project_id": project_id},
             )
             row = result.fetchone()
 
@@ -1213,7 +1283,9 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def save_visualization(self, project_id: str, visualization_data: dict) -> str:
+    async def save_visualization(
+        self, project_id: str, visualization_data: dict
+    ) -> str:
         """保存可视化数据到 pipeline_checkpoints"""
         viz_id = str(uuid.uuid4())
         async with self.session() as session:
@@ -1232,7 +1304,7 @@ class DatabaseService:
                     "node_name": "visualization_data",
                     "state_snapshot": json.dumps(visualization_data),
                     "status": "completed",
-                }
+                },
             )
         logger.info("Saved visualization data", project_id=project_id)
         return viz_id
@@ -1246,7 +1318,7 @@ class DatabaseService:
                     WHERE project_id = :project_id AND node_name = 'visualization_data'
                     ORDER BY created_at DESC LIMIT 1
                 """),
-                {"project_id": project_id}
+                {"project_id": project_id},
             )
             row = result.fetchone()
 
@@ -1256,6 +1328,7 @@ class DatabaseService:
         snapshot = row[0]
         if isinstance(snapshot, str):
             import json as _json
+
             return _json.loads(snapshot)
         return snapshot
 
@@ -1269,7 +1342,7 @@ class DatabaseService:
                     WHERE o.project_id = :project_id
                     ORDER BY wc.created_at
                 """),
-                {"project_id": project_id}
+                {"project_id": project_id},
             )
             rows = result.fetchall()
 
@@ -1301,7 +1374,7 @@ class DatabaseService:
                     "topic": topic,
                     "config": json.dumps(config) if config else None,
                     "created_by": created_by,
-                }
+                },
             )
 
         logger.info("Created pipeline run", run_id=run_id, project_id=project_id)
@@ -1339,7 +1412,7 @@ class DatabaseService:
                     "total_tokens": total_tokens,
                     "total_cost": total_cost,
                     "llm_calls_count": llm_calls_count,
-                }
+                },
             )
 
         logger.info("Finished pipeline run", run_id=run_id, status=status)
@@ -1445,10 +1518,12 @@ class DatabaseService:
                     "node_name": node_name,
                     "node_type": node_type,
                     "index": index,
-                }
+                },
             )
 
-        logger.debug("Created node execution", execution_id=execution_id, node=node_name)
+        logger.debug(
+            "Created node execution", execution_id=execution_id, node=node_name
+        )
         return execution_id
 
     async def finish_node_execution(
@@ -1493,8 +1568,12 @@ class DatabaseService:
                     "status": status,
                     "error_message": error_message,
                     "error_traceback": error_traceback,
-                    "input_summary": json.dumps(input_summary) if input_summary else None,
-                    "output_summary": json.dumps(output_summary) if output_summary else None,
+                    "input_summary": json.dumps(input_summary)
+                    if input_summary
+                    else None,
+                    "output_summary": json.dumps(output_summary)
+                    if output_summary
+                    else None,
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
@@ -1502,10 +1581,12 @@ class DatabaseService:
                     "llm_calls_count": llm_calls_count,
                     "retry_count": retry_count,
                     "metadata": json.dumps(metadata) if metadata else None,
-                }
+                },
             )
 
-        logger.debug("Finished node execution", execution_id=execution_id, status=status)
+        logger.debug(
+            "Finished node execution", execution_id=execution_id, status=status
+        )
 
     async def create_llm_call(
         self,
@@ -1572,11 +1653,13 @@ class DatabaseService:
                     "first_token_ms": first_token_ms,
                     "input_preview": input_preview,
                     "output_preview": output_preview,
-                    "request_metadata": json.dumps(request_metadata) if request_metadata else None,
+                    "request_metadata": json.dumps(request_metadata)
+                    if request_metadata
+                    else None,
                     "retry_of": retry_of,
                     "input_price_per_m": input_price_per_m,
                     "output_price_per_m": output_price_per_m,
-                }
+                },
             )
 
         return call_id
@@ -1631,7 +1714,7 @@ class DatabaseService:
                     "upstream_model": upstream_model,
                     "input_price_per_m": input_price_per_m,
                     "output_price_per_m": output_price_per_m,
-                }
+                },
             )
 
         async with self.session() as session:

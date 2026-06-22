@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 # Quality thresholds (basis points, 10000 = 100%)
-MIN_WEIGHTED_COVERAGE_BP: int = 8000   # 80%
+MIN_WEIGHTED_COVERAGE_BP: int = 8000  # 80%
 MIN_ASSEMBLY_RETENTION_BP: int = 9000  # 90%
 
 
@@ -24,9 +24,11 @@ MIN_ASSEMBLY_RETENTION_BP: int = 9000  # 90%
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ClusterCoverageDetail:
     """Per-cluster coverage info (mirrors Rust ClusterCoverage)."""
+
     cluster_id: str
     eligible: bool
     covered: bool
@@ -39,6 +41,7 @@ class ClusterCoverageDetail:
 @dataclass
 class SectionCoverageDetail:
     """Per-section coverage info (mirrors Rust SectionCoverage)."""
+
     section_index: int
     section_title: str
     key_clusters: list[int] = field(default_factory=list)
@@ -51,6 +54,7 @@ class SectionCoverageDetail:
 @dataclass
 class CoverageAuditReport:
     """Full coverage audit result (mirrors Rust CitationCoverageReport)."""
+
     # High-level metrics (basis points)
     cluster_coverage_bp: int = 0
     candidate_coverage_bp: int = 0
@@ -133,6 +137,7 @@ class CoverageAuditReport:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ratio_bp(numerator: int, denominator: int) -> int:
     """Compute a ratio in basis points (10000 = 100%). Returns 0 when denominator is 0."""
     if denominator == 0:
@@ -143,6 +148,7 @@ def _ratio_bp(numerator: int, denominator: int) -> int:
 # ---------------------------------------------------------------------------
 # Core audit function
 # ---------------------------------------------------------------------------
+
 
 def audit_citation_coverage(
     *,
@@ -210,21 +216,31 @@ def audit_citation_coverage(
             covered_clusters += 1
         else:
             orphan_clusters.append(cid)
-        cluster_details.append(ClusterCoverageDetail(
-            cluster_id=cid,
-            eligible=True,  # all clusters in the map are eligible
-            covered=is_covered,
-            candidate_count=len(cluster_candidates),
-            cited_candidate_count=len(cluster_cited_candidates),
-            uncovered_candidate_count=len(cluster_candidates - cited_paper_ids),
-            coverage_ratio_bp=_ratio_bp(len(cluster_cited_candidates), len(cluster_candidates)),
-        ))
+        cluster_details.append(
+            ClusterCoverageDetail(
+                cluster_id=cid,
+                eligible=True,  # all clusters in the map are eligible
+                covered=is_covered,
+                candidate_count=len(cluster_candidates),
+                cited_candidate_count=len(cluster_cited_candidates),
+                uncovered_candidate_count=len(cluster_candidates - cited_paper_ids),
+                coverage_ratio_bp=_ratio_bp(
+                    len(cluster_cited_candidates), len(cluster_candidates)
+                ),
+            )
+        )
 
-    cluster_coverage_bp = _ratio_bp(covered_clusters, total_clusters) if total_clusters > 0 else 10_000
+    cluster_coverage_bp = (
+        _ratio_bp(covered_clusters, total_clusters) if total_clusters > 0 else 10_000
+    )
 
     # -- Candidate coverage --
     total_candidates = len(candidate_set)
-    candidate_coverage_bp = _ratio_bp(len(cited_candidates), total_candidates) if total_candidates > 0 else 10_000
+    candidate_coverage_bp = (
+        _ratio_bp(len(cited_candidates), total_candidates)
+        if total_candidates > 0
+        else 10_000
+    )
 
     # -- Core vs auxiliary --
     cited_core = cited_paper_ids & core_paper_ids
@@ -250,27 +266,37 @@ def audit_citation_coverage(
     # -- Weighted coverage (combination of cluster + candidate coverage) --
     # Matches Rust: importance-weighted eligible cluster coverage.
     # Python approximation: 60% cluster + 40% candidate.
-    weighted_coverage_bp = round(cluster_coverage_bp * 0.6 + candidate_coverage_bp * 0.4)
+    weighted_coverage_bp = round(
+        cluster_coverage_bp * 0.6 + candidate_coverage_bp * 0.4
+    )
 
     # -- Section-level detail --
     section_details: list[SectionCoverageDetail] = []
     num_sections = max(len(section_citations), len(candidate_plans))
     for i in range(num_sections):
-        title = (section_titles[i] if section_titles and i < len(section_titles)
-                 else f"Section {i}")
-        key_cls = (section_key_clusters[i] if section_key_clusters and i < len(section_key_clusters)
-                   else [])
+        title = (
+            section_titles[i]
+            if section_titles and i < len(section_titles)
+            else f"Section {i}"
+        )
+        key_cls = (
+            section_key_clusters[i]
+            if section_key_clusters and i < len(section_key_clusters)
+            else []
+        )
         plan_set = set(candidate_plans[i]) if i < len(candidate_plans) else set()
         cited_in_section = plan_set & cited_paper_ids
-        section_details.append(SectionCoverageDetail(
-            section_index=i,
-            section_title=title,
-            key_clusters=key_cls,
-            candidate_count=len(plan_set),
-            cited_candidate_count=len(cited_in_section),
-            uncovered_candidate_count=len(plan_set - cited_paper_ids),
-            coverage_ratio_bp=_ratio_bp(len(cited_in_section), len(plan_set)),
-        ))
+        section_details.append(
+            SectionCoverageDetail(
+                section_index=i,
+                section_title=title,
+                key_clusters=key_cls,
+                candidate_count=len(plan_set),
+                cited_candidate_count=len(cited_in_section),
+                uncovered_candidate_count=len(plan_set - cited_paper_ids),
+                coverage_ratio_bp=_ratio_bp(len(cited_in_section), len(plan_set)),
+            )
+        )
 
     # -- Pass/fail gate --
     passes = (
@@ -352,11 +378,7 @@ def route_after_coverage_audit(
         passes = coverage_result.get("pass", False)
 
     # All-clear: no invalid citations, no missing evidence, thresholds met
-    if (
-        invalid_citation_count == 0
-        and missing_evidence_card_count == 0
-        and passes
-    ):
+    if invalid_citation_count == 0 and missing_evidence_card_count == 0 and passes:
         return "pass"
 
     # Invalid citations with attempts remaining: repair

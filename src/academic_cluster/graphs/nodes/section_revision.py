@@ -60,12 +60,14 @@ def _find_sentences_with_invalid_citations(
         # 检查是否包含无效引用
         invalid_in_sentence = refs_in_sentence & invalid_numbers
         if invalid_in_sentence:
-            results.append({
-                "sentence": sentence_stripped,
-                "invalid_refs": invalid_in_sentence,
-                "start": offset,
-                "end": offset + len(sentence),
-            })
+            results.append(
+                {
+                    "sentence": sentence_stripped,
+                    "invalid_refs": invalid_in_sentence,
+                    "start": offset,
+                    "end": offset + len(sentence),
+                }
+            )
 
         offset += len(sentence)
 
@@ -92,7 +94,7 @@ async def _llm_rewrite_invalid_sentences(
     sentences_to_fix = []
     for i, item in enumerate(invalid_sentences[:10], 1):
         sentences_to_fix.append(
-            f"{i}. \"{item['sentence']}\" — 包含无效引用 {item['invalid_refs']}"
+            f'{i}. "{item["sentence"]}" — 包含无效引用 {item["invalid_refs"]}'
         )
 
     prompt = f"""你是一位学术综述修订专家。以下综述章节中有些句子引用了不存在的参考文献编号。
@@ -120,7 +122,9 @@ async def _llm_rewrite_invalid_sentences(
     try:
         llm = create_llm(temperature=0.3, max_tokens=8192)
         messages = [
-            SystemMessage(content="你是一位学术综述修订专家。只输出修订后的章节正文，不要解释。"),
+            SystemMessage(
+                content="你是一位学术综述修订专家。只输出修订后的章节正文，不要解释。"
+            ),
             HumanMessage(content=prompt),
         ]
         response = await ainvoke_with_callbacks(llm, messages)
@@ -144,28 +148,33 @@ async def _llm_rewrite_invalid_sentences(
         return content.strip()
 
     except Exception as e:
-        logger.warning("LLM revision failed, using deterministic fallback", error=str(e))
+        logger.warning(
+            "LLM revision failed, using deterministic fallback", error=str(e)
+        )
         return section_content
 
 
 async def section_revision_node(state: PipelineState) -> dict:
     """
-    章节修订（对齐 Rust 版 section_revision.rs）
+     章节修订（对齐 Rust 版 section_revision.rs）
 
-    1. 校验每个章节的引用有效性
-   2. LLM 辅助重写含无效引用的句子
-   3. 确定性移除剩余无效引用
-    4. 按首次出现顺序重编号
-    5. 重新组装综述 + 参考文献列表
+     1. 校验每个章节的引用有效性
+    2. LLM 辅助重写含无效引用的句子
+    3. 确定性移除剩余无效引用
+     4. 按首次出现顺序重编号
+     5. 重新组装综述 + 参考文献列表
     """
     tracker = get_current_tracker()
     if tracker:
         await tracker.begin_node("section_revision", "compute", index=9)
 
-    logger.info("Starting section revision", invalid_citations=state.invalid_citation_count)
+    logger.info(
+        "Starting section revision", invalid_citations=state.invalid_citation_count
+    )
 
     await send_progress(
-        state.project_id, "section_revision",
+        state.project_id,
+        "section_revision",
         f"章节修订中，处理 {state.invalid_citation_count} 个无效引用...",
     )
 
@@ -175,7 +184,9 @@ async def section_revision_node(state: PipelineState) -> dict:
         valid_paper_count = len(state.core_paper_ids)
 
         # 获取已写章节
-        written_sections = await db.get_written_sections_by_ids(state.written_section_ids)
+        written_sections = await db.get_written_sections_by_ids(
+            state.written_section_ids
+        )
         if not written_sections:
             raise ValueError("No written sections to revise")
 
@@ -221,14 +232,18 @@ async def section_revision_node(state: PipelineState) -> dict:
                         sentence_count=len(invalid_sentences),
                     )
                     content = await _llm_rewrite_invalid_sentences(
-                        content, invalid_sentences,
-                        valid_references_text, state.query,
+                        content,
+                        invalid_sentences,
+                        valid_references_text,
+                        state.query,
                     )
 
                 # 确定性移除剩余无效引用
                 recheck = validate_citations(content, valid_paper_count)
                 if recheck["invalid_numbers"]:
-                    content = strip_invalid_citations(content, set(recheck["invalid_numbers"]))
+                    content = strip_invalid_citations(
+                        content, set(recheck["invalid_numbers"])
+                    )
 
             revised_contents.append(content)
 
@@ -273,13 +288,15 @@ async def section_revision_node(state: PipelineState) -> dict:
         for i, section in enumerate(written_sections):
             section_id = section.get("id")
             if section_id and i < len(revised_contents):
-                await db.save_written_section({
-                    "id": section_id,
-                    "outline_id": section.get("outline_id"),
-                    "section_id": section.get("section_id"),
-                    "content": revised_contents[i],
-                    "word_count": len(revised_contents[i]),
-                })
+                await db.save_written_section(
+                    {
+                        "id": section_id,
+                        "outline_id": section.get("outline_id"),
+                        "section_id": section.get("section_id"),
+                        "content": revised_contents[i],
+                        "word_count": len(revised_contents[i]),
+                    }
+                )
 
         logger.info(
             "Section revision completed",
@@ -290,7 +307,8 @@ async def section_revision_node(state: PipelineState) -> dict:
         )
 
         await send_progress(
-            state.project_id, "section_revision",
+            state.project_id,
+            "section_revision",
             f"章节修订完成，移除 {len(all_invalid)} 个无效引用",
         )
 
@@ -301,16 +319,23 @@ async def section_revision_node(state: PipelineState) -> dict:
             "status": "revised",
         }
         if tracker:
-            await tracker.end_node("section_revision", "succeeded", output_summary={
-                "sections_revised": len(revised_contents),
-                "invalid_stripped": len(all_invalid),
-            })
+            await tracker.end_node(
+                "section_revision",
+                "succeeded",
+                output_summary={
+                    "sections_revised": len(revised_contents),
+                    "invalid_stripped": len(all_invalid),
+                },
+            )
         return result
 
     except Exception as e:
         if tracker:
-            await tracker.end_node("section_revision", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "section_revision",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         logger.error("Section revision failed", error=str(e))
         raise

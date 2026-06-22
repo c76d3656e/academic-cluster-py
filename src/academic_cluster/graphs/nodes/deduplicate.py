@@ -25,10 +25,10 @@ def _normalize_title_for_dedup(title: str) -> str:
     - 只保留字母数字和 CJK 字符
     """
     import unicodedata
+
     title = title.strip().lower()
     return "".join(
-        ch for ch in title
-        if ch.isalnum() or unicodedata.category(ch).startswith("Lo")
+        ch for ch in title if ch.isalnum() or unicodedata.category(ch).startswith("Lo")
     )
 
 
@@ -101,7 +101,8 @@ async def deduplicate_node(state: PipelineState) -> dict:
     )
 
     await send_progress(
-        state.project_id, "deduplicate",
+        state.project_id,
+        "deduplicate",
         f"去重完成，保留 {len(deduplicated_ids)} 篇",
         detail={"removed": len(state.paper_ids) - len(deduplicated_ids)},
     )

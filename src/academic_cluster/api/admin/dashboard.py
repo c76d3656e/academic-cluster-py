@@ -21,8 +21,10 @@ router = APIRouter(tags=["admin-dashboard"])
 # 响应模型
 # =============================================================================
 
+
 class ProviderSummary(BaseModel):
     """Provider 概览"""
+
     id: str
     name: str
     status: str
@@ -32,6 +34,7 @@ class ProviderSummary(BaseModel):
 
 class DailyUsageItem(BaseModel):
     """每日用量"""
+
     date: str
     calls: int = 0
     tokens: int = 0
@@ -40,6 +43,7 @@ class DailyUsageItem(BaseModel):
 
 class ActivityItem(BaseModel):
     """最近活动"""
+
     id: str
     user_id: str
     action: str
@@ -49,6 +53,7 @@ class ActivityItem(BaseModel):
 
 class AdminOverviewResponse(BaseModel):
     """管理后台概览响应"""
+
     total_users: int
     active_users: int
     total_projects: int
@@ -66,6 +71,7 @@ class AdminOverviewResponse(BaseModel):
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("/overview", response_model=AdminOverviewResponse)
 async def admin_overview(

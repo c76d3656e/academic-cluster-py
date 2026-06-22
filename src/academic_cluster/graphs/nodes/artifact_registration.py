@@ -29,7 +29,9 @@ async def artifact_registration_node(state: PipelineState) -> dict:
         final_review = state.final_review
 
         if not final_review:
-            raise ValueError("No final review content - write_review must complete first")
+            raise ValueError(
+                "No final review content - write_review must complete first"
+            )
 
         # 计算统计信息
         word_count = len(final_review.split())

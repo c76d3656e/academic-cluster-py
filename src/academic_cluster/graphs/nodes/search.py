@@ -44,10 +44,10 @@ _DEFAULT_MIN_RELEVANT = 20
 def _normalize_title_for_dedup(title: str) -> str:
     """标准化标题用于去重"""
     import unicodedata
+
     title = title.strip().lower()
     return "".join(
-        ch for ch in title
-        if ch.isalnum() or unicodedata.category(ch).startswith("Lo")
+        ch for ch in title if ch.isalnum() or unicodedata.category(ch).startswith("Lo")
     )
 
 
@@ -142,7 +142,7 @@ async def _llm_topic_relevance_filter(
     relevant_papers = []
 
     for batch_start in range(0, len(papers), batch_size):
-        batch = papers[batch_start:batch_start + batch_size]
+        batch = papers[batch_start : batch_start + batch_size]
 
         # 构建论文摘要列表
         paper_lines = []
@@ -166,7 +166,9 @@ async def _llm_topic_relevance_filter(
         try:
             llm = create_llm(temperature=0.0, max_tokens=1024)
             messages = [
-                SystemMessage(content="Return one compact JSON object only. No markdown."),
+                SystemMessage(
+                    content="Return one compact JSON object only. No markdown."
+                ),
                 HumanMessage(content=prompt),
             ]
             response = await asyncio.wait_for(
@@ -190,7 +192,9 @@ async def _llm_topic_relevance_filter(
                 relevant_papers.extend(batch)
 
         except Exception as e:
-            logger.warning("LLM relevance filter failed for batch, keeping all", error=str(e))
+            logger.warning(
+                "LLM relevance filter failed for batch, keeping all", error=str(e)
+            )
             relevant_papers.extend(batch)
 
     logger.info(
@@ -212,9 +216,12 @@ def _build_paper_summaries(papers: list[dict], max_count: int = 30) -> str:
     return "\n".join(lines)
 
 
-async def _generate_search_queries(topic: str, max_queries: int = _DEFAULT_INITIAL_QUERY_LIMIT) -> list[str]:
+async def _generate_search_queries(
+    topic: str, max_queries: int = _DEFAULT_INITIAL_QUERY_LIMIT
+) -> list[str]:
     """使用 LLM 生成优化的搜索 query（对齐 Rust 版 parse_topic）"""
     from ...services.llm_client import ainvoke_with_callbacks, create_llm
+
     llm = create_llm(temperature=0.3)
 
     prompt_template = get_parse_topic_prompt()
@@ -224,12 +231,16 @@ async def _generate_search_queries(topic: str, max_queries: int = _DEFAULT_INITI
     prompt = prompt_template.format(topic=topic)
 
     messages = [
-        SystemMessage(content="Return one compact JSON object only. No markdown. No reasoning. No explanation."),
+        SystemMessage(
+            content="Return one compact JSON object only. No markdown. No reasoning. No explanation."
+        ),
         HumanMessage(content=prompt),
     ]
 
     try:
-        response = await asyncio.wait_for(ainvoke_with_callbacks(llm, messages), timeout=60.0)
+        response = await asyncio.wait_for(
+            ainvoke_with_callbacks(llm, messages), timeout=60.0
+        )
         content = response.content
         if isinstance(content, list):
             content = "".join(
@@ -242,9 +253,10 @@ async def _generate_search_queries(topic: str, max_queries: int = _DEFAULT_INITI
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end > start:
-            content = content[start:end + 1]
+            content = content[start : end + 1]
 
         from ...tools.json_repair import try_parse_json
+
         data = try_parse_json(content)
         if data:
             queries = data.get("final_queries", [])
@@ -254,7 +266,9 @@ async def _generate_search_queries(topic: str, max_queries: int = _DEFAULT_INITI
         return [topic]
 
     except Exception as e:
-        logger.warning("Failed to generate search queries, using fallback", error=str(e))
+        logger.warning(
+            "Failed to generate search queries, using fallback", error=str(e)
+        )
         return [topic]
 
 
@@ -292,7 +306,9 @@ async def _evaluate_coverage(
 
     try:
         llm = create_llm(temperature=0.0, max_tokens=1024)
-        response = await asyncio.wait_for(ainvoke_with_callbacks(llm, messages), timeout=30.0)
+        response = await asyncio.wait_for(
+            ainvoke_with_callbacks(llm, messages), timeout=30.0
+        )
         content = response.content
         if isinstance(content, list):
             content = "".join(
@@ -301,6 +317,7 @@ async def _evaluate_coverage(
             )
 
         from ...tools.json_repair import try_parse_json
+
         data = try_parse_json(content)
         if data:
             return {
@@ -348,7 +365,9 @@ async def _refine_queries(
 
     try:
         llm = create_llm(temperature=0.3, max_tokens=1024)
-        response = await asyncio.wait_for(ainvoke_with_callbacks(llm, messages), timeout=30.0)
+        response = await asyncio.wait_for(
+            ainvoke_with_callbacks(llm, messages), timeout=30.0
+        )
         content = response.content
         if isinstance(content, list):
             content = "".join(
@@ -357,6 +376,7 @@ async def _refine_queries(
             )
 
         from ...tools.json_repair import try_parse_json
+
         data = try_parse_json(content)
         if data:
             new_queries = data.get("new_queries", [])
@@ -382,11 +402,15 @@ async def search_node(state: PipelineState) -> dict:
         await tracker.begin_node("search", "search", index=0)
 
     try:
-        logger.info("Starting paper search", query=state.query, project_id=state.project_id)
+        logger.info(
+            "Starting paper search", query=state.query, project_id=state.project_id
+        )
 
         config = state.config or {}
         limit_per_source = config.get("limit_per_source", 200)
-        sources = config.get("sources", ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"])
+        sources = config.get(
+            "sources", ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"]
+        )
         per_source_limits = {
             s: int(config.get(f"search.source_limit.{s}", limit_per_source))
             for s in sources
@@ -394,18 +418,25 @@ async def search_node(state: PipelineState) -> dict:
 
         # 从 config 读取可调参数
         max_rounds = config.get("search.max_rounds", _DEFAULT_MAX_SEARCH_ROUNDS)
-        initial_query_limit = config.get("search.initial_query_limit", _DEFAULT_INITIAL_QUERY_LIMIT)
-        refine_query_limit = config.get("search.refine_query_limit", _DEFAULT_REFINE_QUERY_LIMIT)
+        initial_query_limit = config.get(
+            "search.initial_query_limit", _DEFAULT_INITIAL_QUERY_LIMIT
+        )
+        refine_query_limit = config.get(
+            "search.refine_query_limit", _DEFAULT_REFINE_QUERY_LIMIT
+        )
         target_relevant = config.get("search.target_relevant", _DEFAULT_TARGET_RELEVANT)
         min_relevant = config.get("search.min_relevant", _DEFAULT_MIN_RELEVANT)
 
         # Phase 1: 初始 query 生成
         logger.info("Generating initial search queries...", query=state.query)
-        queries = await _generate_search_queries(state.query, max_queries=initial_query_limit)
+        queries = await _generate_search_queries(
+            state.query, max_queries=initial_query_limit
+        )
         all_queries = list(queries)  # 记录所有已搜索的 queries
 
         await send_progress(
-            state.project_id, "search",
+            state.project_id,
+            "search",
             f"生成 {len(queries)} 条搜索词，开始多轮搜索...",
             detail={"queries": queries, "sources": sources, "max_rounds": max_rounds},
         )
@@ -418,7 +449,8 @@ async def search_node(state: PipelineState) -> dict:
             logger.info(f"Search round {round_num}/{max_rounds}", queries=queries)
 
             await send_progress(
-                state.project_id, "search",
+                state.project_id,
+                "search",
                 f"第 {round_num} 轮搜索：{len(queries)} 条搜索词 × {len(sources)} 个数据源...",
                 detail={"round": round_num, "queries": queries},
             )
@@ -472,8 +504,7 @@ async def search_node(state: PipelineState) -> dict:
 
             # 主题相关性过滤
             relevant_papers = [
-                p for p in all_papers
-                if _is_topic_relevant(state.query, all_queries, p)
+                p for p in all_papers if _is_topic_relevant(state.query, all_queries, p)
             ]
 
             logger.info(
@@ -484,7 +515,8 @@ async def search_node(state: PipelineState) -> dict:
             )
 
             await send_progress(
-                state.project_id, "search",
+                state.project_id,
+                "search",
                 f"第 {round_num} 轮完成：本轮 {len(round_papers)} 篇，累计去重 {len(all_papers)} 篇，相关 {len(relevant_papers)} 篇",
                 detail={
                     "round": round_num,
@@ -497,7 +529,9 @@ async def search_node(state: PipelineState) -> dict:
             # 覆盖度评估
             if len(relevant_papers) >= target_relevant:
                 # 数量充足，评估覆盖度
-                assessment = await _evaluate_coverage(state.query, all_queries, relevant_papers)
+                assessment = await _evaluate_coverage(
+                    state.query, all_queries, relevant_papers
+                )
                 if assessment.get("is_sufficient", False):
                     logger.info(
                         "Coverage sufficient, stopping search",
@@ -508,7 +542,9 @@ async def search_node(state: PipelineState) -> dict:
                 gaps = assessment.get("identified_gaps", [])
             else:
                 # 数量不足，继续搜索
-                gaps = [f"Only {len(relevant_papers)} relevant papers found, need at least {target_relevant}"]
+                gaps = [
+                    f"Only {len(relevant_papers)} relevant papers found, need at least {target_relevant}"
+                ]
 
             # 最后一轮不再补充
             if round_num >= max_rounds:
@@ -516,7 +552,9 @@ async def search_node(state: PipelineState) -> dict:
                 break
 
             # 生成补充 queries
-            new_queries = await _refine_queries(state.query, gaps, all_queries, max_queries=refine_query_limit)
+            new_queries = await _refine_queries(
+                state.query, gaps, all_queries, max_queries=refine_query_limit
+            )
             if not new_queries:
                 logger.info("No new queries generated, stopping search")
                 break
@@ -525,7 +563,8 @@ async def search_node(state: PipelineState) -> dict:
             all_queries.extend(new_queries)
 
             await send_progress(
-                state.project_id, "search",
+                state.project_id,
+                "search",
                 f"补充 {len(new_queries)} 条搜索词，继续第 {round_num + 1} 轮...",
                 detail={"new_queries": new_queries, "gaps": gaps},
             )
@@ -533,8 +572,7 @@ async def search_node(state: PipelineState) -> dict:
         # Phase 3: 最终验证
         # 第一层：关键词过滤
         keyword_relevant = [
-            p for p in all_papers
-            if _is_topic_relevant(state.query, all_queries, p)
+            p for p in all_papers if _is_topic_relevant(state.query, all_queries, p)
         ]
 
         # 第二层：LLM 主题相关性过滤（对齐 Rust 版 is_topic_relevant_with_queries）
@@ -546,7 +584,9 @@ async def search_node(state: PipelineState) -> dict:
                     state.query, keyword_relevant
                 )
             except Exception as e:
-                logger.warning("LLM relevance filter failed, using keyword results", error=str(e))
+                logger.warning(
+                    "LLM relevance filter failed, using keyword results", error=str(e)
+                )
                 final_papers = keyword_relevant
         else:
             final_papers = keyword_relevant
@@ -581,7 +621,8 @@ async def search_node(state: PipelineState) -> dict:
         )
 
         await send_progress(
-            state.project_id, "search",
+            state.project_id,
+            "search",
             f"搜索完成：{len(paper_ids)} 篇相关论文（共搜索 {len(all_papers)} 篇去重后）[{source_summary}]",
             detail={
                 "total_searched": len(all_papers),
@@ -617,11 +658,15 @@ async def search_node(state: PipelineState) -> dict:
         }
 
         if tracker:
-            await tracker.end_node("search", "succeeded", output_summary={
-                "paper_count": len(paper_ids),
-                "total_searched": len(all_papers),
-                "sources": sources,
-            })
+            await tracker.end_node(
+                "search",
+                "succeeded",
+                output_summary={
+                    "paper_count": len(paper_ids),
+                    "total_searched": len(all_papers),
+                    "sources": sources,
+                },
+            )
         return result
 
     except Exception as e:
@@ -636,12 +681,16 @@ async def search_node(state: PipelineState) -> dict:
         )
 
         if tracker:
-            await tracker.end_node("search", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "search",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
 
         await send_progress(
-            state.project_id, "search",
+            state.project_id,
+            "search",
             f"搜索出错: {e!s}，将用空结果继续",
             detail={"error": str(e), "error_type": type(e).__name__},
         )

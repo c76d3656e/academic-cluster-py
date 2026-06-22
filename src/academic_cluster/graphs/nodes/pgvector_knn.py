@@ -20,7 +20,9 @@ async def pgvector_knn_node(state: PipelineState) -> dict:
     - 计算余弦相似度
     - 构建 KNN 图（每个论文的 Top-K 相似论文）
     """
-    logger.info("Starting KNN graph computation", embedding_count=len(state.embedding_ids))
+    logger.info(
+        "Starting KNN graph computation", embedding_count=len(state.embedding_ids)
+    )
 
     config = state.config or {}
     k = config.get("knn_k", 10)

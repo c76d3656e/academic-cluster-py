@@ -29,6 +29,7 @@ async def _generate_targeted_queries(
 ) -> list[str]:
     """使用 LLM 生成针对性补充 query（对齐 Rust 版 cluster_targeted_refine）"""
     from ...services.llm_client import ainvoke_with_callbacks, create_llm
+
     llm = create_llm(temperature=0.3)
 
     prompt_template = get_cluster_targeted_refine_prompt()
@@ -39,12 +40,18 @@ async def _generate_targeted_queries(
     prompt = prompt_template.format(
         topic=topic,
         gaps="\n".join(f"- {g}" for g in gaps) if gaps else "None identified",
-        weak_clusters=json.dumps(weak_clusters, ensure_ascii=False, indent=2) if weak_clusters else "None",
-        previous_queries="\n".join(f"- {q}" for q in previous_queries) if previous_queries else "None",
+        weak_clusters=json.dumps(weak_clusters, ensure_ascii=False, indent=2)
+        if weak_clusters
+        else "None",
+        previous_queries="\n".join(f"- {q}" for q in previous_queries)
+        if previous_queries
+        else "None",
     )
 
     messages = [
-        SystemMessage(content="Return one compact JSON object only. No markdown. No reasoning. No explanation."),
+        SystemMessage(
+            content="Return one compact JSON object only. No markdown. No reasoning. No explanation."
+        ),
         HumanMessage(content=prompt),
     ]
 
@@ -62,7 +69,7 @@ async def _generate_targeted_queries(
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end > start:
-            content = content[start:end + 1]
+            content = content[start : end + 1]
 
         data = json.loads(content)
         queries = data.get("new_queries", [])
@@ -74,7 +81,9 @@ async def _generate_targeted_queries(
         return queries
 
     except Exception as e:
-        logger.warning("Failed to generate targeted queries, using fallback", error=str(e))
+        logger.warning(
+            "Failed to generate targeted queries, using fallback", error=str(e)
+        )
         return [f"{topic} methods", f"{topic} applications"]
 
 
@@ -106,12 +115,12 @@ async def targeted_refine_node(state: PipelineState) -> dict:
         weak_clusters = []
         previous_queries = []
 
-        if hasattr(state, 'gap_analysis_result') and state.gap_analysis_result:
+        if hasattr(state, "gap_analysis_result") and state.gap_analysis_result:
             gaps = state.gap_analysis_result.get("gaps", [])
             weak_clusters = state.gap_analysis_result.get("weak_clusters", [])
 
         # 收集已搜索过的 queries（从 config 或历史中获取）
-        if hasattr(state, 'searched_queries'):
+        if hasattr(state, "searched_queries"):
             previous_queries = state.searched_queries or []
 
         # 使用 LLM 生成针对性 queries
@@ -175,17 +184,24 @@ async def targeted_refine_node(state: PipelineState) -> dict:
             "status": "refined",
         }
         if tracker:
-            await tracker.end_node("targeted_refine", "succeeded", output_summary={
-                "new_papers": len(new_paper_ids),
-                "queries": len(targeted_queries),
-            })
+            await tracker.end_node(
+                "targeted_refine",
+                "succeeded",
+                output_summary={
+                    "new_papers": len(new_paper_ids),
+                    "queries": len(targeted_queries),
+                },
+            )
         return result
 
     except Exception as e:
         if tracker:
-            await tracker.end_node("targeted_refine", "failed",
-                                   error_message=str(e),
-                                   error_traceback=traceback.format_exc())
+            await tracker.end_node(
+                "targeted_refine",
+                "failed",
+                error_message=str(e),
+                error_traceback=traceback.format_exc(),
+            )
         logger.error("Targeted refinement failed", error=str(e))
         return {
             "paper_ids": [],

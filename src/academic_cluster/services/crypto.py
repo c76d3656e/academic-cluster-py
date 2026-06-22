@@ -23,6 +23,7 @@ def _get_fernet() -> Fernet:
         return _fernet
 
     from ..config import get_settings
+
     settings = get_settings()
     key = settings.provider_encryption_key
 

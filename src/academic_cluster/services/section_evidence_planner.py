@@ -29,7 +29,7 @@ def _tokens(value: Any) -> set[str]:
     tokens = set(_TOKEN_RE.findall(text))
     cjk = "".join(ch for ch in text if "\u4e00" <= ch <= "\u9fff")
     if len(cjk) >= 2:
-        tokens.update(cjk[i:i + 2] for i in range(len(cjk) - 1))
+        tokens.update(cjk[i : i + 2] for i in range(len(cjk) - 1))
     return tokens
 
 
@@ -39,7 +39,9 @@ def _score_overlap(query_tokens: set[str], value: Any) -> float:
     value_tokens = _tokens(value)
     if not value_tokens:
         return 0.0
-    return len(query_tokens & value_tokens) / max(1, min(len(query_tokens), len(value_tokens)))
+    return len(query_tokens & value_tokens) / max(
+        1, min(len(query_tokens), len(value_tokens))
+    )
 
 
 def _as_list(value: Any) -> list:
@@ -57,12 +59,15 @@ def _source_weight(source: str) -> float:
 
 
 def _section_query(section: dict, memories: list[dict]) -> str:
-    target = {str(x) for x in (
-        section.get("target_communities")
-        or section.get("key_clusters")
-        or section.get("clusters")
-        or []
-    )}
+    target = {
+        str(x)
+        for x in (
+            section.get("target_communities")
+            or section.get("key_clusters")
+            or section.get("clusters")
+            or []
+        )
+    }
     related = [m for m in memories if str(m.get("cluster_id")) in target]
     parts: list[Any] = [
         section.get("title"),
@@ -75,13 +80,15 @@ def _section_query(section: dict, memories: list[dict]) -> str:
         section.get("future_directions_to_cover"),
     ]
     for memory in related:
-        parts.extend([
-            memory.get("summary"),
-            memory.get("method_families"),
-            memory.get("key_claims"),
-            memory.get("limitations"),
-            memory.get("future_directions"),
-        ])
+        parts.extend(
+            [
+                memory.get("summary"),
+                memory.get("method_families"),
+                memory.get("key_claims"),
+                memory.get("limitations"),
+                memory.get("future_directions"),
+            ]
+        )
     return _text(parts)
 
 
@@ -150,7 +157,9 @@ def _render_community_context(section: dict, memories: list[dict]) -> str:
         metadata = memory.get("metadata") or {}
         coherence = metadata.get("coherence_assessment") or {}
         topic_rel = metadata.get("topic_relevance") or {}
-        lines.append(f"community {memory.get('cluster_id')}: {memory.get('summary', '')}")
+        lines.append(
+            f"community {memory.get('cluster_id')}: {memory.get('summary', '')}"
+        )
         methods = memory.get("method_families") or []
         if methods:
             lines.append("method_families: " + "; ".join(str(x) for x in methods[:8]))
@@ -192,7 +201,9 @@ def plan_section_evidence(
     topic_tokens = _tokens(topic)
 
     for plan in citation_plans:
-        section = sections[plan.section_index] if plan.section_index < len(sections) else {}
+        section = (
+            sections[plan.section_index] if plan.section_index < len(sections) else {}
+        )
         query = _section_query(section, community_memories)
         query_tokens = _tokens(query) | topic_tokens
         target_clusters = {
@@ -212,11 +223,17 @@ def plan_section_evidence(
                 continue
             paper = paper_map.get(pid, {})
             cards = cards_by_pid.get(pid, [])
-            cluster_id = str(detail.get("cluster_id") or paper_to_cluster.get(pid) or "")
+            cluster_id = str(
+                detail.get("cluster_id") or paper_to_cluster.get(pid) or ""
+            )
             source = str(detail.get("source") or "")
             cluster_bonus = 0.28 if cluster_id in target_clusters else 0.0
-            paper_score = _score_overlap(query_tokens, [paper.get("title"), paper.get("abstract")])
-            card_score = max((_score_overlap(query_tokens, card) for card in cards), default=0.0)
+            paper_score = _score_overlap(
+                query_tokens, [paper.get("title"), paper.get("abstract")]
+            )
+            card_score = max(
+                (_score_overlap(query_tokens, card) for card in cards), default=0.0
+            )
             memory_score = _score_overlap(query_tokens, memory_map.get(cluster_id, {}))
             evidence_bonus = 0.12 if cards else 0.0
             score = (
@@ -232,20 +249,23 @@ def plan_section_evidence(
         scored.sort(key=lambda item: (-item[0], item[1]))
         selected = scored[:max_references_per_section]
         if len(selected) < min_references_per_section:
-            selected = scored[:min(min_references_per_section, len(scored))]
+            selected = scored[: min(min_references_per_section, len(scored))]
         selected_pids = [str(detail.get("paper_id")) for _, _, detail in selected]
         selected_set = set(selected_pids)
         selected_details = [
-            detail for detail in plan.candidate_details
+            detail
+            for detail in plan.candidate_details
             if str(detail.get("paper_id")) in selected_set
         ]
         selected_details.sort(key=lambda d: selected_pids.index(str(d.get("paper_id"))))
 
-        filtered_plans.append(replace(
-            plan,
-            candidate_paper_ids=selected_pids,
-            candidate_details=selected_details,
-        ))
+        filtered_plans.append(
+            replace(
+                plan,
+                candidate_paper_ids=selected_pids,
+                candidate_details=selected_details,
+            )
+        )
 
         support_matrix = []
         for score, _, detail in selected:
@@ -256,13 +276,15 @@ def plan_section_evidence(
                 cards,
                 key=lambda card: _score_overlap(query_tokens, card) if card else 0.0,
             )
-            support_matrix.append(_support_item(
-                paper_id=pid,
-                card=best_card,
-                paper=paper,
-                score=score,
-                source=str(detail.get("source") or ""),
-            ))
+            support_matrix.append(
+                _support_item(
+                    paper_id=pid,
+                    card=best_card,
+                    paper=paper,
+                    score=score,
+                    source=str(detail.get("source") or ""),
+                )
+            )
 
         weak = [item for item in support_matrix if item["relevance_score"] < 0.25]
         evidence_plans[plan.section_index] = {
@@ -292,16 +314,18 @@ def cards_from_support_matrix(support_matrix: list[dict]) -> list[dict]:
     for item in support_matrix:
         if not item.get("evidence_card_id") and not item.get("claim"):
             continue
-        cards.append({
-            "id": item.get("evidence_card_id"),
-            "paper_id": item.get("paper_id"),
-            "title": item.get("title"),
-            "claim": item.get("claim"),
-            "evidence_span": item.get("evidence_span"),
-            "method": item.get("method"),
-            "metric": item.get("metric"),
-            "limitation": item.get("limitation"),
-            "confidence": item.get("confidence"),
-            "relevance_score": item.get("relevance_score"),
-        })
+        cards.append(
+            {
+                "id": item.get("evidence_card_id"),
+                "paper_id": item.get("paper_id"),
+                "title": item.get("title"),
+                "claim": item.get("claim"),
+                "evidence_span": item.get("evidence_span"),
+                "method": item.get("method"),
+                "metric": item.get("metric"),
+                "limitation": item.get("limitation"),
+                "confidence": item.get("confidence"),
+                "relevance_score": item.get("relevance_score"),
+            }
+        )
     return cards

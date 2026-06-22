@@ -73,7 +73,9 @@ def _mask_source_value(definition: SourceDefinition, value: str | None) -> str |
     if not definition.secret:
         return value
     if definition.key == "semantic_scholar_api_key" and "," in value:
-        return ", ".join(mask_key(part.strip()) for part in value.split(",") if part.strip())
+        return ", ".join(
+            mask_key(part.strip()) for part in value.split(",") if part.strip()
+        )
     return mask_key(value)
 
 
@@ -87,7 +89,8 @@ async def ensure_source_registry_schema(db: DatabaseService | None = None) -> No
     """Create source_registry for both fresh and existing databases."""
     db = db or get_database()
     async with db.session() as session:
-        await session.execute(text("""
+        await session.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS source_registry (
                 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
                 key VARCHAR(100) NOT NULL UNIQUE,
@@ -99,14 +102,20 @@ async def ensure_source_registry_schema(db: DatabaseService | None = None) -> No
                 created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             )
-        """))
-        await session.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_source_registry_key ON source_registry(key)"
-        ))
-        await session.execute(text(
-            "CREATE INDEX IF NOT EXISTS idx_source_registry_enabled ON source_registry(is_enabled)"
-        ))
-        await session.execute(text("""
+        """)
+        )
+        await session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_source_registry_key ON source_registry(key)"
+            )
+        )
+        await session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_source_registry_enabled ON source_registry(is_enabled)"
+            )
+        )
+        await session.execute(
+            text("""
             DO $$
             BEGIN
                 IF NOT EXISTS (
@@ -118,16 +127,20 @@ async def ensure_source_registry_schema(db: DatabaseService | None = None) -> No
                 END IF;
             END;
             $$;
-        """))
+        """)
+        )
 
 
 async def _load_registry_rows(db: DatabaseService) -> dict[str, dict[str, Any]]:
     async with db.session() as session:
-        result = await session.execute(text("""
+        result = await session.execute(
+            text("""
             SELECT key, label, value_enc, is_enabled, metadata, created_at, updated_at
             FROM source_registry
             WHERE key = ANY(:keys)
-        """), {"keys": list(SOURCE_DEFINITION_BY_KEY)})
+        """),
+            {"keys": list(SOURCE_DEFINITION_BY_KEY)},
+        )
         rows = result.fetchall()
     return {row._mapping["key"]: dict(row._mapping) for row in rows}
 
@@ -142,7 +155,9 @@ def _decrypt_row_value(key: str, encrypted: str | None) -> str | None:
         return None
 
 
-async def list_source_configs(db: DatabaseService | None = None) -> list[dict[str, Any]]:
+async def list_source_configs(
+    db: DatabaseService | None = None,
+) -> list[dict[str, Any]]:
     """Return masked source configuration with DB/env provenance."""
     db = db or get_database()
     await ensure_source_registry_schema(db)
@@ -166,19 +181,23 @@ async def list_source_configs(db: DatabaseService | None = None) -> list[dict[st
                 else None
             )
 
-        configs.append({
-            "key": definition.key,
-            "label": definition.label,
-            "description": definition.description,
-            "value": _mask_source_value(definition, plain_value),
-            "is_set": bool(plain_value),
-            "key_count": len(_split_source_values(plain_value)) if definition.supports_multiple else (1 if plain_value else 0),
-            "is_enabled": is_enabled,
-            "value_source": value_source,
-            "is_secret": definition.secret,
-            "supports_multiple": definition.supports_multiple,
-            "updated_at": str(updated_at) if updated_at else None,
-        })
+        configs.append(
+            {
+                "key": definition.key,
+                "label": definition.label,
+                "description": definition.description,
+                "value": _mask_source_value(definition, plain_value),
+                "is_set": bool(plain_value),
+                "key_count": len(_split_source_values(plain_value))
+                if definition.supports_multiple
+                else (1 if plain_value else 0),
+                "is_enabled": is_enabled,
+                "value_source": value_source,
+                "is_secret": definition.secret,
+                "supports_multiple": definition.supports_multiple,
+                "updated_at": str(updated_at) if updated_at else None,
+            }
+        )
 
     return configs
 
@@ -202,7 +221,8 @@ async def upsert_source_config(
     value_enc = encrypt_key(normalized) if normalized and is_enabled else None
 
     async with db.session() as session:
-        await session.execute(text("""
+        await session.execute(
+            text("""
             INSERT INTO source_registry (key, label, value_enc, is_enabled, metadata, created_by)
             VALUES (:key, :label, :value_enc, :is_enabled, '{}'::jsonb, :created_by)
             ON CONFLICT (key) DO UPDATE SET
@@ -211,13 +231,15 @@ async def upsert_source_config(
                 is_enabled = EXCLUDED.is_enabled,
                 created_by = COALESCE(EXCLUDED.created_by, source_registry.created_by),
                 updated_at = NOW()
-        """), {
-            "key": key,
-            "label": definition.label,
-            "value_enc": value_enc,
-            "is_enabled": bool(is_enabled and normalized),
-            "created_by": created_by,
-        })
+        """),
+            {
+                "key": key,
+                "label": definition.label,
+                "value_enc": value_enc,
+                "is_enabled": bool(is_enabled and normalized),
+                "created_by": created_by,
+            },
+        )
 
     return (await list_source_configs(db))[list(SOURCE_DEFINITION_BY_KEY).index(key)]
 
@@ -274,7 +296,8 @@ async def clear_source_config(
     db = db or get_database()
     await ensure_source_registry_schema(db)
     async with db.session() as session:
-        await session.execute(text("""
+        await session.execute(
+            text("""
             INSERT INTO source_registry (key, label, value_enc, is_enabled, metadata, created_by)
             VALUES (:key, :label, NULL, false, '{}'::jsonb, :created_by)
             ON CONFLICT (key) DO UPDATE SET
@@ -283,11 +306,13 @@ async def clear_source_config(
                 is_enabled = false,
                 created_by = COALESCE(EXCLUDED.created_by, source_registry.created_by),
                 updated_at = NOW()
-        """), {
-            "key": key,
-            "label": definition.label,
-            "created_by": created_by,
-        })
+        """),
+            {
+                "key": key,
+                "label": definition.label,
+                "created_by": created_by,
+            },
+        )
 
     return (await list_source_configs(db))[list(SOURCE_DEFINITION_BY_KEY).index(key)]
 

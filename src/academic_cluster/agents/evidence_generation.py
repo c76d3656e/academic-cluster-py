@@ -56,6 +56,7 @@ def create_evidence_agent(
 ) -> ChatOpenAI:
     """创建证据生成 Agent"""
     from ..services.llm_client import create_llm
+
     return create_llm(temperature=temperature)
 
 
@@ -87,6 +88,7 @@ async def generate_evidence_card(
     ]
 
     from ..services.llm_client import ainvoke_with_callbacks
+
     response = await ainvoke_with_callbacks(agent, messages)
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
@@ -110,13 +112,21 @@ async def generate_evidence_card(
             end = content.rfind("}")
             if start != -1 and end > start:
                 try:
-                    result = json.loads(content[start:end + 1])
+                    result = json.loads(content[start : end + 1])
                 except json.JSONDecodeError:
-                    logger.error("Failed to parse evidence response", response=raw_content[:500])
-                    raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}") from None
+                    logger.error(
+                        "Failed to parse evidence response", response=raw_content[:500]
+                    )
+                    raise ValueError(
+                        f"LLM returned invalid JSON for evidence card: {raw_content[:200]}"
+                    ) from None
             else:
-                logger.error("Failed to parse evidence response", response=raw_content[:500])
-                raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}") from None
+                logger.error(
+                    "Failed to parse evidence response", response=raw_content[:500]
+                )
+                raise ValueError(
+                    f"LLM returned invalid JSON for evidence card: {raw_content[:200]}"
+                ) from None
 
     # 添加论文 ID
     result["paper_id"] = paper.get("id")
@@ -194,7 +204,9 @@ def normalize_evidence_card(raw_card: dict | None, paper: dict) -> dict:
     return {
         **card,
         "paper_id": str(paper.get("id", "")),
-        "title": _clean_text(paper.get("title")) or _clean_text(card.get("title")) or "Untitled",
+        "title": _clean_text(paper.get("title"))
+        or _clean_text(card.get("title"))
+        or "Untitled",
         "authors": card.get("authors") or paper.get("authors"),
         "year": card.get("year") or _paper_year(paper),
         "claim": claim,

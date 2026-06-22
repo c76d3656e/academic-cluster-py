@@ -50,7 +50,10 @@ async def bm25_node(state: PipelineState) -> dict:
 
     # 如果阈值筛选后太少，保留 top max_papers
     if len(above_threshold) < 20:
-        logger.warning("BM25 threshold too strict, using top papers", above_threshold=len(above_threshold))
+        logger.warning(
+            "BM25 threshold too strict, using top papers",
+            above_threshold=len(above_threshold),
+        )
         above_threshold = results[:max_papers]
 
     # 安全阀：最多 max_papers 篇进入 embedding
@@ -67,7 +70,8 @@ async def bm25_node(state: PipelineState) -> dict:
     )
 
     await send_progress(
-        state.project_id, "bm25",
+        state.project_id,
+        "bm25",
         f"BM25 评分完成：{len(results)} 篇评分，{len(bm25_ids)} 篇高于阈值 {min_score}",
     )
 

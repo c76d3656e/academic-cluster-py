@@ -41,9 +41,15 @@ class PipelineState(BaseModel):
 
     # === 过滤阶段 ===
     filtered_paper_ids: list[str] = Field(default_factory=list)
-    reranked_paper_ids: list[str] = Field(default_factory=list)  # 全部 reranked 论文（用于 KG、聚类）
-    core_paper_ids: list[str] = Field(default_factory=list)      # top N 核心论文（用于 evidence cards）
-    auxiliary_paper_ids: list[str] = Field(default_factory=list)  # 辅助论文（用于 review 写作）
+    reranked_paper_ids: list[str] = Field(
+        default_factory=list
+    )  # 全部 reranked 论文（用于 KG、聚类）
+    core_paper_ids: list[str] = Field(
+        default_factory=list
+    )  # top N 核心论文（用于 evidence cards）
+    auxiliary_paper_ids: list[str] = Field(
+        default_factory=list
+    )  # 辅助论文（用于 review 写作）
 
     # === 嵌入阶段 ===
     # 嵌入向量 ID 列表（向量存储在向量数据库）
@@ -98,11 +104,13 @@ class PipelineState(BaseModel):
 
     class Config:
         """Pydantic 配置"""
+
         arbitrary_types_allowed = True
 
 
 class SearchState(BaseModel):
     """搜索子图状态"""
+
     query: str
     source: str
     raw_results: list[dict] = Field(default_factory=list)
@@ -112,6 +120,7 @@ class SearchState(BaseModel):
 
 class ClusteringState(BaseModel):
     """聚类子图状态"""
+
     paper_ids: list[str] = Field(default_factory=list)
     embedding_ids: list[str] = Field(default_factory=list)
     kg_entity_ids: list[str] = Field(default_factory=list)
@@ -126,6 +135,7 @@ class ClusteringState(BaseModel):
 
 class WritingState(BaseModel):
     """写作子图状态"""
+
     outline_id: str | None = None
     cluster_ids: list[str] = Field(default_factory=list)
     evidence_card_ids: list[str] = Field(default_factory=list)

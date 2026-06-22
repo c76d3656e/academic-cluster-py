@@ -4,7 +4,6 @@
 使用 PostgreSQL pgvector 进行向量存储和检索。
 """
 
-
 import structlog
 from sqlalchemy import text
 
@@ -49,7 +48,7 @@ class VectorStoreService:
                         "model_name": model_name,
                         "vector": str(embedding),
                         "dimensions": len(embedding),
-                    }
+                    },
                 )
 
         logger.info("Added embeddings", count=len(paper_ids))
@@ -81,15 +80,12 @@ class VectorStoreService:
                     "query_embedding": str(query_embedding),
                     "limit": limit,
                     "threshold": threshold,
-                }
+                },
             )
 
             rows = result.fetchall()
 
-        return [
-            {"paper_id": str(row[0]), "similarity": row[1]}
-            for row in rows
-        ]
+        return [{"paper_id": str(row[0]), "similarity": row[1]} for row in rows]
 
     async def get_knn_graph(
         self,
@@ -119,7 +115,7 @@ class VectorStoreService:
                         WHERE paper_id = :paper_id
                         LIMIT 1
                     """),
-                    {"paper_id": paper_id}
+                    {"paper_id": paper_id},
                 )
                 row = result.fetchone()
 
@@ -137,11 +133,13 @@ class VectorStoreService:
 
                 for item in similar:
                     if item["paper_id"] != paper_id:
-                        edges.append({
-                            "source": paper_id,
-                            "target": item["paper_id"],
-                            "weight": item["similarity"],
-                        })
+                        edges.append(
+                            {
+                                "source": paper_id,
+                                "target": item["paper_id"],
+                                "weight": item["similarity"],
+                            }
+                        )
 
         logger.info("KNN graph built", edges=len(edges))
         return edges

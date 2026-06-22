@@ -49,13 +49,18 @@ def _summarize_output(output: Any, max_len: int = 500) -> dict:
             summary[k] = v
     return summary
 
+
 # ---------------------------------------------------------------------------
 # Context variables -- 在 pipeline 执行期间标识当前 run 和 node
 # ---------------------------------------------------------------------------
 _current_run_id: ContextVar[str | None] = ContextVar("current_run_id", default=None)
 _current_node: ContextVar[str | None] = ContextVar("current_node", default=None)
-_current_tracker: ContextVar[Optional["PipelineTracker"]] = ContextVar("current_tracker", default=None)
-_current_project_id: ContextVar[str | None] = ContextVar("current_project_id", default=None)
+_current_tracker: ContextVar[Optional["PipelineTracker"]] = ContextVar(
+    "current_tracker", default=None
+)
+_current_project_id: ContextVar[str | None] = ContextVar(
+    "current_project_id", default=None
+)
 
 # LangGraph 执行上下文不传播 ContextVar。
 # 用线程级栈（list）做最后 fallback，run_pipeline push，结束时 pop。
@@ -63,7 +68,9 @@ _current_project_id: ContextVar[str | None] = ContextVar("current_project_id", d
 _run_id_stack: list[str] = []
 _project_id_stack: list[str] = []
 _node_stack: list[str] = []
-_current_llm_callback: ContextVar[Optional["LLMCallbackHandler"]] = ContextVar("current_llm_callback", default=None)
+_current_llm_callback: ContextVar[Optional["LLMCallbackHandler"]] = ContextVar(
+    "current_llm_callback", default=None
+)
 
 
 def setup_structlog(log_level: str = "INFO"):
@@ -214,7 +221,11 @@ class LLMCallbackHandler(BaseCallbackHandler):
     def on_llm_end(self, response: LLMResult, *, run_id, **kwargs):
         try:
             start_time = self._start_times.pop(str(run_id), None)
-            elapsed_ms = int((time.monotonic() - start_time) * 1000) if start_time is not None else 0
+            elapsed_ms = (
+                int((time.monotonic() - start_time) * 1000)
+                if start_time is not None
+                else 0
+            )
 
             # 提取 token 用量
             usage: dict = {}
@@ -265,11 +276,15 @@ class LLMCallbackHandler(BaseCallbackHandler):
                 # callback often lacks provider context and would create duplicate
                 # "unknown" rows.
         except Exception as e:
-            structlog.get_logger().warning("LLM callback on_llm_end error", error=str(e))
+            structlog.get_logger().warning(
+                "LLM callback on_llm_end error", error=str(e)
+            )
 
     def on_llm_error(self, error, *, run_id, **kwargs):
         start_time = self._start_times.pop(str(run_id), None)
-        elapsed_ms = int((time.monotonic() - start_time) * 1000) if start_time is not None else 0
+        elapsed_ms = (
+            int((time.monotonic() - start_time) * 1000) if start_time is not None else 0
+        )
         logger = structlog.get_logger()
         logger.error(
             "llm_call_failed",
@@ -308,14 +323,18 @@ class PipelineStatusCallback(BaseCallbackHandler):
         """LangGraph 节点开始时调用"""
         try:
             # LangGraph 的 node name 从 serialized.name 或 inputs 的 __name__ 获取
-            node_name = serialized.get("name", "") if isinstance(serialized, dict) else ""
+            node_name = (
+                serialized.get("name", "") if isinstance(serialized, dict) else ""
+            )
             if not node_name:
                 # 尝试从 kwargs 获取
                 node_name = kwargs.get("name", "")
             if node_name and node_name != self._last_node:
                 self._last_node = node_name
                 status = f"running:{node_name}"
-                structlog.get_logger().info("PipelineStatusCallback: node started", node=node_name)
+                structlog.get_logger().info(
+                    "PipelineStatusCallback: node started", node=node_name
+                )
                 # 使用 run_coroutine_threadsafe 从线程池安全地调度异步调用
                 if self._loop is not None:
                     asyncio.run_coroutine_threadsafe(
@@ -375,9 +394,7 @@ class PipelineTracker:
         """启动 pipeline run 记录"""
         self._start_time = time.monotonic()
         if db_create_run:
-            self.run_id = await db_create_run(
-                self.project_id, self.topic, self.config
-            )
+            self.run_id = await db_create_run(self.project_id, self.topic, self.config)
         else:
             self.run_id = str(uuid.uuid4())
 
@@ -401,9 +418,7 @@ class PipelineTracker:
         self._node_starts[node_name] = time.monotonic()
 
         if db_create_node and self.run_id:
-            exec_id = await db_create_node(
-                self.run_id, node_name, node_type, index
-            )
+            exec_id = await db_create_node(self.run_id, node_name, node_type, index)
             self._node_ids[node_name] = exec_id
 
         self.logger.info(
@@ -637,7 +652,9 @@ def set_current_llm_callback(callback: Optional["LLMCallbackHandler"]) -> None:
 
 def get_current_project() -> str | None:
     """获取当前项目 ID"""
-    return _current_project_id.get() or (_project_id_stack[-1] if _project_id_stack else None)
+    return _current_project_id.get() or (
+        _project_id_stack[-1] if _project_id_stack else None
+    )
 
 
 def push_current_project(project_id: str | None) -> None:

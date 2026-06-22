@@ -52,7 +52,9 @@ class TokenService:
         settings = get_settings()
         self.secret_key = settings.jwt_secret_key
         self.algorithm = settings.jwt_algorithm
-        self.access_token_expire = timedelta(minutes=settings.access_token_expire_minutes)
+        self.access_token_expire = timedelta(
+            minutes=settings.access_token_expire_minutes
+        )
         self.refresh_token_expire = timedelta(days=settings.refresh_token_expire_days)
 
     def create_access_token(self, user_id: str, role: str) -> str:

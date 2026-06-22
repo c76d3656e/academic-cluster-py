@@ -20,8 +20,10 @@ router = APIRouter(tags=["admin-projects"])
 # 响应模型
 # =============================================================================
 
+
 class AdminProjectItem(BaseModel):
     """管理后台项目列表项"""
+
     id: str
     name: str
     query: str
@@ -32,6 +34,7 @@ class AdminProjectItem(BaseModel):
 
 class AdminProjectListResponse(BaseModel):
     """管理后台项目列表响应"""
+
     projects: list[AdminProjectItem]
     total: int
 
@@ -39,6 +42,7 @@ class AdminProjectListResponse(BaseModel):
 # =============================================================================
 # 端点
 # =============================================================================
+
 
 @router.get("", response_model=AdminProjectListResponse)
 async def list_all_projects(
@@ -83,6 +87,7 @@ async def delete_project(
 
     # 使用原始 SQL 级联删除项目及相关数据
     from sqlalchemy import text
+
     async with db.session() as session:
         # 删除相关的 LLM 调用记录
         await session.execute(
@@ -131,7 +136,10 @@ async def delete_project(
         )
 
     await db.log_activity(
-        admin["id"], "admin_delete_project", "project", project_id,
+        admin["id"],
+        "admin_delete_project",
+        "project",
+        project_id,
         {"name": project.get("name", "")},
         ip_address=request.client.host if request.client else None,
     )
