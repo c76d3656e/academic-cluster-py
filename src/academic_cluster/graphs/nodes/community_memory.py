@@ -242,11 +242,11 @@ def synthesize_community_memory(
     cards = [c for c in evidence_cards if str(c.get("paper_id")) in set(cluster_paper_ids)]
     entities = [
         e for e in kg_entities
-        if set(str(pid) for pid in _as_list(e.get("paper_ids"))) & set(cluster_paper_ids)
+        if {str(pid) for pid in _as_list(e.get("paper_ids"))} & set(cluster_paper_ids)
     ]
     relations = [
         r for r in kg_relations
-        if set(str(pid) for pid in _as_list(r.get("paper_ids"))) & set(cluster_paper_ids)
+        if {str(pid) for pid in _as_list(r.get("paper_ids"))} & set(cluster_paper_ids)
     ]
 
     method_values = [c.get("method") for c in cards]
@@ -355,11 +355,11 @@ async def enrich_community_memory_with_llm(
     cards = [c for c in evidence_cards if str(c.get("paper_id")) in cluster_paper_ids][:24]
     entities = [
         e for e in kg_entities
-        if set(str(pid) for pid in _as_list(e.get("paper_ids"))) & cluster_paper_ids
+        if {str(pid) for pid in _as_list(e.get("paper_ids"))} & cluster_paper_ids
     ][:40]
     relations = [
         r for r in kg_relations
-        if set(str(pid) for pid in _as_list(r.get("paper_ids"))) & cluster_paper_ids
+        if {str(pid) for pid in _as_list(r.get("paper_ids"))} & cluster_paper_ids
     ][:30]
 
     paper_lines = []
@@ -546,10 +546,10 @@ async def community_memory_node(state: PipelineState) -> dict:
                 ),
                 timeout=timeout_s,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             metadata = dict(fallback.get("metadata") or {})
             metadata["synthesis_mode"] = "deterministic_fallback"
-            metadata["llm_error"] = f"community memory enrichment timed out"
+            metadata["llm_error"] = "community memory enrichment timed out"
             fallback["metadata"] = metadata
             logger.warning(
                 "Community LLM synthesis timed out, using deterministic fallback",

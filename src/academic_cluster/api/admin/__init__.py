@@ -6,14 +6,14 @@
 
 from fastapi import APIRouter
 
+from .audit import router as audit_router
 from .dashboard import router as dashboard_router
-from .users import router as users_router
+from .pipeline_config import router as pipeline_config_router
 from .projects import router as projects_router
 from .providers import router as providers_router
-from .usage import router as usage_router
-from .audit import router as audit_router
 from .source_config import router as source_config_router
-from .pipeline_config import router as pipeline_config_router
+from .usage import router as usage_router
+from .users import router as users_router
 
 router = APIRouter(prefix="/admin")
 

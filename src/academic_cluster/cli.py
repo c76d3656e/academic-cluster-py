@@ -2,7 +2,6 @@
 CLI 入口
 """
 
-import asyncio
 
 import structlog
 from rich.console import Console

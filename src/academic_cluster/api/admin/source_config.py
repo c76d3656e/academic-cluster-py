@@ -4,14 +4,16 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..dependencies import require_admin
 from ...services.database import DatabaseService, get_database
 from ...services.source_config import (
     append_source_config_value,
     clear_source_config,
-    list_source_configs as list_source_configs_service,
     upsert_source_config,
 )
+from ...services.source_config import (
+    list_source_configs as list_source_configs_service,
+)
+from ..dependencies import require_admin
 
 logger = structlog.get_logger()
 

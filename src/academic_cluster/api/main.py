@@ -2,9 +2,9 @@
 FastAPI 主应用
 """
 
-import structlog
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -15,8 +15,9 @@ logger = structlog.get_logger()
 
 async def _seed_admin(db, settings):
     """启动时确保存在管理员账户（幂等）"""
-    from ..services.auth import get_password_service
     from sqlalchemy import text
+
+    from ..services.auth import get_password_service
 
     admin_password = settings.admin_password
     if not admin_password:
@@ -66,6 +67,7 @@ async def _seed_admin(db, settings):
 async def _seed_providers(db, settings):
     """启动时将 .env 中的 Provider 配置同步到 provider_registry 表（幂等）"""
     from sqlalchemy import text
+
     from ..services.crypto import encrypt_key
 
     providers_to_seed = []
@@ -308,10 +310,10 @@ async def lifespan(app: FastAPI):
     settings.validate_security()
 
     # 初始化服务
-    from ..services import get_database, get_cache, get_vector_store
+    from ..services import get_cache, get_database, get_vector_store
     db = get_database()
-    cache = get_cache()
-    vector_store = get_vector_store()
+    get_cache()
+    get_vector_store()
 
     # 初始化 LangGraph checkpointer（AsyncPostgresSaver）
     try:
@@ -344,7 +346,7 @@ async def lifespan(app: FastAPI):
 
     # 初始化 Pipeline 配置表
     try:
-        from .admin.pipeline_config import init_pipeline_config_table, _ensure_defaults
+        from .admin.pipeline_config import _ensure_defaults, init_pipeline_config_table
         await init_pipeline_config_table()
         await _ensure_defaults()
     except Exception as e:
@@ -377,7 +379,7 @@ async def lifespan(app: FastAPI):
     await close_pools()
     from ..graphs.graph import close_checkpointer
     await close_checkpointer()
-    from ..services import close_database, close_cache, close_vector_store
+    from ..services import close_cache, close_database, close_vector_store
     await close_database()
     await close_cache()
     await close_vector_store()
@@ -412,11 +414,11 @@ def create_app() -> FastAPI:
     )
 
     # 注册路由
-    from .routes import router
-    from .sse import router as sse_router
+    from .admin import router as admin_router
     from .auth_routes import router as auth_router
     from .console import router as console_router
-    from .admin import router as admin_router
+    from .routes import router
+    from .sse import router as sse_router
     app.include_router(auth_router, prefix="/api")
     app.include_router(router, prefix="/api")
     app.include_router(sse_router, prefix="/api")

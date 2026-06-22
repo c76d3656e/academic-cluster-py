@@ -3,8 +3,7 @@
 """
 
 from datetime import datetime
-from typing import Optional
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -12,16 +11,16 @@ from pydantic import BaseModel, Field
 class Paper(BaseModel):
     """论文模型"""
     id: str = Field(default_factory=lambda: str(uuid4()))
-    external_id: Optional[str] = None
+    external_id: str | None = None
     source: str  # 'semantic_scholar', 'pubmed', 'arxiv', 'openalex', 'crossref'
     title: str
-    abstract: Optional[str] = None
+    abstract: str | None = None
     authors: list[dict] = Field(default_factory=list)
-    publication_date: Optional[datetime] = None
-    journal: Optional[str] = None
-    doi: Optional[str] = None
-    url: Optional[str] = None
-    pdf_url: Optional[str] = None
+    publication_date: datetime | None = None
+    journal: str | None = None
+    doi: str | None = None
+    url: str | None = None
+    pdf_url: str | None = None
     citation_count: int = 0
     reference_count: int = 0
     influential_citation_count: int = 0
@@ -29,10 +28,10 @@ class Paper(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
     # 处理状态
-    embedding_id: Optional[str] = None
-    quality_score: Optional[float] = None
-    rerank_score: Optional[float] = None
-    tier: Optional[str] = None  # 'core', 'auxiliary', 'filtered'
+    embedding_id: str | None = None
+    quality_score: float | None = None
+    rerank_score: float | None = None
+    tier: str | None = None  # 'core', 'auxiliary', 'filtered'
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -66,16 +65,16 @@ class Embedding(BaseModel):
     model_name: str
     vector: list[float] = Field(default_factory=list)
     dimensions: int = 0
-    vector_id: Optional[str] = None  # 向量数据库中的 ID
+    vector_id: str | None = None  # 向量数据库中的 ID
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class PaperQuality(BaseModel):
     """论文质量评估"""
     paper_id: str
-    jcr_quartile: Optional[str] = None  # 'Q1', 'Q2', 'Q3', 'Q4'
-    ccf_rank: Optional[str] = None  # 'A', 'B', 'C'
-    impact_factor: Optional[float] = None
+    jcr_quartile: str | None = None  # 'Q1', 'Q2', 'Q3', 'Q4'
+    ccf_rank: str | None = None  # 'A', 'B', 'C'
+    impact_factor: float | None = None
     quality_score: float = 0.0
     is_high_quality: bool = False
 

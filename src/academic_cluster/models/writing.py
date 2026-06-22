@@ -3,7 +3,6 @@
 """
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -15,11 +14,11 @@ class EvidenceCard(BaseModel):
     title: str
     claim: str
     evidence_span: str
-    method: Optional[str] = None
-    metric: Optional[str] = None
-    limitation: Optional[str] = None
+    method: str | None = None
+    metric: str | None = None
+    limitation: str | None = None
     confidence: float = 0.0
-    cluster_id: Optional[str] = None
+    cluster_id: str | None = None
 
 
 class GapAnalysis(BaseModel):
@@ -50,7 +49,7 @@ class CitationPlan(BaseModel):
     citation_text: str
     citation_style: str = "apa"
     relevance_score: float = 0.0
-    location_in_section: Optional[str] = None  # 'introduction', 'methodology', 'results', 'discussion'
+    location_in_section: str | None = None  # 'introduction', 'methodology', 'results', 'discussion'
 
 
 class WrittenSection(BaseModel):
@@ -80,7 +79,7 @@ class Outline(BaseModel):
     """综述大纲"""
     id: str
     title: str
-    abstract: Optional[str] = None
+    abstract: str | None = None
     sections: list[OutlineSection] = Field(default_factory=list)
     status: str = "draft"  # 'draft', 'approved', 'writing', 'completed'
     version: int = 1

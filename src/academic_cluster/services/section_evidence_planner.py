@@ -13,7 +13,6 @@ from typing import Any
 
 from .citation_planner import SectionCitationPlan
 
-
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]{2,}|[\u4e00-\u9fff]{2,}")
 
 

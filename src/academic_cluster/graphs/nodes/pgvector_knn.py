@@ -4,8 +4,8 @@ pgvector KNN 节点 - 存储嵌入并计算 KNN 图
 
 import structlog
 
-from ...services.vector_store import get_vector_store
 from ...services.database import get_database
+from ...services.vector_store import get_vector_store
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -35,7 +35,7 @@ async def pgvector_knn_node(state: PipelineState) -> dict:
         )
 
         # 保存到数据库
-        db = get_database()
+        get_database()
         knn_graph_id = f"knn_{state.project_id}"
         # TODO: 保存 KNN 图到数据库
 
@@ -54,5 +54,5 @@ async def pgvector_knn_node(state: PipelineState) -> dict:
         return {
             "knn_graph_id": None,
             "status": "knn_computed",
-            "errors": [f"KNN computation failed: {str(e)}"],
+            "errors": [f"KNN computation failed: {e!s}"],
         }

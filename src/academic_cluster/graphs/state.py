@@ -6,9 +6,8 @@ LangGraph 状态定义
 """
 
 from operator import add
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
-from langgraph.graph import add_messages
 from pydantic import BaseModel, Field
 
 
@@ -31,7 +30,7 @@ class PipelineState(BaseModel):
     project_id: str
     query: str
     status: Annotated[str, _last_write_wins] = "created"
-    current_node: Optional[str] = None
+    current_node: str | None = None
     errors: Annotated[list[str], add] = Field(default_factory=list)
     retry_count: int = 0
 
@@ -49,7 +48,7 @@ class PipelineState(BaseModel):
     # === 嵌入阶段 ===
     # 嵌入向量 ID 列表（向量存储在向量数据库）
     embedding_ids: list[str] = Field(default_factory=list)
-    knn_graph_id: Optional[str] = None  # KNN 图在数据库中的 ID
+    knn_graph_id: str | None = None  # KNN 图在数据库中的 ID
 
     # === 知识图谱阶段 ===
     kg_entity_ids: list[str] = Field(default_factory=list)
@@ -57,8 +56,8 @@ class PipelineState(BaseModel):
 
     # === 聚类阶段 ===
     cluster_ids: list[str] = Field(default_factory=list)
-    hybrid_graph_id: Optional[str] = None
-    community_visualization: Optional[dict] = None  # 推送给前端的可视化数据
+    hybrid_graph_id: str | None = None
+    community_visualization: dict | None = None  # 推送给前端的可视化数据
 
     # === 证据阶段 ===
     evidence_card_ids: list[str] = Field(default_factory=list)
@@ -69,18 +68,18 @@ class PipelineState(BaseModel):
     max_refinement_attempts: int = 5
 
     # === 写作阶段 ===
-    outline_id: Optional[str] = None
-    outline_data: Optional[dict] = None  # 大纲内容（用于 write_review 节点）
+    outline_id: str | None = None
+    outline_data: dict | None = None  # 大纲内容（用于 write_review 节点）
     section_plan_ids: list[str] = Field(default_factory=list)
     citation_plan_ids: list[str] = Field(default_factory=list)
     written_section_ids: list[str] = Field(default_factory=list)
 
     # === 产出物 ===
-    final_review_id: Optional[str] = None
-    final_review: Optional[str] = None  # 最终综述内容
-    abstract: Optional[str] = None  # 基于最终全文生成的无引用摘要
-    bibtex: Optional[str] = None
-    artifact_id: Optional[str] = None
+    final_review_id: str | None = None
+    final_review: str | None = None  # 最终综述内容
+    abstract: str | None = None  # 基于最终全文生成的无引用摘要
+    bibtex: str | None = None
+    artifact_id: str | None = None
 
     # === 覆盖审计 ===
     coverage_score: float = 0.0
@@ -108,7 +107,7 @@ class SearchState(BaseModel):
     source: str
     raw_results: list[dict] = Field(default_factory=list)
     processed_ids: list[str] = Field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ClusteringState(BaseModel):
@@ -120,14 +119,14 @@ class ClusteringState(BaseModel):
     evidence_card_ids: list[str] = Field(default_factory=list)
     community_memory_ids: list[str] = Field(default_factory=list)
 
-    hybrid_graph_id: Optional[str] = None
+    hybrid_graph_id: str | None = None
     cluster_ids: list[str] = Field(default_factory=list)
-    visualization: Optional[dict] = None
+    visualization: dict | None = None
 
 
 class WritingState(BaseModel):
     """写作子图状态"""
-    outline_id: Optional[str] = None
+    outline_id: str | None = None
     cluster_ids: list[str] = Field(default_factory=list)
     evidence_card_ids: list[str] = Field(default_factory=list)
     core_paper_ids: list[str] = Field(default_factory=list)
@@ -136,9 +135,9 @@ class WritingState(BaseModel):
     citation_plan_ids: list[str] = Field(default_factory=list)
     written_section_ids: list[str] = Field(default_factory=list)
 
-    final_review: Optional[str] = None
-    abstract: Optional[str] = None
-    bibtex: Optional[str] = None
+    final_review: str | None = None
+    abstract: str | None = None
+    bibtex: str | None = None
 
     # 覆盖审计
     coverage_score: float = 0.0

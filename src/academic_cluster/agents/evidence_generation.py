@@ -5,7 +5,8 @@
 """
 
 import json
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -112,10 +113,10 @@ async def generate_evidence_card(
                     result = json.loads(content[start:end + 1])
                 except json.JSONDecodeError:
                     logger.error("Failed to parse evidence response", response=raw_content[:500])
-                    raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}")
+                    raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}") from None
             else:
                 logger.error("Failed to parse evidence response", response=raw_content[:500])
-                raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}")
+                raise ValueError(f"LLM returned invalid JSON for evidence card: {raw_content[:200]}") from None
 
     # 添加论文 ID
     result["paper_id"] = paper.get("id")

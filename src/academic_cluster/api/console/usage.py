@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from ..dependencies import get_current_user
 from ...services.database import DatabaseService, get_database
+from ..dependencies import get_current_user
 
 logger = structlog.get_logger()
 
@@ -99,8 +99,8 @@ async def get_usage_trend(
 
     time_group = "DATE(lc.created_at)" if granularity == "day" else "date_trunc('hour', lc.created_at)"
     run_time_group = "DATE(pr.created_at)" if granularity == "day" else "date_trunc('hour', pr.created_at)"
-    time_filter = f"lc.created_at >= NOW() - (:days * INTERVAL '1 day')"
-    run_time_filter = f"pr.created_at >= NOW() - (:days * INTERVAL '1 day')"
+    time_filter = "lc.created_at >= NOW() - (:days * INTERVAL '1 day')"
+    run_time_filter = "pr.created_at >= NOW() - (:days * INTERVAL '1 day')"
 
     async with db.session() as session:
         result = await session.execute(
@@ -172,7 +172,7 @@ async def get_usage_trend(
                 FROM usage_daily
                 GROUP BY date
                 ORDER BY date
-            """),
+            """),  # nosec B608
             {"user_id": user_id, "days": days},
         )
         rows = result.fetchall()
@@ -269,7 +269,7 @@ async def get_usage_calls(
                 {node_filter}
                 {status_filter}
                 {call_type_filter}
-            """),
+            """),  # nosec B608
             params,
         )
         total = count_result.scalar() or 0
@@ -315,7 +315,7 @@ async def get_usage_calls(
                 {call_type_filter}
                 ORDER BY lc.created_at DESC
                 LIMIT :limit
-            """),
+            """),  # nosec B608
             params,
         )
         rows = result.fetchall()

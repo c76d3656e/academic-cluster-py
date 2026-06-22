@@ -4,11 +4,9 @@
 使用 PostgreSQL pgvector 进行向量存储和检索。
 """
 
-from typing import Optional
 
 import structlog
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from .database import get_database
 
@@ -37,7 +35,7 @@ class VectorStoreService:
             model_name: 模型名称
         """
         async with self.db.session() as session:
-            for paper_id, embedding in zip(paper_ids, embeddings):
+            for paper_id, embedding in zip(paper_ids, embeddings, strict=False):
                 # 使用 UPSERT 语义
                 await session.execute(
                     text("""
@@ -154,7 +152,7 @@ class VectorStoreService:
 
 
 # 全局向量存储实例
-_vector_store: Optional[VectorStoreService] = None
+_vector_store: VectorStoreService | None = None
 
 
 def get_vector_store() -> VectorStoreService:

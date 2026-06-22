@@ -4,19 +4,19 @@
 提供 PostgreSQL 异步数据库访问，使用 pgvector 进行向量存储。
 """
 
-from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import Any, AsyncGenerator, Optional
 import json
 import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime
+from typing import Any
 
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
-    create_async_engine,
     async_sessionmaker,
+    create_async_engine,
 )
 
 
@@ -24,22 +24,20 @@ def _convert_uuid_fields(row: dict) -> dict:
     """将 UUID 字段转换为字符串"""
     result = {}
     for key, value in row.items():
-        if isinstance(value, uuid.UUID):
-            result[key] = str(value)
-        elif hasattr(value, '__class__') and 'UUID' in value.__class__.__name__:
+        if isinstance(value, uuid.UUID) or (hasattr(value, '__class__') and 'UUID' in value.__class__.__name__):
             result[key] = str(value)
         elif key.endswith("_ids") and value is None:
             result[key] = []
         elif key.endswith("_ids") and isinstance(value, (list, tuple, set)):
             result[key] = [
-                str(v) if isinstance(v, uuid.UUID) or hasattr(v, '__class__') and 'UUID' in v.__class__.__name__ else v
+                str(v) if isinstance(v, uuid.UUID) or (hasattr(v, '__class__') and 'UUID' in v.__class__.__name__) else v
                 for v in value
             ]
         else:
             result[key] = value
     return result
 
-from ..config import get_settings
+from ..config import get_settings  # noqa: E402
 
 logger = structlog.get_logger()
 
@@ -67,7 +65,7 @@ def _stringify_scalar(value: Any) -> str:
 class DatabaseService:
     """PostgreSQL 异步数据库服务"""
 
-    def __init__(self, database_url: Optional[str] = None):
+    def __init__(self, database_url: str | None = None):
         settings = get_settings()
 
         if database_url is None:
@@ -177,7 +175,7 @@ class DatabaseService:
         logger.debug("Saved paper", paper_id=actual_id)
         return actual_id
 
-    async def get_paper(self, paper_id: str) -> Optional[dict]:
+    async def get_paper(self, paper_id: str) -> dict | None:
         """获取论文详情"""
         async with self.session() as session:
             result = await session.execute(
@@ -228,7 +226,7 @@ class DatabaseService:
         embedding_id = str(uuid.uuid4())
 
         async with self.session() as session:
-            result = await session.execute(
+            await session.execute(
                 text("""
                     INSERT INTO embeddings (id, paper_id, model_name, vector, dimensions)
                     VALUES (:id, :paper_id, :model_name, :vector, :dimensions)
@@ -251,7 +249,7 @@ class DatabaseService:
         cluster_id = cluster_data.get("id", str(uuid.uuid4()))
 
         async with self.session() as session:
-            result = await session.execute(
+            await session.execute(
                 text("""
                     INSERT INTO clusters (id, project_id, name, description, algorithm,
                                         parameters, quality_score, size)
@@ -641,7 +639,7 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def get_outline_by_id(self, outline_id: str) -> Optional[dict]:
+    async def get_outline_by_id(self, outline_id: str) -> dict | None:
         """获取大纲详情"""
         if not outline_id:
             return None
@@ -658,7 +656,7 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def get_project(self, project_id: str) -> Optional[dict]:
+    async def get_project(self, project_id: str) -> dict | None:
         """获取项目详情"""
         async with self.session() as session:
             result = await session.execute(
@@ -698,7 +696,7 @@ class DatabaseService:
         logger.debug("Saved pipeline checkpoint", checkpoint_id=checkpoint_id, node=checkpoint_data.get("node_name"))
         return checkpoint_id
 
-    async def get_pipeline_checkpoint(self, project_id: str, node_name: str) -> Optional[dict]:
+    async def get_pipeline_checkpoint(self, project_id: str, node_name: str) -> dict | None:
         """获取 Pipeline 检查点"""
         async with self.session() as session:
             result = await session.execute(
@@ -715,7 +713,7 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def get_latest_checkpoint(self, project_id: str) -> Optional[dict]:
+    async def get_latest_checkpoint(self, project_id: str) -> dict | None:
         """获取项目最新的检查点"""
         async with self.session() as session:
             result = await session.execute(
@@ -749,7 +747,7 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def get_latest_successful_checkpoint(self, project_id: str) -> Optional[dict]:
+    async def get_latest_successful_checkpoint(self, project_id: str) -> dict | None:
         """获取项目最新的成功检查点（含完整 PipelineState）"""
         async with self.session() as session:
             result = await session.execute(
@@ -770,10 +768,8 @@ class DatabaseService:
         # 解析 state_snapshot JSON
         snapshot = cp.get("state_snapshot")
         if isinstance(snapshot, str):
-            try:
+            with suppress(json.JSONDecodeError, TypeError):
                 cp["state_snapshot"] = json.loads(snapshot)
-            except (json.JSONDecodeError, TypeError):
-                pass
         return cp
 
     async def save_audit_log(self, audit_data: dict) -> str:
@@ -898,7 +894,7 @@ class DatabaseService:
         logger.info("Saved user", user_id=actual_id)
         return actual_id
 
-    async def get_user_by_id(self, user_id: str) -> Optional[dict]:
+    async def get_user_by_id(self, user_id: str) -> dict | None:
         """根据 ID 获取用户"""
         async with self.session() as session:
             result = await session.execute(
@@ -911,7 +907,7 @@ class DatabaseService:
             return None
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def get_user_by_email(self, email: str) -> Optional[dict]:
+    async def get_user_by_email(self, email: str) -> dict | None:
         """根据邮箱获取用户"""
         async with self.session() as session:
             result = await session.execute(
@@ -945,7 +941,7 @@ class DatabaseService:
 
         async with self.session() as session:
             await session.execute(
-                text(f"UPDATE users SET {', '.join(set_clauses)} WHERE id = :id"),
+                text(f"UPDATE users SET {', '.join(set_clauses)} WHERE id = :id"),  # nosec B608
                 params
             )
 
@@ -1008,7 +1004,7 @@ class DatabaseService:
 
         return token_id
 
-    async def get_refresh_token(self, token_hash: str) -> Optional[dict]:
+    async def get_refresh_token(self, token_hash: str) -> dict | None:
         """获取有效的 Refresh Token"""
         async with self.session() as session:
             result = await session.execute(
@@ -1050,10 +1046,10 @@ class DatabaseService:
         self,
         user_id: str,
         action: str,
-        resource_type: str = None,
-        resource_id: str = None,
-        details: dict = None,
-        ip_address: str = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        details: dict | None = None,
+        ip_address: str | None = None,
     ) -> str:
         """记录用户活动"""
         activity_id = str(uuid.uuid4())
@@ -1203,7 +1199,7 @@ class DatabaseService:
 
         logger.info("Updated project status", project_id=project_id, status=status)
 
-    async def get_outline_by_project_id(self, project_id: str) -> Optional[dict]:
+    async def get_outline_by_project_id(self, project_id: str) -> dict | None:
         """根据项目 ID 获取大纲"""
         async with self.session() as session:
             result = await session.execute(
@@ -1241,7 +1237,7 @@ class DatabaseService:
         logger.info("Saved visualization data", project_id=project_id)
         return viz_id
 
-    async def get_visualization_by_project_id(self, project_id: str) -> Optional[dict]:
+    async def get_visualization_by_project_id(self, project_id: str) -> dict | None:
         """根据项目 ID 获取可视化数据"""
         async with self.session() as session:
             result = await session.execute(
@@ -1389,7 +1385,7 @@ class DatabaseService:
 
         async with self.session() as session:
             await session.execute(
-                text(f"UPDATE pipeline_runs SET {', '.join(set_parts)} WHERE id = :id"),
+                text(f"UPDATE pipeline_runs SET {', '.join(set_parts)} WHERE id = :id"),  # nosec B608
                 params,
             )
 
@@ -1760,7 +1756,7 @@ class DatabaseService:
             WHERE {where_clause}
             GROUP BY lc.provider_name, lc.model_name, lc.call_type
             ORDER BY total_cost DESC
-        """
+        """  # nosec B608
 
         async with self.session() as session:
             result = await session.execute(
@@ -1773,7 +1769,7 @@ class DatabaseService:
 
 
 # 全局数据库实例
-_db_service: Optional[DatabaseService] = None
+_db_service: DatabaseService | None = None
 
 
 def get_database() -> DatabaseService:

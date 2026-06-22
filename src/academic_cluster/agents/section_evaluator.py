@@ -4,8 +4,9 @@ Section Evaluator Agent
 评估已写 section 的质量，提供评分和修订反馈。
 """
 
-import re
 import math
+import re
+
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -15,7 +16,7 @@ from ..prompts.writing_rules import (
     THROAT_CLEARING_EN,
     THROAT_CLEARING_ZH,
 )
-from ..services.llm_client import create_llm, ainvoke_with_callbacks
+from ..services.llm_client import ainvoke_with_callbacks, create_llm
 from ..tools.json_repair import try_parse_json
 
 logger = structlog.get_logger()
@@ -405,9 +406,7 @@ def _check_citation_format(draft: str) -> dict:
     parenthesized_citation_matches = []
     for match in parenthesized_citation_re.finditer(draft):
         inner = match.group(1).strip()
-        if re.fullmatch(r"(?:\[[0-9,\s;、，\-–—]+\]\s*)+", inner):
-            parenthesized_citation_matches.append(match.group(0))
-        elif re.search(r"[\u4e00-\u9fffA-Za-z]", inner):
+        if re.fullmatch(r"(?:\[[0-9,\s;、，\-–—]+\]\s*)+", inner) or re.search(r"[\u4e00-\u9fffA-Za-z]", inner):
             parenthesized_citation_matches.append(match.group(0))
 
     issues = []

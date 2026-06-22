@@ -18,7 +18,6 @@
 
 import asyncio
 import time
-from typing import Optional
 
 import httpx
 import structlog
@@ -27,7 +26,7 @@ from ..services.source_config import (
     get_effective_source_value,
     get_semantic_scholar_api_keys,
 )
-from .doi import normalize_doi, is_valid_doi, extract_doi
+from .doi import is_valid_doi, normalize_doi
 
 logger = structlog.get_logger()
 
@@ -87,7 +86,7 @@ async def _enforce_rate_limit(source: str) -> None:
 
 class _KeySlot:
     """单个 API key 的限流状态"""
-    __slots__ = ("key", "lock", "last_used")
+    __slots__ = ("key", "last_used", "lock")
 
     def __init__(self, key: str):
         self.key = key
@@ -225,8 +224,8 @@ async def _request_with_retry(
 async def search_semantic_scholar(
     query: str,
     limit: int = 100,
-    year_range: Optional[tuple[int, int]] = None,
-    fields_of_study: Optional[list[str]] = None,
+    year_range: tuple[int, int] | None = None,
+    fields_of_study: list[str] | None = None,
 ) -> list[dict]:
     """
     搜索 Semantic Scholar
@@ -338,8 +337,8 @@ async def search_semantic_scholar(
 async def search_pubmed(
     query: str,
     limit: int = 100,
-    min_date: Optional[str] = None,
-    max_date: Optional[str] = None,
+    min_date: str | None = None,
+    max_date: str | None = None,
 ) -> list[dict]:
     """
     搜索 PubMed
@@ -473,7 +472,7 @@ async def search_pubmed(
 async def search_arxiv(
     query: str,
     limit: int = 100,
-    categories: Optional[list[str]] = None,
+    categories: list[str] | None = None,
     sort_by: str = "relevance",
 ) -> list[dict]:
     """
@@ -505,9 +504,9 @@ async def search_arxiv(
             response.raise_for_status()
 
             # arXiv 返回 XML，需要解析
-            import xml.etree.ElementTree as ET
+            import xml.etree.ElementTree as ET  # nosec B405
 
-            root = ET.fromstring(response.text)
+            root = ET.fromstring(response.text)  # nosec B314
             ns = {
                 "atom": "http://www.w3.org/2005/Atom",
                 "arxiv": "http://arxiv.org/schemas/atom",
@@ -583,7 +582,7 @@ async def search_arxiv(
 # OpenAlex
 # =============================================================================
 
-def _get_openalex_journal(work: dict) -> Optional[str]:
+def _get_openalex_journal(work: dict) -> str | None:
     """从 OpenAlex work 中安全提取期刊名称"""
     primary_location = work.get("primary_location")
     if not primary_location:
@@ -597,8 +596,8 @@ def _get_openalex_journal(work: dict) -> Optional[str]:
 async def search_openalex(
     query: str,
     limit: int = 100,
-    from_year: Optional[int] = None,
-    to_year: Optional[int] = None,
+    from_year: int | None = None,
+    to_year: int | None = None,
 ) -> list[dict]:
     """
     搜索 OpenAlex
@@ -696,8 +695,8 @@ async def search_openalex(
 async def search_crossref(
     query: str,
     limit: int = 200,
-    from_year: Optional[int] = None,
-    to_year: Optional[int] = None,
+    from_year: int | None = None,
+    to_year: int | None = None,
 ) -> list[dict]:
     """
     搜索 Crossref
@@ -823,9 +822,9 @@ async def search_crossref(
 async def search_all_sources(
     query: str,
     limit_per_source: int = 200,
-    sources: Optional[list[str]] = None,
+    sources: list[str] | None = None,
     timeout: float = 120.0,
-    per_source_limits: Optional[dict[str, int]] = None,
+    per_source_limits: dict[str, int] | None = None,
 ) -> list[dict]:
     """
     并行搜索所有数据源
@@ -869,7 +868,7 @@ async def search_all_sources(
             asyncio.gather(*tasks, return_exceptions=True),
             timeout=timeout,
         )
-        for source_name, result in zip(active_sources, results):
+        for source_name, result in zip(active_sources, results, strict=False):
             if isinstance(result, Exception):
                 logger.error(
                     "Search source failed",
@@ -882,7 +881,7 @@ async def search_all_sources(
                 continue
             source_counts[source_name] = len(result)
             all_papers.extend(result)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(
             "Multi-source search timed out",
             query=query,

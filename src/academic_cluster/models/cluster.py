@@ -3,7 +3,6 @@
 """
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -11,8 +10,8 @@ from pydantic import BaseModel, Field
 class Cluster(BaseModel):
     """聚类/社区模型"""
     id: str
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
     algorithm: str = "leiden"
     parameters: dict = Field(default_factory=dict)
     quality_score: float = 0.0
@@ -22,7 +21,7 @@ class Cluster(BaseModel):
     # 社区特征
     main_topics: list[str] = Field(default_factory=list)
     key_entities: list[str] = Field(default_factory=list)
-    representative_paper_id: Optional[str] = None
+    representative_paper_id: str | None = None
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

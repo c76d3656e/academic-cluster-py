@@ -8,6 +8,7 @@
 - 弱引用支撑检测
 """
 
+import contextlib
 import re
 import traceback
 
@@ -30,10 +31,8 @@ def _extract_cited_indices(text: str) -> set[int]:
     cited = set()
     for match in re.finditer(r"\[(\d+(?:\s*,\s*\d+)*)\]", text):
         for num_str in match.group(1).split(","):
-            try:
+            with contextlib.suppress(ValueError):
                 cited.add(int(num_str.strip()))
-            except ValueError:
-                pass
     return cited
 
 

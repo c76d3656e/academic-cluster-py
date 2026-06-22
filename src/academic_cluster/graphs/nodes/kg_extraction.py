@@ -30,7 +30,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
         await tracker.begin_node("kg_extraction", "llm", index=3)
 
     from ...config import get_settings
-    settings = get_settings()
+    get_settings()
     config = state.config or {}
     project_id = state.project_id
     kg_scope = str(config.get("kg_scope", "core")).lower()
@@ -182,7 +182,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
 
                         # 鏋勫缓瀹炰綋鍚嶇О鍒?ID 鏄犲皠
                         entity_name_to_id = {}
-                        for entity, eid in zip(entities, saved_entity_ids):
+                        for entity, eid in zip(entities, saved_entity_ids, strict=False):
                             entity_name_to_id[entity.get("normalized_name", "")] = eid
 
                         # 鏇存柊鍏崇郴鐨勫疄浣?ID
@@ -264,6 +264,6 @@ async def kg_extraction_node(state: PipelineState) -> dict:
             "kg_entity_ids": existing_entity_ids,
             "kg_relation_ids": existing_relation_ids,
             "status": "kg_extracted",
-            "errors": [f"KG extraction failed: {str(e)}"],
+            "errors": [f"KG extraction failed: {e!s}"],
         }
 

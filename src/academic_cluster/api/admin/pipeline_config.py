@@ -5,7 +5,6 @@ Pipeline 配置管理 API
 参数存储在数据库中，pipeline 运行时实时读取。
 """
 
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -367,7 +366,7 @@ async def _ensure_defaults():
         ]
         for key, col, cn_val in cn_migrations:
             await session.execute(
-                text(f"UPDATE pipeline_config SET {col} = :val, updated_at = NOW() WHERE key = :key"),
+                text(f"UPDATE pipeline_config SET {col} = :val, updated_at = NOW() WHERE key = :key"),  # nosec B608
                 {"key": key, "val": cn_val},
             )
         await session.commit()

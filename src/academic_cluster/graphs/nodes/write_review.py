@@ -9,22 +9,25 @@
 """
 
 import asyncio
-import traceback
+import contextlib
 from dataclasses import asdict
+from typing import Any
 
 import structlog
 
+from ...agents.section_evaluator import evaluate_section
+from ...agents.section_outline import plan_section_outline
 from ...agents.writing import (
     render_section_community_context,
     render_section_evidence_limitations,
     write_section_units,
 )
-from ...agents.section_outline import plan_section_outline
-from ...agents.section_evaluator import evaluate_section, revise_section
-from ...services.citation_planner import plan_review_citations, render_section_references
+from ...services.citation_planner import (
+    plan_review_citations,
+    render_section_references,
+)
 from ...services.citation_utils import (
     clean_filler_phrases,
-    is_primarily_chinese,
     normalize_citation_surface,
     strip_author_year_citations,
     strip_body_structure_leakage,
@@ -35,11 +38,16 @@ from ...services.citation_utils import (
     strip_unsupported_precise_metrics,
     validate_citations,
 )
-from ...services.citation_support import audit_citation_support
-from ...services.coverage_audit import audit_citation_coverage, route_after_coverage_audit
+from ...services.coverage_audit import (
+    audit_citation_coverage,
+    route_after_coverage_audit,
+)
 from ...services.database import get_database
 from ...services.observability import get_current_tracker
-from ...services.review_finalizer import finalize_review_markdown, remap_section_local_citations
+from ...services.review_finalizer import (
+    finalize_review_markdown,
+    remap_section_local_citations,
+)
 from ...services.section_evidence_planner import (
     cards_from_support_matrix,
     plan_section_evidence,
@@ -312,10 +320,8 @@ async def write_review_node(state: PipelineState) -> dict:
         # 获取 KG 实体（用于社区上下文的 top_entities）
         kg_entities = []
         if state.kg_entity_ids:
-            try:
+            with contextlib.suppress(Exception):
                 kg_entities = await db.get_kg_entities_by_ids(state.kg_entity_ids)
-            except Exception:
-                pass
 
         logger.info(
             "Citation planning completed",
@@ -343,10 +349,8 @@ async def write_review_node(state: PipelineState) -> dict:
         # 获取 KG 关系（用于 section outline）
         kg_relations = []
         if state.kg_relation_ids:
-            try:
+            with contextlib.suppress(Exception):
                 kg_relations = await db.get_kg_relations_by_ids(state.kg_relation_ids)
-            except Exception:
-                pass
 
         # === Step 2: 逐章写作（支持幂等恢复，含 section outline + evaluation） ===
         # 查询已写章节，跳过
@@ -438,7 +442,7 @@ async def write_review_node(state: PipelineState) -> dict:
             *[_gen_outline(ctx, i) for i, ctx in enumerate(section_contexts)],
             return_exceptions=True,
         )
-        for i, (ctx, result) in enumerate(zip(section_contexts, outline_results)):
+        for i, (ctx, result) in enumerate(zip(section_contexts, outline_results, strict=False)):
             if isinstance(result, Exception):
                 logger.error("Section outline failed", title=ctx["section"].get("title"), error=str(result)[:200])
                 raise result
@@ -551,7 +555,7 @@ async def write_review_node(state: PipelineState) -> dict:
         section_evaluations: list[dict] = []
 
         write_idx = 0
-        for plan_idx, plan in enumerate(citation_plans):
+        for _plan_idx, plan in enumerate(citation_plans):
             section = sections[plan.section_index]
             sk = str(section.get("name", section.get("number", 0)))
             if sk in existing_sections:
@@ -671,7 +675,11 @@ async def write_review_node(state: PipelineState) -> dict:
             raise
 
         try:
-            from ...services.citation_utils import _CITATION_RE, _YEAR_BRACKET_RE, parse_citation_numbers
+            from ...services.citation_utils import (
+                _CITATION_RE,
+                _YEAR_BRACKET_RE,
+                parse_citation_numbers,
+            )
 
             section_citations: list[set[int]] = []
             for body in remapped_section_bodies:

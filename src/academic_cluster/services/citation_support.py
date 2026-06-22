@@ -11,7 +11,6 @@ from typing import Any
 
 from .citation_utils import parse_citation_numbers
 
-
 # Sentence-ending punctuation (Chinese + English)
 _SENTENCE_END_RE = re.compile(r"[。！？.!?\n]")
 

@@ -10,7 +10,7 @@
 import json
 import re
 import uuid
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -350,7 +350,7 @@ def normalized_name(value: str) -> str:
 
 def clamp_confidence(value: float) -> float:
     """限制置信度范围（对齐 Rust 版 clamp_confidence）"""
-    if isinstance(value, (int, float)) and not (value != value):  # not NaN
+    if isinstance(value, (int, float)) and value == value:  # not NaN
         return max(0.0, min(1.0, float(value)))
     return 0.0
 
@@ -435,7 +435,7 @@ def parse_kg_response(response: str) -> dict:
         return json.loads(fixed, strict=False)
     except json.JSONDecodeError as e:
         logger.error("Failed to parse KG response", error=str(e), response=response[:500])
-        raise ValueError(f"LLM returned invalid JSON for KG extraction: {response[:200]}")
+        raise ValueError(f"LLM returned invalid JSON for KG extraction: {response[:200]}") from e
 
 
 # =============================================================================
@@ -537,7 +537,7 @@ async def extract_kg_from_papers_batch(
 async def extract_kg_batch(
     papers: list[dict],
     batch_size: int = 12,
-    progress_callback: Optional[Callable] = None,
+    progress_callback: Callable | None = None,
     max_entities_per_paper: int = 12,
     max_relations_per_paper: int = 12,
 ) -> dict:
@@ -556,7 +556,6 @@ async def extract_kg_batch(
     Returns:
         规范化后的实体和关系
     """
-    import asyncio
 
     # 重置 token tracker
     reset_token_tracker()

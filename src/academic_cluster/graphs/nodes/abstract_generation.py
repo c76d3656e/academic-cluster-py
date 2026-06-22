@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import traceback
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage

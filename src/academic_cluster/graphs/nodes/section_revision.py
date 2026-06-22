@@ -8,6 +8,7 @@
 5. 重新组装综述
 """
 
+import contextlib
 import re
 import traceback
 
@@ -15,8 +16,8 @@ import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...services.citation_utils import (
-    renumber_citations_by_first_use,
     render_reference_list,
+    renumber_citations_by_first_use,
     strip_invalid_citations,
     validate_citations,
 )
@@ -53,10 +54,8 @@ def _find_sentences_with_invalid_citations(
         refs_in_sentence = set()
         for match in re.finditer(r"\[(\d+(?:\s*,\s*\d+)*)\]", sentence_stripped):
             for num_str in match.group(1).split(","):
-                try:
+                with contextlib.suppress(ValueError):
                     refs_in_sentence.add(int(num_str.strip()))
-                except ValueError:
-                    pass
 
         # 检查是否包含无效引用
         invalid_in_sentence = refs_in_sentence & invalid_numbers
@@ -84,7 +83,7 @@ async def _llm_rewrite_invalid_sentences(
 
     将无效引用替换为有效引用，或改写为不需要该引用的表述。
     """
-    from ...services.llm_client import create_llm, ainvoke_with_callbacks
+    from ...services.llm_client import ainvoke_with_callbacks, create_llm
 
     if not invalid_sentences:
         return section_content

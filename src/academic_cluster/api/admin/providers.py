@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from ..dependencies import require_admin
+from ...services.crypto import decrypt_key, encrypt_key, mask_key
 from ...services.database import DatabaseService, get_database
-from ...services.crypto import encrypt_key, decrypt_key, mask_key
+from ..dependencies import require_admin
 
 logger = structlog.get_logger()
 
@@ -159,7 +159,7 @@ def _row_to_provider(row, extra_keys_raw=None) -> ProviderResponse:
         try:
             keys = json.loads(raw) if isinstance(raw, str) else raw
             extra_key_count = len(keys) if isinstance(keys, list) else 0
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     return ProviderResponse(
@@ -223,7 +223,7 @@ async def list_providers(
                 FROM provider_registry
                 {where_clause}
                 ORDER BY kind, priority DESC, created_at DESC
-            """),
+            """),  # nosec B608
             params,
         )
         rows = result.fetchall()
@@ -390,7 +390,7 @@ async def update_provider(
                           auto_ban, cooldown_until, test_model, metadata, created_by,
                           created_at, updated_at, extra_keys,
                           input_price_per_m, output_price_per_m
-            """),
+            """),  # nosec B608
             params,
         )
         row = result.fetchone()

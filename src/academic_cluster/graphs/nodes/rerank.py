@@ -12,7 +12,7 @@ import httpx
 import structlog
 
 from ...services.database import get_database
-from ...services.observability import get_current_tracker, get_current_run_id
+from ...services.observability import get_current_tracker
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -93,9 +93,9 @@ def _quality_tier(score: float) -> str:
     """质量等级（对齐 Rust 版 tier 划分）"""
     if score >= 0.40:
         return "A"
-    elif score >= 0.16:
+    if score >= 0.16:
         return "B"
-    elif score >= 0.06:
+    if score >= 0.06:
         return "C"
     return "noise"
 
@@ -123,10 +123,7 @@ async def rerank_papers(query: str, papers: list[dict], timeout: float = 120.0) 
 
         async def _do_rerank(provider) -> list[dict]:
             base = provider.api_url.rstrip("/")
-            if not base.endswith("/v1"):
-                url = f"{base}/v1/rerank"
-            else:
-                url = f"{base}/rerank"
+            url = f"{base}/v1/rerank" if not base.endswith("/v1") else f"{base}/rerank"
             headers = {
                 "Authorization": f"Bearer {provider.api_key}",
                 "Content-Type": "application/json",
@@ -244,7 +241,6 @@ async def rerank_node(state: PipelineState) -> dict:
 
                 # rerank 通常按文档数计费，这里用调用次数近似
                 prompt_tokens = len(papers)  # 每篇论文算 1 token
-                completion_tokens = 0
 
                 # 计算 cost（rerank 通常按调用次数计费，这里按 token 近似）
                 input_price, output_price = await get_provider_pricing(db, provider_name, rerank_model)
@@ -293,8 +289,8 @@ async def rerank_node(state: PipelineState) -> dict:
                     input_price_per_m=input_price,
                     output_price_per_m=output_price,
                 )
-            except Exception:
-                pass  # 追踪失败不影响主流程
+            except Exception:  # nosec B110
+                pass
 
         # 取 top max_papers（默认 500）作为最终 reranked 结果
         reranked_papers = reranked_papers[:max_papers]
@@ -322,7 +318,7 @@ async def rerank_node(state: PipelineState) -> dict:
             })
         return result
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         error_msg = f"Reranking timed out after 120s for {len(papers)} papers"
         logger.error(
             "Reranking timed out",
@@ -334,7 +330,7 @@ async def rerank_node(state: PipelineState) -> dict:
         if tracker:
             await tracker.end_node("rerank", "failed",
                                    error_message=error_msg)
-        raise TimeoutError(error_msg)
+        raise TimeoutError(error_msg) from None
     except Exception as e:
         logger.error(
             "Reranking failed",

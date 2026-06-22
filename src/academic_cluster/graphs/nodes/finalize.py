@@ -2,7 +2,7 @@
 终结节点 - 完成 Pipeline 运行，输出 review.md 和 references.bib
 """
 
-import os
+from pathlib import Path
 
 import structlog
 
@@ -13,7 +13,7 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 # 输出目录
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "output")
+OUTPUT_DIR = Path(__file__).resolve().parent / ".." / ".." / ".." / ".." / "output"
 
 
 async def finalize_node(state: PipelineState) -> dict:
@@ -35,11 +35,11 @@ async def finalize_node(state: PipelineState) -> dict:
         "生成最终产出...",
     )
 
-    db = get_database()
+    get_database()
 
     try:
         # 确保输出目录存在
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
         # 输出 review.md
         review_content = state.final_review or ""
@@ -57,15 +57,15 @@ async def finalize_node(state: PipelineState) -> dict:
         else:
             review_md += "*No review content generated.*\n"
 
-        review_path = os.path.join(OUTPUT_DIR, f"review_{state.project_id[:8]}.md")
-        with open(review_path, "w", encoding="utf-8") as f:
+        review_path = OUTPUT_DIR / f"review_{state.project_id[:8]}.md"
+        with review_path.open("w", encoding="utf-8") as f:
             f.write(review_md)
         logger.info("Review written", path=review_path)
 
         # 输出 references.bib
         bibtex_content = state.bibtex or ""
-        bib_path = os.path.join(OUTPUT_DIR, f"references_{state.project_id[:8]}.bib")
-        with open(bib_path, "w", encoding="utf-8") as f:
+        bib_path = OUTPUT_DIR / f"references_{state.project_id[:8]}.bib"
+        with bib_path.open("w", encoding="utf-8") as f:
             f.write(bibtex_content)
         logger.info("BibTeX written", path=bib_path)
 
@@ -99,5 +99,5 @@ async def finalize_node(state: PipelineState) -> dict:
         logger.error("Finalization failed", error=str(e))
         return {
             "status": "completed",
-            "errors": [f"Finalization failed: {str(e)}"],
+            "errors": [f"Finalization failed: {e!s}"],
         }

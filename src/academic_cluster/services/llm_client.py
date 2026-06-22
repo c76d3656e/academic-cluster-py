@@ -10,7 +10,6 @@
 import asyncio
 import re
 from hashlib import sha256
-from typing import Optional
 
 import structlog
 from langchain_core.messages import AIMessage
@@ -124,7 +123,7 @@ def _api_key_hint(llm) -> str | None:
 
 def _get_llm_queue_semaphore() -> asyncio.Semaphore:
     """Build a process-local queue gate from enabled provider capacity.
-    
+
     容量 = 所有 provider 总 slots × 并发管道倍数（默认 3 倍），
     避免跨 pipeline 竞争导致死锁。
     """
@@ -146,7 +145,7 @@ _rr_counter = 0
 
 def create_llm(
     temperature: float = 0.7,
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
 ) -> ChatOpenAI:
     """
     从 Provider Pool 创建 ChatOpenAI 实例。
@@ -222,7 +221,12 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
     import asyncio
     import time as _time
 
-    from .observability import get_current_node, get_current_tracker, get_resolved_run_id, get_current_project
+    from .observability import (
+        get_current_node,
+        get_current_project,
+        get_current_tracker,
+        get_resolved_run_id,
+    )
 
     start_time = _time.monotonic()
     node_name = get_current_node() or "unknown"
@@ -395,7 +399,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
         input_price, output_price = await get_provider_pricing(_db, provider_alias, model_name)
         if input_price or output_price:
             cost = (prompt_tokens * input_price + completion_tokens * output_price) / 1_000_000
-    except Exception:
+    except Exception:  # nosec B110
         pass
 
     # 记录到 tracker
@@ -411,7 +415,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
                 cost=cost,
                 latency_ms=elapsed_ms,
             )
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     if db and call_id:
@@ -437,7 +441,7 @@ async def ainvoke_with_callbacks(llm, input, config=None, timeout: float = 300.0
 
 def create_llm_with_retry(
     temperature: float = 0.7,
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
     max_retries: int = 3,
 ):
     """
@@ -449,7 +453,11 @@ def create_llm_with_retry(
         async callable: _invoke(messages) -> response
     """
     async def _invoke(messages):
-        from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+        from tenacity import (
+            retry,
+            stop_after_attempt,
+            wait_exponential,
+        )
 
         @retry(
             stop=stop_after_attempt(max_retries),
@@ -468,7 +476,7 @@ def create_llm_with_retry(
 async def invoke_llm(
     messages: list,
     temperature: float = 0.7,
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
 ):
     """
     便捷函数：创建 LLM 并调用，自动注入 callback。

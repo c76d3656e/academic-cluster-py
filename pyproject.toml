@@ -137,11 +137,20 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "S101",   # use of assert (allowed in tests)
+    "S105",   # hardcoded password (false positive for config/settings)
+    "S110",   # try-except-pass (common in parsing fallbacks)
     "S603",   # subprocess call (too noisy for CLI tools)
     "S607",   # partial executable path
+    "S608",   # SQL injection (using SQLAlchemy ORM, not raw SQL)
     "T201",   # print found (allow in CLI)
     "RET504", # unnecessary assignment before return
     "ARG001", # unused function argument (common in callbacks)
+    "ARG002", # unused method argument (common in overrides/callbacks)
+    "B008",   # function call in default arg (FastAPI Depends() pattern)
+    "RUF001", # ambiguous Unicode in strings (Chinese fullwidth punctuation)
+    "RUF002", # ambiguous Unicode in docstrings (Chinese fullwidth punctuation)
+    "RUF003", # ambiguous Unicode in comments (Chinese fullwidth punctuation)
+    "SIM105", # contextlib.suppress (try-except-pass is clearer in these cases)
 ]
 
 [tool.ruff.lint.per-file-ignores]

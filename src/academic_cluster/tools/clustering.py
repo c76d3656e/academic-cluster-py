@@ -7,7 +7,6 @@
 import math
 import uuid
 from collections import defaultdict
-from typing import Optional
 
 import networkx as nx
 import structlog
@@ -41,7 +40,7 @@ def build_hybrid_graph(
     kg_entities: list[dict],
     evidence_cards: list[dict],
     core_paper_ids: list[str],
-    weights: Optional[dict[str, float]] = None,
+    weights: dict[str, float] | None = None,
 ) -> nx.Graph:
     """
     构建混合图
@@ -99,8 +98,8 @@ def build_hybrid_graph(
 
     # 2. 添加 KG 关系边
     for relation in kg_relations:
-        source_entity = relation.get("source_entity")
-        target_entity = relation.get("target_entity")
+        relation.get("source_entity")
+        relation.get("target_entity")
         paper_ids = relation.get("paper_ids") or []
 
         # 通过共享关系连接论文
@@ -154,7 +153,7 @@ def build_hybrid_graph(
         if paper_id:
             evidence_to_papers[evidence_key].append(paper_id)
 
-    for evidence_key, paper_ids in evidence_to_papers.items():
+    for _evidence_key, paper_ids in evidence_to_papers.items():
         for i, paper_a in enumerate(paper_ids):
             for paper_b in paper_ids[i + 1:]:
                 if G.has_node(paper_a) and G.has_node(paper_b):

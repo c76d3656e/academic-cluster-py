@@ -3,13 +3,12 @@
 """
 
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class ProjectStatus(str, Enum):
+class ProjectStatus(StrEnum):
     """项目状态枚举"""
     CREATED = "created"
     SEARCHING = "searching"
@@ -37,7 +36,7 @@ class ProjectConfig(BaseModel):
 
     # 质量过滤
     min_citation_count: int = 0
-    min_year: Optional[int] = None
+    min_year: int | None = None
     jcr_quartiles: list[str] = Field(default_factory=lambda: ["Q1", "Q2"])
 
     # 聚类配置
@@ -59,7 +58,7 @@ class Project(BaseModel):
     """项目模型"""
     id: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     query: str
     status: ProjectStatus = ProjectStatus.CREATED
     config: ProjectConfig = Field(default_factory=ProjectConfig)
@@ -73,8 +72,8 @@ class Project(BaseModel):
     # 时间戳
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     # 错误信息
-    error_message: Optional[str] = None
+    error_message: str | None = None
     retry_count: int = 0

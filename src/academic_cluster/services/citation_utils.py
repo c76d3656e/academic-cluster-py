@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 _REVISION_COMMENTARY_MARKERS = (
     "本修改",
     "本次修改",
@@ -582,9 +581,9 @@ def strip_reference_block(markdown: str) -> str:
     next_heading = re.search(rf"^#{{{1},{heading_level}}}\s+\S", rest, re.MULTILINE)
 
     if next_heading is not None:
-        end = match.end() + next_heading.start()
+        match.end() + next_heading.start()
     else:
-        end = len(markdown)
+        len(markdown)
 
     return markdown[:start].rstrip() + "\n"
 

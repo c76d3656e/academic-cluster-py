@@ -6,15 +6,14 @@ JSON 修复工具
 """
 
 import json
-import re
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
 logger = structlog.get_logger()
 
 
-def extract_json_object(text: str) -> Optional[str]:
+def extract_json_object(text: str) -> str | None:
     """
     从 LLM 响应中提取 JSON 对象（去除 markdown 代码块等包裹）。
 
@@ -27,7 +26,7 @@ def extract_json_object(text: str) -> Optional[str]:
     return None
 
 
-def extract_json_array(text: str) -> Optional[str]:
+def extract_json_array(text: str) -> str | None:
     """从 LLM 响应中提取 JSON 数组"""
     start = text.find("[")
     end = text.rfind("]")
@@ -51,7 +50,7 @@ def strip_markdown_fences(text: str) -> str:
     return text
 
 
-def try_parse_json(text: str) -> Optional[Any]:
+def try_parse_json(text: str) -> Any | None:
     """
     尝试解析 JSON，支持多种容错策略。
 
@@ -96,7 +95,7 @@ def try_parse_json(text: str) -> Optional[Any]:
     return None
 
 
-async def repair_json_with_llm(raw: str, schema_hint: str = "") -> Optional[Any]:
+async def repair_json_with_llm(raw: str, schema_hint: str = "") -> Any | None:
     """
     使用 LLM 修复畸形 JSON。
 
@@ -107,11 +106,12 @@ async def repair_json_with_llm(raw: str, schema_hint: str = "") -> Optional[Any]
     Returns:
         修复后的 JSON 对象，失败返回 None
     """
-    from ..services.llm_client import create_llm, ainvoke_with_callbacks
     from langchain_core.messages import HumanMessage, SystemMessage
 
+    from ..services.llm_client import ainvoke_with_callbacks, create_llm
+
     system_prompt = "You repair malformed JSON. Return strict JSON only. No markdown, no explanations."
-    user_prompt = f"Repair the following malformed output into one valid JSON object."
+    user_prompt = "Repair the following malformed output into one valid JSON object."
     if schema_hint:
         user_prompt += f"\n\nRequired shape:\n{schema_hint}"
     user_prompt += f"\n\nMalformed output:\n{raw}"

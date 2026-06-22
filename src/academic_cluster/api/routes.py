@@ -3,18 +3,16 @@ API 路由定义
 """
 
 import asyncio
+import contextlib
 import uuid
-
-import json
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from ..config import get_settings
 from ..services.database import DatabaseService, get_database
-from .dependencies import get_current_user, require_admin
+from .dependencies import get_current_user
 
 logger = structlog.get_logger()
 
@@ -284,7 +282,10 @@ async def start_pipeline(
 
     async def run_in_background():
         try:
-            from .admin.pipeline_config import get_pipeline_config_dict, build_node_config
+            from .admin.pipeline_config import (
+                build_node_config,
+                get_pipeline_config_dict,
+            )
             raw_config = await get_pipeline_config_dict()
             pipeline_config = build_node_config(raw_config)
             project_config = project.get("config") or {}
@@ -352,7 +353,10 @@ async def resume_pipeline(
     async def run_in_background():
         try:
             # 加载 pipeline 配置（DB 中的可调参数 + 项目自定义配置）
-            from .admin.pipeline_config import get_pipeline_config_dict, build_node_config
+            from .admin.pipeline_config import (
+                build_node_config,
+                get_pipeline_config_dict,
+            )
             raw_config = await get_pipeline_config_dict()
             pipeline_config = build_node_config(raw_config)
             project_config = project.get("config") or {}
@@ -368,7 +372,7 @@ async def resume_pipeline(
         except Exception as e:
             logger.error("Pipeline resume failed", error=str(e))
 
-    asyncio.create_task(run_in_background())
+    _bg_task = asyncio.create_task(run_in_background())  # noqa: RUF006
 
     return {"message": "Pipeline resumed from checkpoint", "project_id": project_id}
 
@@ -600,17 +604,15 @@ class ConnectionManager:
     async def send_update(self, project_id: str, data: dict):
         if project_id in self.active_connections:
             for connection in self.active_connections[project_id]:
-                try:
+                with contextlib.suppress(Exception):
                     await connection.send_json(data)
-                except Exception:
-                    pass
 
 
 manager = ConnectionManager()
 
 
 @router.websocket("/ws/{project_id}")
-async def websocket_endpoint(websocket: WebSocket, project_id: str, token: str = None):
+async def websocket_endpoint(websocket: WebSocket, project_id: str, token: str | None = None):
     """WebSocket 端点，用于实时更新"""
     # 安全修复: WebSocket 连接必须携带有效 token（通过 query 参数传递）
     from ..services.auth import get_token_service
@@ -640,7 +642,7 @@ async def websocket_endpoint(websocket: WebSocket, project_id: str, token: str =
     await manager.connect(websocket, project_id)
     try:
         while True:
-            data = await websocket.receive_text()
+            await websocket.receive_text()
             logger.info("WebSocket message received", project_id=project_id)
     except WebSocketDisconnect:
         manager.disconnect(websocket, project_id)

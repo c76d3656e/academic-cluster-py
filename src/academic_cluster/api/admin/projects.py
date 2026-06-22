@@ -8,8 +8,8 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from ..dependencies import require_admin
 from ...services.database import DatabaseService, get_database
+from ..dependencies import require_admin
 
 logger = structlog.get_logger()
 

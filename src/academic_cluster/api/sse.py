@@ -6,14 +6,14 @@ SSE (Server-Sent Events) 实时推送服务
 
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from ..services.auth import TokenService, get_token_service
-from ..services.database import DatabaseService, get_database
+from ..services.auth import get_token_service
+from ..services.database import get_database
 
 logger = structlog.get_logger()
 
@@ -112,7 +112,7 @@ class SSEManager:
 
 
 # 全局 SSE 管理器
-_sse_manager: Optional[SSEManager] = None
+_sse_manager: SSEManager | None = None
 
 
 def get_sse_manager() -> SSEManager:
@@ -149,7 +149,7 @@ async def sse_generator(
 
                 yield f"event: {event_type}\ndata: {data}\n\n"
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # 发送心跳
                 yield ": heartbeat\n\n"
 
@@ -183,7 +183,7 @@ async def stream_events(
     try:
         payload = token_service.decode_access_token(token)
     except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from None
 
     db = get_database()
     user = await db.get_user_by_id(payload["sub"])

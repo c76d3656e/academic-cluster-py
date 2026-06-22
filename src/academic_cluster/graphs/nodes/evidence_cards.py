@@ -9,7 +9,10 @@ import traceback
 
 import structlog
 
-from ...agents.evidence_generation import CORE_EVIDENCE_CARD_TARGET, generate_evidence_cards_batch
+from ...agents.evidence_generation import (
+    CORE_EVIDENCE_CARD_TARGET,
+    generate_evidence_cards_batch,
+)
 from ...services.database import get_database
 from ...services.observability import get_current_tracker
 from ..state import PipelineState
@@ -148,7 +151,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             timeout_s = 120
 
         def _progress(completed: int, total: int):
-            asyncio.ensure_future(send_progress(
+            _task = asyncio.ensure_future(send_progress(  # noqa: RUF006
                 state.project_id, "evidence_cards",
                 f"证据卡片生成中 {completed}/{total}...",
                 progress=completed / total if total > 0 else 0,

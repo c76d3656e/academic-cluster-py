@@ -14,11 +14,11 @@ Citation Planner - 为综述论文各章节分配候选参考文献
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
+from enum import StrEnum
 
 
-class CandidateSelectionSource(str, Enum):
+class CandidateSelectionSource(StrEnum):
     """候选文献的选取来源（优先级从高到低，对齐 Rust 版）"""
     COMMUNITY_CORE = "community_core"
     COMMUNITY_AUXILIARY = "community_auxiliary"

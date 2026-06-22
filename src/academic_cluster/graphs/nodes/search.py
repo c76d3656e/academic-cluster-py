@@ -13,18 +13,21 @@
 """
 
 import asyncio
-import json
 import traceback
 import uuid
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ...prompts import get_parse_topic_prompt, get_evaluate_search_prompt, get_refine_query_prompt
-from ...tools.academic_search import search_all_sources
-from ...tools.doi import normalize_doi, is_valid_doi
+from ...prompts import (
+    get_evaluate_search_prompt,
+    get_parse_topic_prompt,
+    get_refine_query_prompt,
+)
 from ...services.database import get_database
 from ...services.observability import get_current_tracker
+from ...tools.academic_search import search_all_sources
+from ...tools.doi import is_valid_doi, normalize_doi
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -130,7 +133,7 @@ async def _llm_topic_relevance_filter(
 
     对关键词过滤后的论文进行批量 LLM 相关性判断。
     """
-    from ...services.llm_client import create_llm, ainvoke_with_callbacks
+    from ...services.llm_client import ainvoke_with_callbacks, create_llm
     from ...tools.json_repair import try_parse_json
 
     if len(papers) <= 10:
@@ -211,7 +214,7 @@ def _build_paper_summaries(papers: list[dict], max_count: int = 30) -> str:
 
 async def _generate_search_queries(topic: str, max_queries: int = _DEFAULT_INITIAL_QUERY_LIMIT) -> list[str]:
     """使用 LLM 生成优化的搜索 query（对齐 Rust 版 parse_topic）"""
-    from ...services.llm_client import create_llm, ainvoke_with_callbacks
+    from ...services.llm_client import ainvoke_with_callbacks, create_llm
     llm = create_llm(temperature=0.3)
 
     prompt_template = get_parse_topic_prompt()
@@ -265,7 +268,7 @@ async def _evaluate_coverage(
 
     返回: {"is_sufficient": bool, "identified_gaps": list[str]}
     """
-    from ...services.llm_client import create_llm, ainvoke_with_callbacks
+    from ...services.llm_client import ainvoke_with_callbacks, create_llm
 
     prompt_template = get_evaluate_search_prompt()
     if not prompt_template:
@@ -326,7 +329,7 @@ async def _refine_queries(
 
     最多返回 REFINE_QUERY_LIMIT 条新 queries。
     """
-    from ...services.llm_client import create_llm, ainvoke_with_callbacks
+    from ...services.llm_client import ainvoke_with_callbacks, create_llm
 
     prompt_template = get_refine_query_prompt()
     if not prompt_template:
@@ -409,7 +412,7 @@ async def search_node(state: PipelineState) -> dict:
 
         # Phase 2: 多轮搜索循环
         all_papers: list[dict] = []
-        source_counts: dict[str, int] = {s: 0 for s in sources}
+        source_counts: dict[str, int] = dict.fromkeys(sources, 0)
 
         for round_num in range(1, max_rounds + 1):
             logger.info(f"Search round {round_num}/{max_rounds}", queries=queries)
@@ -438,7 +441,7 @@ async def search_node(state: PipelineState) -> dict:
                     asyncio.gather(*search_tasks, return_exceptions=True),
                     timeout=120.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.error(f"Search round {round_num} timed out after 120s")
                 results = []
                 for task in search_tasks:
@@ -622,7 +625,7 @@ async def search_node(state: PipelineState) -> dict:
         return result
 
     except Exception as e:
-        error_msg = f"Search node failed: {type(e).__name__}: {str(e)}"
+        error_msg = f"Search node failed: {type(e).__name__}: {e!s}"
         logger.error(
             "Search node failed",
             query=state.query,
@@ -639,7 +642,7 @@ async def search_node(state: PipelineState) -> dict:
 
         await send_progress(
             state.project_id, "search",
-            f"搜索出错: {str(e)}，将用空结果继续",
+            f"搜索出错: {e!s}，将用空结果继续",
             detail={"error": str(e), "error_type": type(e).__name__},
         )
 

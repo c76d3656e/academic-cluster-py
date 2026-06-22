@@ -5,6 +5,7 @@
 在大纲生成前对聚类进行层次分类，使综述结构体现研究演进脉络。
 """
 
+import contextlib
 import traceback
 from datetime import datetime
 
@@ -94,7 +95,7 @@ def _normalize_outline_word_budget(
     for _, idx in sorted(fractions, reverse=True)[:max(0, delta)]:
         allocated[idx] += 1
 
-    for section, target in zip(sections, allocated):
+    for section, target in zip(sections, allocated, strict=False):
         if isinstance(section, dict):
             section["target_words"] = int(target)
 
@@ -259,10 +260,8 @@ def _classify_cluster_layers(
             # 被引次数
             cc = p.get("citation_count")
             if cc is not None:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     citations.append(int(cc))
-                except (ValueError, TypeError):
-                    pass
             # 实体类型
             entity_types.extend(entity_types_by_paper.get(pid, []))
 
@@ -270,10 +269,8 @@ def _classify_cluster_layers(
         for card in cards_by_cluster.get(cid, []):
             conf = card.get("confidence")
             if conf is not None:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     confidences.append(float(conf))
-                except (ValueError, TypeError):
-                    pass
 
         # --- 评分 ---
         foundation_score = 0.0
@@ -309,7 +306,7 @@ def _classify_cluster_layers(
         if total_mapped > 0:
             foundation_ratio = type_counts.get("foundation", 0) / total_mapped
             frontier_ratio = type_counts.get("frontier", 0) / total_mapped
-            development_ratio = type_counts.get("development", 0) / total_mapped
+            type_counts.get("development", 0) / total_mapped
             foundation_score += foundation_ratio * 2.0
             frontier_score += frontier_ratio * 2.0
             # development 实体多时不额外加分，作为默认
@@ -384,8 +381,8 @@ async def outline_generation_node(state: PipelineState) -> dict:
         evidence_cards_raw = await db.get_evidence_cards_by_ids(state.evidence_card_ids)
 
         # 构建知识图谱摘要（对齐 Rust 版）
-        entity_types = list(set(e.get("entity_type", "") for e in kg_entities if e.get("entity_type")))
-        relation_types = list(set(r.get("relation_type", "") for r in kg_relations if r.get("relation_type")))
+        entity_types = list({e.get("entity_type", "") for e in kg_entities if e.get("entity_type")})
+        relation_types = list({r.get("relation_type", "") for r in kg_relations if r.get("relation_type")})
 
         kg_summary = {
             "entity_types": entity_types,

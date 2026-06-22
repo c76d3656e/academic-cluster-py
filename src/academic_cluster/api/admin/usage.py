@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from ..dependencies import require_admin
 from ...services.database import DatabaseService, get_database
+from ..dependencies import require_admin
 
 logger = structlog.get_logger()
 

@@ -4,11 +4,12 @@
 提供用户注册、登录、Token 刷新、用户管理等端点。
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ..config import get_settings
 from ..models.user import (
     RefreshTokenRequest,
     SystemStatsResponse,
@@ -25,7 +26,6 @@ from ..services.auth import (
     get_password_service,
     get_token_service,
 )
-from ..config import get_settings
 from ..services.database import DatabaseService, get_database
 from .dependencies import get_current_user, require_admin
 
@@ -109,11 +109,11 @@ async def login(
 
     # 存储 Refresh Token
     settings = get_settings()
-    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+    expires_at = datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days)
     await db.save_refresh_token(token_hash, user["id"], expires_at)
 
     # 更新最后登录时间
-    await db.update_user(user["id"], {"last_login_at": datetime.now(timezone.utc)})
+    await db.update_user(user["id"], {"last_login_at": datetime.now(UTC)})
 
     await db.log_activity(user["id"], "login", ip_address=request.client.host if request.client else None)
 
@@ -151,7 +151,7 @@ async def refresh_token(
     new_raw_token, new_token_hash = token_service.create_refresh_token(user["id"])
 
     settings = get_settings()
-    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+    expires_at = datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days)
     await db.save_refresh_token(new_token_hash, user["id"], expires_at)
 
     return TokenResponse(

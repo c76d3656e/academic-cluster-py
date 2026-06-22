@@ -11,8 +11,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from ..dependencies import get_current_user
 from ...services.database import DatabaseService, get_database
+from ..dependencies import get_current_user
 
 logger = structlog.get_logger()
 

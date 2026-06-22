@@ -5,9 +5,8 @@
 """
 
 from functools import lru_cache
-from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,8 +14,8 @@ class LLMSettings(BaseModel):
     """LLM 配置"""
     provider: str = "openai"
     model: str = "gpt-4o-mini"
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    base_url: str | None = None
+    api_key: str | None = None
     temperature: float = 0.7
     max_tokens: int = 4096
 
@@ -26,7 +25,7 @@ class EmbeddingSettings(BaseModel):
     provider: str = "siliconflow"
     model: str = "BAAI/bge-m3"
     api_url: str = "https://api.siliconflow.cn/v1"
-    api_key: Optional[str] = None
+    api_key: str | None = None
     dimensions: int = 1024
 
 
@@ -35,7 +34,7 @@ class RerankSettings(BaseModel):
     provider: str = "siliconflow"
     model: str = "BAAI/bge-reranker-v2-m3"
     api_url: str = "https://api.siliconflow.cn/v1"
-    api_key: Optional[str] = None
+    api_key: str | None = None
     threshold: float = 0.02
 
 
@@ -43,7 +42,7 @@ class RedisSettings(BaseModel):
     """Redis 配置"""
     host: str = "localhost"
     port: int = 6379
-    password: Optional[str] = None
+    password: str | None = None
     db: int = 0
 
     @property
@@ -74,12 +73,12 @@ class Settings(BaseSettings):
     # 应用配置
     app_env: str = "development"
     app_debug: bool = False  # 安全修复: 默认关闭 debug，避免泄露调试信息
-    app_host: str = "0.0.0.0"
+    app_host: str = "0.0.0.0"  # noqa: S104  # nosec B104
     app_port: int = 8000
     app_secret_key: str = "change-me-in-production"
 
     # CORS 配置（逗号分隔的允许来源列表）
-    cors_origins: Optional[str] = None
+    cors_origins: str | None = None
 
     # 日志配置
     log_level: str = "INFO"
@@ -88,33 +87,33 @@ class Settings(BaseSettings):
     # LLM 配置（单 provider fallback）
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o-mini"
-    llm_base_url: Optional[str] = None
-    llm_api_key: Optional[str] = None
+    llm_base_url: str | None = None
+    llm_api_key: str | None = None
     llm_temperature: float = 0.7
     llm_max_tokens: int = 4096
 
     # LLM 多 provider 配置（JSON 数组，优先于单 provider）
-    llm_providers_json: Optional[str] = None
+    llm_providers_json: str | None = None
 
     # Embedding 配置（单 provider fallback）
     embedding_provider: str = "siliconflow"
     embedding_model: str = "BAAI/bge-m3"
     embedding_api_url: str = "https://api.siliconflow.cn/v1"
-    embedding_api_key: Optional[str] = None
+    embedding_api_key: str | None = None
     embedding_dimensions: int = 1024
 
     # Embedding 多 provider 配置（JSON 数组）
-    embedding_providers_json: Optional[str] = None
+    embedding_providers_json: str | None = None
 
     # Rerank 配置（单 provider fallback）
     rerank_provider: str = "siliconflow"
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
     rerank_api_url: str = "https://api.siliconflow.cn/v1"
-    rerank_api_key: Optional[str] = None
+    rerank_api_key: str | None = None
     rerank_threshold: float = 0.02
 
     # Rerank 多 provider 配置（JSON 数组）
-    rerank_providers_json: Optional[str] = None
+    rerank_providers_json: str | None = None
 
     # 数据库配置
     postgres_host: str = "localhost"
@@ -126,7 +125,7 @@ class Settings(BaseSettings):
     # Redis 配置
     redis_host: str = "localhost"
     redis_port: int = 6379
-    redis_password: Optional[str] = None
+    redis_password: str | None = None
     redis_db: int = 0
 
     # 向量数据库配置
@@ -136,9 +135,9 @@ class Settings(BaseSettings):
 
     # 学术数据源配置
     # Semantic Scholar API key，支持逗号分隔多 key（每个 key 独立 1 rps）
-    semantic_scholar_api_key: Optional[str] = None
+    semantic_scholar_api_key: str | None = None
     pubmed_email: str = "user@example.com"
-    pubmed_api_key: Optional[str] = None
+    pubmed_api_key: str | None = None
 
     @property
     def semantic_scholar_api_keys(self) -> list[str]:
@@ -168,7 +167,7 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # Provider 加密密钥（Fernet key 或任意密码，程序自动派生）
-    provider_encryption_key: Optional[str] = None
+    provider_encryption_key: str | None = None
 
     # 默认管理员账户（首次启动时自动创建）
     # admin_password 无默认值，必须通过环境变量或 .env 显式设置
@@ -179,7 +178,7 @@ class Settings(BaseSettings):
 
     # LangGraph 配置
     langgraph_debug: bool = True
-    langsmith_api_key: Optional[str] = None
+    langsmith_api_key: str | None = None
     langsmith_project: str = "academic-cluster"
 
     @property
@@ -193,7 +192,7 @@ class Settings(BaseSettings):
         insecure_defaults = []
         if self.jwt_secret_key in ("change-me-jwt-secret-in-production", "change-me-in-production"):
             insecure_defaults.append("jwt_secret_key")
-        if self.app_secret_key == "change-me-in-production":
+        if self.app_secret_key == "change-me-in-production":  # nosec B105
             insecure_defaults.append("app_secret_key")
         if self.postgres_password in ("postgres", ""):
             insecure_defaults.append("postgres_password")
@@ -257,7 +256,7 @@ class Settings(BaseSettings):
         )
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """获取配置单例"""
     return Settings()

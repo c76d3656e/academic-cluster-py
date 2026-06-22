@@ -480,7 +480,7 @@ async def generate_outline(
                     outline = _try_repair_truncated_json(content[start:])
             else:
                 logger.error("Failed to parse outline response", response=raw_content[:500])
-                raise ValueError(f"LLM returned invalid JSON for outline: {raw_content[:200]}")
+                raise ValueError(f"LLM returned invalid JSON for outline: {raw_content[:200]}") from None
 
     # 验证大纲：至少 3 个章节，否则使用 fallback
     sections = outline.get("sections", [])
@@ -630,7 +630,7 @@ async def write_section(
             title = card.get("title", card.get("paper_title", ""))
             claim = card.get("claim", card.get("key_finding", ""))
             span = card.get("evidence_span", "")
-            method = card.get("method", "")
+            card.get("method", "")
             line = f"{i}. {title}"
             if claim:
                 line += f" — {claim}"
@@ -1038,7 +1038,7 @@ def render_section_community_context(
 
     parts = []
     paper_map = {p.get("id"): p for p in papers}
-    paper_set_all = {p.get("id") for p in papers}
+    {p.get("id") for p in papers}
 
     # 构建 paper_id -> entity names 映射
     entity_by_paper: dict[str, list[str]] = {}

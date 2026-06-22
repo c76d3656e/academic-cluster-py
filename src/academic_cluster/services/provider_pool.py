@@ -7,9 +7,9 @@ Rerank 使用轻量自定义 pool（LiteLLM 不原生支持 SiliconFlow rerank�
 
 import asyncio
 import json
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
-import httpx
 import structlog
 
 logger = structlog.get_logger()
@@ -146,7 +146,7 @@ class RerankPool:
                 healthy = self._providers
 
             weights = [1.0 / p.priority for p in healthy]
-            provider = random.choices(healthy, weights=weights, k=1)[0]
+            provider = random.choices(healthy, weights=weights, k=1)[0]  # nosec B311
 
             try:
                 async with provider._semaphore:
@@ -186,9 +186,9 @@ class RerankPool:
 # 全局池管理
 # =============================================================================
 
-_llm_pool: Optional[LiteLLMPool] = None
-_embedding_pool: Optional[LiteLLMPool] = None
-_rerank_pool: Optional[RerankPool] = None
+_llm_pool: LiteLLMPool | None = None
+_embedding_pool: LiteLLMPool | None = None
+_rerank_pool: RerankPool | None = None
 
 
 def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict]:

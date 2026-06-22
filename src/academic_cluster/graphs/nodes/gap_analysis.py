@@ -15,6 +15,7 @@ import structlog
 from ...services.database import get_database
 from ...services.observability import get_current_tracker
 from ..state import PipelineState
+
 logger = structlog.get_logger()
 
 DEFAULT_GAP_ANALYSIS_TIMEOUT_S = 180
@@ -133,7 +134,7 @@ async def _refine_gaps_with_llm(
                 if decision_map.get(str(report["cluster_id"])) == "enough_evidence":
                     report["status"] = "enough_evidence"
                     report["gap_type"] = None
-    except asyncio.TimeoutError:
+    except TimeoutError:
         judge_available = False
         logger.warning(
             "LLM gap judge timed out, keeping deterministic decisions",

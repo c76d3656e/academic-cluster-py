@@ -10,7 +10,7 @@
 import structlog
 
 from ...services.database import get_database
-from ...tools.doi import normalize_doi, is_valid_doi
+from ...tools.doi import is_valid_doi, normalize_doi
 from ..state import PipelineState
 from .progress import send_progress
 

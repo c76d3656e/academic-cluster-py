@@ -3,13 +3,12 @@
 """
 
 from datetime import datetime
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
-class UserRole(str, Enum):
+class UserRole(StrEnum):
     """用户角色"""
     USER = "user"
     ADMIN = "admin"
@@ -19,7 +18,7 @@ class UserCreate(BaseModel):
     """用户注册请求"""
     email: str = Field(..., min_length=5, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
-    full_name: Optional[str] = Field(None, max_length=255)
+    full_name: str | None = Field(None, max_length=255)
 
 
 class UserLogin(BaseModel):
@@ -30,18 +29,18 @@ class UserLogin(BaseModel):
 
 class UserUpdate(BaseModel):
     """用户信息更新请求"""
-    full_name: Optional[str] = Field(None, max_length=255)
-    password: Optional[str] = Field(None, min_length=8, max_length=128)
+    full_name: str | None = Field(None, max_length=255)
+    password: str | None = Field(None, min_length=8, max_length=128)
 
 
 class UserResponse(BaseModel):
     """用户信息响应"""
     id: str
     email: str
-    full_name: Optional[str] = None
+    full_name: str | None = None
     role: str = "user"
     is_active: bool = True
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
 
 class TokenResponse(BaseModel):

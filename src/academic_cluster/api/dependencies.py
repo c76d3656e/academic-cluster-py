@@ -4,7 +4,6 @@ FastAPI 依赖注入
 提供认证和权限检查的依赖函数。
 """
 
-from typing import Optional
 
 import structlog
 from fastapi import Depends, HTTPException, Request
@@ -20,7 +19,7 @@ security = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     token_service: TokenService = Depends(get_token_service),
     db: DatabaseService = Depends(get_database),
 ) -> dict:
@@ -32,7 +31,7 @@ async def get_current_user(
         payload = token_service.decode_access_token(credentials.credentials)
     except ValueError:
         # 安全修复: 不向客户端泄露 JWT 解码的具体错误原因（过期/无效/格式错误）
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from None
 
     user = await db.get_user_by_id(payload["sub"])
     if user is None:

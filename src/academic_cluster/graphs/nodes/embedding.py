@@ -9,10 +9,10 @@ import traceback
 
 import structlog
 
-from ...services.database import get_database
 from ...services.cache import get_cache
-from ...services.vector_store import get_vector_store
+from ...services.database import get_database
 from ...services.observability import get_current_tracker
+from ...services.vector_store import get_vector_store
 from ..state import PipelineState
 from .progress import send_progress
 
@@ -28,8 +28,8 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
     """
     import time as _time
 
+    from ...services.observability import get_current_node, get_current_tracker
     from ...services.provider_pool import get_embedding_pool
-    from ...services.observability import get_current_tracker, get_current_node
 
     pool = get_embedding_pool()
     start_time = _time.monotonic()
@@ -55,8 +55,8 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
     run_id = get_resolved_run_id()
     if run_id:
         try:
-            from ...services.database import get_database
             from ...api.admin.providers import get_provider_pricing
+            from ...services.database import get_database
 
             db = get_database()
             node_name = get_current_node() or "embedding"
@@ -64,7 +64,6 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
             # embedding 的 token 用量：input_tokens = len(text) 近似
             # 大多数 embedding API 不返回 token 用量，用字符数近似
             prompt_tokens = len(text) // 2  # 粗略估计
-            completion_tokens = 0  # embedding 没有 output tokens
 
             # 计算 cost
             input_price, output_price = await get_provider_pricing(db, provider_alias, "bge-m3")
@@ -115,8 +114,8 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
                 input_price_per_m=input_price,
                 output_price_per_m=output_price,
             )
-        except Exception:
-            pass  # 追踪失败不影响主流程
+        except Exception:  # nosec B110
+            pass
 
     return response.data[0]["embedding"]
 
@@ -175,7 +174,7 @@ async def embedding_node(state: PipelineState) -> dict:
                     try:
                         embedding = await generate_embedding(text)
                         await cache.set_embedding(paper_id, "bge-m3", embedding)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         logger.error(
                             "Embedding generation timed out",
                             paper_id=paper_id, title_length=len(title),

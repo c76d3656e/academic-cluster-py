@@ -5,45 +5,47 @@ LangGraph 图定义
 集成 PipelineTracker 实现可观测性。
 """
 
+import contextlib
+
 import structlog
 from langgraph.graph import END, StateGraph
 
-from .state import PipelineState
-from .checkpoint import with_audit
 from ..services.observability import (
-    PipelineTracker,
     LLMCallbackHandler,
-    set_current_tracker,
-    set_current_llm_callback,
-    push_current_project,
+    PipelineTracker,
     pop_current_project,
-    push_run_id,
     pop_run_id,
+    push_current_project,
+    push_run_id,
+    set_current_llm_callback,
+    set_current_tracker,
 )
+from .checkpoint import with_audit
 from .nodes import (
-    search_node,
-    deduplicate_node,
-    filter_node,
+    artifact_registration_node,
     bm25_node,
+    community_detection_node,
+    community_memory_node,
+    coverage_audit_node,
+    deduplicate_node,
     embedding_node,
+    evidence_cards_node,
+    filter_node,
+    finalize_node,
+    gap_analysis_node,
+    generate_abstract_node,
+    kg_extraction_node,
+    outline_generation_node,
     pgvector_knn_node,
     rerank_node,
-    kg_extraction_node,
-    community_detection_node,
-    visualize_community_node,
-    community_memory_node,
-    evidence_cards_node,
-    gap_analysis_node,
-    targeted_refine_node,
-    outline_generation_node,
-    user_confirm_node,
-    write_review_node,
-    coverage_audit_node,
+    search_node,
     section_revision_node,
-    generate_abstract_node,
-    artifact_registration_node,
-    finalize_node,
+    targeted_refine_node,
+    user_confirm_node,
+    visualize_community_node,
+    write_review_node,
 )
+from .state import PipelineState
 
 logger = structlog.get_logger()
 
@@ -73,9 +75,10 @@ async def get_checkpointer():
         except Exception as patch_error:
             logger.warning("Skipping msgpack numpy patch", error=str(patch_error))
 
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         from psycopg import AsyncConnection
         from psycopg.rows import dict_row
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
         from ..config import get_settings
 
         settings = get_settings()
@@ -108,7 +111,7 @@ async def close_checkpointer():
             conn = getattr(_default_checkpointer, 'conn', None)
             if conn is not None and hasattr(conn, 'close'):
                 await conn.close()
-        except Exception:
+        except Exception:  # nosec B110
             pass
         _default_checkpointer = None
         logger.info("Checkpointer closed")
@@ -349,7 +352,7 @@ async def run_pipeline(
                 from ..api.admin.providers import get_provider_pricing
                 input_price_per_m, output_price_per_m = await get_provider_pricing(db, provider_name, model_name)
                 cost = (prompt_tokens * input_price_per_m + completion_tokens * output_price_per_m) / 1_000_000
-            except Exception:
+            except Exception:  # nosec B110
                 pass
             call_id = await db.create_llm_call(
                 pipeline_run_id=tracker.run_id,
@@ -450,7 +453,7 @@ async def run_pipeline(
                         message=detail_msg,
                     )
 
-        tracker_summary = await tracker.finish(
+        await tracker.finish(
             status="succeeded",
             db_finish_run=db.finish_pipeline_run,
         )
@@ -464,14 +467,12 @@ async def run_pipeline(
             })
 
     except Exception as e:
-        try:
+        with contextlib.suppress(Exception):
             await tracker.finish(
                 status="failed",
                 error_message=str(e),
                 db_finish_run=db.finish_pipeline_run,
             )
-        except Exception:
-            pass
         logger.error("Pipeline failed", error=str(e), project_id=project_id)
         await db.update_project_status(project_id, "failed")
         if sse_manager:

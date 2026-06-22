@@ -6,15 +6,21 @@ Pipeline 审计日志
 Checkpoint 由 LangGraph 原生 AsyncPostgresSaver 自动管理。
 """
 
+import contextlib
 import time
 import traceback
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable
 
 import structlog
 
 from ..services.database import get_database
-from ..services.observability import _summarize_output, get_current_tracker, pop_node, push_node
+from ..services.observability import (
+    _summarize_output,
+    get_current_tracker,
+    pop_node,
+    push_node,
+)
 
 logger = structlog.get_logger()
 
@@ -161,7 +167,7 @@ def with_audit(node_name: str):
 
                 # 更新 tracker
                 if tracker and hasattr(tracker, 'end_node'):
-                    try:
+                    with contextlib.suppress(Exception):
                         await tracker.end_node(
                             node_name,
                             "failed",
@@ -169,8 +175,6 @@ def with_audit(node_name: str):
                             error_traceback=tb,
                             db_finish_node=db.finish_node_execution,
                         )
-                    except Exception:
-                        pass
 
                 # SSE: 推送节点失败事件
                 if project_id:
@@ -182,7 +186,7 @@ def with_audit(node_name: str):
                             "status": "failed",
                             "error": str(e),
                         })
-                    except Exception:
+                    except Exception:  # nosec B110
                         pass
 
                 logger.error(

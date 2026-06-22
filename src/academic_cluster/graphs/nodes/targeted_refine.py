@@ -13,9 +13,9 @@ import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ...prompts import get_cluster_targeted_refine_prompt
-from ...tools.academic_search import search_all_sources
 from ...services.database import get_database
 from ...services.observability import get_current_tracker
+from ...tools.academic_search import search_all_sources
 from ..state import PipelineState
 
 logger = structlog.get_logger()
@@ -28,7 +28,7 @@ async def _generate_targeted_queries(
     previous_queries: list[str],
 ) -> list[str]:
     """使用 LLM 生成针对性补充 query（对齐 Rust 版 cluster_targeted_refine）"""
-    from ...services.llm_client import create_llm, ainvoke_with_callbacks
+    from ...services.llm_client import ainvoke_with_callbacks, create_llm
     llm = create_llm(temperature=0.3)
 
     prompt_template = get_cluster_targeted_refine_prompt()
@@ -192,5 +192,5 @@ async def targeted_refine_node(state: PipelineState) -> dict:
             "refinement_attempt": state.refinement_attempt + 1,
             "needs_targeted_refinement": False,
             "status": "refined",
-            "errors": [f"Targeted refinement failed: {str(e)}"],
+            "errors": [f"Targeted refinement failed: {e!s}"],
         }

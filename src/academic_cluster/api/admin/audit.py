@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from ..dependencies import require_admin
 from ...services.database import DatabaseService, get_database
+from ..dependencies import require_admin
 
 logger = structlog.get_logger()
 
@@ -77,7 +77,7 @@ async def get_audit_logs(
     async with db.session() as session:
         # 查询总数
         count_result = await session.execute(
-            text(f"SELECT COUNT(*) FROM user_activities ua {where_clause}"),
+            text(f"SELECT COUNT(*) FROM user_activities ua {where_clause}"),  # nosec B608
             params,
         )
         total = count_result.scalar()
@@ -91,7 +91,7 @@ async def get_audit_logs(
                 {where_clause}
                 ORDER BY ua.created_at DESC
                 LIMIT :limit OFFSET :skip
-            """),
+            """),  # nosec B608
             params,
         )
         rows = result.fetchall()

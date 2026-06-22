@@ -7,7 +7,6 @@ Fernet 加密服务
 
 import base64
 import hashlib
-import os
 
 import structlog
 from cryptography.fernet import Fernet, InvalidToken
@@ -70,7 +69,7 @@ def decrypt_key(encrypted: str) -> str:
         return f.decrypt(encrypted.encode()).decode()
     except InvalidToken:
         logger.error("Failed to decrypt key: invalid token or wrong encryption key")
-        raise ValueError("解密失败：密钥无效或加密密钥不匹配")
+        raise ValueError("解密失败：密钥无效或加密密钥不匹配") from None
 
 
 def mask_key(plain: str) -> str:

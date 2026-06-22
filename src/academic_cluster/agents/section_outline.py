@@ -62,7 +62,7 @@ def _normalize_paragraph_word_budget(outline: dict, target_words: int) -> dict:
     for _, idx in sorted(fractions, reverse=True)[:max(0, delta)]:
         allocated[idx] += 1
 
-    for paragraph, words in zip(paragraphs, allocated):
+    for paragraph, words in zip(paragraphs, allocated, strict=False):
         if isinstance(paragraph, dict):
             paragraph["target_words"] = int(words)
     outline["paragraphs"] = paragraphs
@@ -362,7 +362,7 @@ def _try_repair_section_outline_json(content: str, target_words: int) -> dict:
             already_covered = [
                 x.strip().strip('"') for x in ac_match.group(1).split(",") if x.strip()
             ]
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     if paragraphs:

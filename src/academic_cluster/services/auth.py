@@ -7,13 +7,12 @@
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import jwt
 import structlog
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 from ..config import get_settings
 
@@ -58,7 +57,7 @@ class TokenService:
 
     def create_access_token(self, user_id: str, role: str) -> str:
         """创建 Access Token"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "sub": user_id,
             "role": role,
@@ -83,9 +82,9 @@ class TokenService:
                 raise jwt.InvalidTokenError("Invalid token type")
             return payload
         except jwt.ExpiredSignatureError:
-            raise ValueError("Token has expired")
+            raise ValueError("Token has expired") from None
         except jwt.InvalidTokenError as e:
-            raise ValueError(f"Invalid token: {e}")
+            raise ValueError(f"Invalid token: {e}") from e
 
     def hash_refresh_token(self, raw_token: str) -> str:
         """哈希 Refresh Token"""
@@ -93,8 +92,8 @@ class TokenService:
 
 
 # 模块级单例
-_password_service: Optional[PasswordService] = None
-_token_service: Optional[TokenService] = None
+_password_service: PasswordService | None = None
+_token_service: TokenService | None = None
 
 
 def get_password_service() -> PasswordService:

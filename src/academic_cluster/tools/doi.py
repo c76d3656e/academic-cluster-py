@@ -5,8 +5,6 @@ DOI (Digital Object Identifier) 是学术论文的唯一标识符。
 """
 
 import re
-from typing import Optional
-
 
 # DOI 正则表达式
 DOI_PATTERN = re.compile(
@@ -16,7 +14,7 @@ DOI_PATTERN = re.compile(
 )
 
 
-def extract_doi(text: str) -> Optional[str]:
+def extract_doi(text: str) -> str | None:
     """
     从文本中提取 DOI
 
@@ -109,7 +107,7 @@ def doi_to_url(doi: str) -> str:
     return ""
 
 
-def get_paper_doi(paper: dict) -> Optional[str]:
+def get_paper_doi(paper: dict) -> str | None:
     """
     从论文数据中获取 DOI
 

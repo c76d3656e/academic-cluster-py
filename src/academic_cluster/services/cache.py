@@ -5,7 +5,7 @@
 """
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
@@ -17,7 +17,7 @@ logger = structlog.get_logger()
 class CacheService:
     """Redis 异步缓存服务"""
 
-    def __init__(self, redis_url: Optional[str] = None):
+    def __init__(self, redis_url: str | None = None):
         import redis.asyncio as redis
 
         settings = get_settings()
@@ -37,7 +37,7 @@ class CacheService:
         await self.redis.close()
         logger.info("Cache connection closed")
 
-    async def get(self, key: str) -> Optional[Any]:
+    async def get(self, key: str) -> Any | None:
         """获取缓存"""
         try:
             data = await self.redis.get(key)
@@ -79,7 +79,7 @@ class CacheService:
         except Exception:
             return False
 
-    async def get_embedding(self, paper_id: str, model_name: str) -> Optional[list[float]]:
+    async def get_embedding(self, paper_id: str, model_name: str) -> list[float] | None:
         """获取缓存的嵌入向量"""
         key = f"embedding:{model_name}:{paper_id}"
         return await self.get(key)
@@ -95,7 +95,7 @@ class CacheService:
         key = f"embedding:{model_name}:{paper_id}"
         return await self.set(key, embedding, expire=expire)
 
-    async def get_paper(self, paper_id: str) -> Optional[dict]:
+    async def get_paper(self, paper_id: str) -> dict | None:
         """获取缓存的论文"""
         key = f"paper:{paper_id}"
         return await self.get(key)
@@ -110,7 +110,7 @@ class CacheService:
         key = f"paper:{paper_id}"
         return await self.set(key, paper_data, expire=expire)
 
-    async def get_search_results(self, query_hash: str) -> Optional[list[dict]]:
+    async def get_search_results(self, query_hash: str) -> list[dict] | None:
         """获取缓存的搜索结果"""
         key = f"search:{query_hash}"
         return await self.get(key)
@@ -127,7 +127,7 @@ class CacheService:
 
 
 # 全局缓存实例
-_cache_service: Optional[CacheService] = None
+_cache_service: CacheService | None = None
 
 
 def get_cache() -> CacheService:
