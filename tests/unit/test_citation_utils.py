@@ -1,10 +1,10 @@
+from academic_cluster.agents.section_evaluator import _check_citation_format
 from academic_cluster.services.citation_utils import (
     normalize_citation_surface,
     strip_body_structure_leakage,
     strip_revision_commentary,
     strip_unsupported_precise_metrics,
 )
-from academic_cluster.agents.section_evaluator import _check_citation_format
 
 
 def test_strip_body_structure_leakage_removes_markdown_body_headings():

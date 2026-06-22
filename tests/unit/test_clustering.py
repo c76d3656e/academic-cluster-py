@@ -2,15 +2,16 @@
 聚类工具单元测试
 """
 
-import pytest
 import networkx as nx
 
+from academic_cluster.graphs.nodes.community_detection import (
+    select_community_balanced_papers,
+)
 from academic_cluster.tools.clustering import (
     build_hybrid_graph,
     community_detection,
     generate_community_visualization,
 )
-from academic_cluster.graphs.nodes.community_detection import select_community_balanced_papers
 
 
 class TestHybridGraph:
@@ -84,14 +85,17 @@ class TestCommunityDetection:
     def test_fallback_clustering(self):
         """测试备用聚类方法（连通分量）"""
         G = nx.Graph()
-        G.add_edges_from([
-            ("p1", "p2"),
-            ("p2", "p3"),
-            ("p3", "p4"),
-            ("p5", "p6"),
-        ])
+        G.add_edges_from(
+            [
+                ("p1", "p2"),
+                ("p2", "p3"),
+                ("p3", "p4"),
+                ("p5", "p6"),
+            ]
+        )
 
         from academic_cluster.tools.clustering import _fallback_clustering
+
         clusters = _fallback_clustering(G)
 
         assert len(clusters) == 2  # 应该有两个连通分量
@@ -102,16 +106,18 @@ class TestCommunityDetection:
         """测试 Leiden 社区检测"""
         G = nx.Graph()
         # 两个紧密社区
-        G.add_edges_from([
-            ("p1", "p2", {"weight": 0.9}),
-            ("p2", "p3", {"weight": 0.8}),
-            ("p3", "p1", {"weight": 0.7}),
-            ("p4", "p5", {"weight": 0.9}),
-            ("p5", "p6", {"weight": 0.8}),
-            ("p6", "p4", {"weight": 0.7}),
-            # 弱连接
-            ("p3", "p4", {"weight": 0.1}),
-        ])
+        G.add_edges_from(
+            [
+                ("p1", "p2", {"weight": 0.9}),
+                ("p2", "p3", {"weight": 0.8}),
+                ("p3", "p1", {"weight": 0.7}),
+                ("p4", "p5", {"weight": 0.9}),
+                ("p5", "p6", {"weight": 0.8}),
+                ("p6", "p4", {"weight": 0.7}),
+                # 弱连接
+                ("p3", "p4", {"weight": 0.1}),
+            ]
+        )
 
         clusters = community_detection(G, algorithm="leiden")
         assert len(clusters) >= 1
@@ -122,13 +128,15 @@ class TestCommunityDetection:
     def test_community_detection_walktrap(self):
         """测试 Walktrap 社区检测"""
         G = nx.Graph()
-        G.add_edges_from([
-            ("p1", "p2", {"weight": 0.9}),
-            ("p2", "p3", {"weight": 0.8}),
-            ("p4", "p5", {"weight": 0.9}),
-            ("p5", "p6", {"weight": 0.8}),
-            ("p3", "p4", {"weight": 0.1}),
-        ])
+        G.add_edges_from(
+            [
+                ("p1", "p2", {"weight": 0.9}),
+                ("p2", "p3", {"weight": 0.8}),
+                ("p4", "p5", {"weight": 0.9}),
+                ("p5", "p6", {"weight": 0.8}),
+                ("p3", "p4", {"weight": 0.1}),
+            ]
+        )
 
         clusters = community_detection(G, algorithm="walktrap")
         assert len(clusters) >= 1
@@ -148,10 +156,12 @@ class TestVisualization:
     def test_generate_visualization(self):
         """测试可视化生成"""
         G = nx.Graph()
-        G.add_edges_from([
-            ("p1", "p2", {"weight": 0.8}),
-            ("p2", "p3", {"weight": 0.6}),
-        ])
+        G.add_edges_from(
+            [
+                ("p1", "p2", {"weight": 0.8}),
+                ("p2", "p3", {"weight": 0.6}),
+            ]
+        )
 
         clusters = [
             {"id": "cluster_0", "paper_ids": ["p1", "p2"], "size": 2},

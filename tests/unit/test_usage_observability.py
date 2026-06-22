@@ -1,13 +1,15 @@
-from academic_cluster.api.console.usage import get_usage_calls, get_usage_trend
+from typing import ClassVar
+
 from academic_cluster.api.admin.providers import get_provider_pricing
+from academic_cluster.api.console.usage import get_usage_calls, get_usage_trend
 from academic_cluster.services.llm_client import ainvoke_with_callbacks
 from academic_cluster.services.observability import PipelineTracker, set_current_tracker
 
 
 class _FakeResponse:
     content = "ok"
-    usage_metadata = {"input_tokens": 11, "output_tokens": 7}
-    response_metadata = {"model_name": "test-model"}
+    usage_metadata: ClassVar[dict[str, int]] = {"input_tokens": 11, "output_tokens": 7}
+    response_metadata: ClassVar[dict[str, str]] = {"model_name": "test-model"}
 
 
 class _FakeLlm:
@@ -53,7 +55,9 @@ async def test_ainvoke_persists_llm_call_without_node_execution(monkeypatch):
     async def fake_get_provider_pricing(db, provider_alias, model_name):
         return (0.2, 0.4)
 
-    monkeypatch.setattr("academic_cluster.services.database.get_database", fake_get_database)
+    monkeypatch.setattr(
+        "academic_cluster.services.database.get_database", fake_get_database
+    )
     monkeypatch.setattr(
         "academic_cluster.api.admin.providers.get_provider_pricing",
         fake_get_provider_pricing,
@@ -95,7 +99,9 @@ async def test_ainvoke_records_error_call(monkeypatch):
     def fake_get_database():
         return db
 
-    monkeypatch.setattr("academic_cluster.services.database.get_database", fake_get_database)
+    monkeypatch.setattr(
+        "academic_cluster.services.database.get_database", fake_get_database
+    )
     monkeypatch.setattr(
         "academic_cluster.services.llm_client._get_llm_queue_semaphore",
         lambda: __import__("asyncio").Semaphore(1),
@@ -184,17 +190,20 @@ class _PricingSession:
     async def execute(self, statement, params):
         self.calls.append((str(statement), params))
         if "display_name" in str(statement):
+
             class _Row:
                 def fetchone(self_inner):
                     return None
 
             return _Row()
         if "WHERE model = :model" in str(statement):
+
             class _Row:
                 def fetchone(self_inner):
                     return None
 
             return _Row()
+
         class _Row:
             def fetchone(self_inner):
                 return (0.2, 0.4)
@@ -291,6 +300,8 @@ async def test_usage_calls_allows_admin_project_lookup():
 
 async def test_get_provider_pricing_handles_namespace_model_alias():
     db = _PricingDb()
-    input_price, output_price = await get_provider_pricing(db, "gitee-1", "Qwen/Qwen3-8B")
+    input_price, output_price = await get_provider_pricing(
+        db, "gitee-1", "Qwen/Qwen3-8B"
+    )
     assert input_price == 0.2
     assert output_price == 0.4

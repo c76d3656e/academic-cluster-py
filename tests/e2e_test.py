@@ -5,6 +5,7 @@ E2E 测试：登录 → 查看项目综述页面
 
 import sys
 import time
+
 from playwright.sync_api import sync_playwright
 
 
@@ -26,13 +27,17 @@ def run_test():
 
         # 填写登录表单
         print("[2] Logging in as admin...")
-        email_input = page.locator('input[type="email"], input[name="email"], input[placeholder*="邮箱"], input[placeholder*="email"]').first
+        email_input = page.locator(
+            'input[type="email"], input[name="email"], input[placeholder*="邮箱"], input[placeholder*="email"]'
+        ).first
         password_input = page.locator('input[type="password"]').first
 
         if email_input.is_visible():
             email_input.fill("admin@cluster.local")
             password_input.fill("Admin123!")
-            login_btn = page.locator('button[type="submit"], button:has-text("登录"), button:has-text("Login")').first
+            login_btn = page.locator(
+                'button[type="submit"], button:has-text("登录"), button:has-text("Login")'
+            ).first
             login_btn.click()
             page.wait_for_load_state("networkidle")
             time.sleep(2)
@@ -55,7 +60,10 @@ def run_test():
 
         # 检查是否有综述相关内容
         checks = {
-            "has_tabs": "综述" in body_text or "Review" in body_text or "概览" in body_text or "Overview" in body_text,
+            "has_tabs": "综述" in body_text
+            or "Review" in body_text
+            or "概览" in body_text
+            or "Overview" in body_text,
             "has_content": len(body_text) > 200,
             "no_empty_state": "尚未生成" not in body_text and "暂无" not in body_text,
         }
@@ -65,7 +73,9 @@ def run_test():
             print(f"    [{status}] {check}")
 
         # 4. 尝试点击不同标签页
-        tabs = page.locator('[role="tab"], .tab, button:has-text("综述"), button:has-text("Review"), button:has-text("参考"), button:has-text("Reference")')
+        tabs = page.locator(
+            '[role="tab"], .tab, button:has-text("综述"), button:has-text("Review"), button:has-text("参考"), button:has-text("Reference")'
+        )
         tab_count = tabs.count()
         print(f"[5] Found {tab_count} tabs")
 
@@ -102,19 +112,22 @@ def run_test():
             print(f"    Sections: {len(sections)}")
             print(f"    Evidence cards: {len(evidence)}")
             for s in sections[:3]:
-                print(f"      - {s.get('section_id', '?')}: {len(s.get('content', ''))} chars")
+                print(
+                    f"      - {s.get('section_id', '?')}: {len(s.get('content', ''))} chars"
+                )
 
         browser.close()
 
     # 判断测试结果
     all_passed = all(checks.values())
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"E2E Test: {'PASSED' if all_passed else 'FAILED'}")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
     return 0 if all_passed else 1
 
 
 if __name__ == "__main__":
-    import os
-    os.makedirs("tests/screenshots", exist_ok=True)
+    from pathlib import Path
+
+    Path("tests/screenshots").mkdir(parents=True, exist_ok=True)
     sys.exit(run_test())

@@ -5,13 +5,12 @@ Pipeline 端到端测试
 使用真实 API 调用，每个数据源限制 2 篇论文。
 """
 
-import asyncio
 import uuid
 
 import pytest
 
-from academic_cluster.graphs.state import PipelineState
 from academic_cluster.graphs.graph import compile_graph
+from academic_cluster.graphs.state import PipelineState
 
 
 @pytest.mark.e2e
@@ -60,7 +59,8 @@ async def test_full_pipeline():
 
         # 验证引用格式
         import re
-        citations = re.findall(r'\[\d+(?:,\d+)*\]', final_review)
+
+        citations = re.findall(r"\[\d+(?:,\d+)*\]", final_review)
         assert len(citations) >= 5, f"Too few citations: {len(citations)}"
 
         # 验证 BibTeX
@@ -72,9 +72,11 @@ async def test_full_pipeline():
         # 验证大纲有章节标题
         outline_data = result.get("outline_data", {})
         sections = outline_data.get("sections", [])
-        assert len(sections) >= 2, f"Outline should have >= 2 sections, got {len(sections)}"
+        assert len(sections) >= 2, (
+            f"Outline should have >= 2 sections, got {len(sections)}"
+        )
 
-        print(f"\n=== Pipeline 结果 ===")
+        print("\n=== Pipeline 结果 ===")
         print(f"项目 ID: {project_id}")
         print(f"论文数量: {len(result.get('paper_ids', []))}")
         print(f"综述长度: {len(final_review)} 字符")
@@ -85,7 +87,7 @@ async def test_full_pipeline():
         return result
 
     except Exception as e:
-        pytest.fail(f"Pipeline failed: {str(e)}")
+        pytest.fail(f"Pipeline failed: {e!s}")
 
 
 @pytest.mark.e2e
@@ -113,7 +115,7 @@ async def test_search_only():
     assert "status" in result
     assert result["status"] == "searched"
 
-    print(f"\n=== 搜索结果 ===")
+    print("\n=== 搜索结果 ===")
     print(f"论文数量: {len(result.get('paper_ids', []))}")
 
 
@@ -134,7 +136,7 @@ async def test_embedding_generation():
     assert isinstance(embedding, list)
     assert len(embedding) == 1024
 
-    print(f"\n=== 嵌入生成结果 ===")
+    print("\n=== 嵌入生成结果 ===")
     print(f"向量维度: {len(embedding)}")
     print(f"前5个值: {embedding[:5]}")
 
@@ -168,6 +170,6 @@ async def test_rerank():
     assert len(reranked) == 2
     assert all("rerank_score" in p for p in reranked)
 
-    print(f"\n=== 重排序结果 ===")
+    print("\n=== 重排序结果 ===")
     for p in reranked:
         print(f"  {p.get('title', '')[:50]}: {p['rerank_score']:.4f}")

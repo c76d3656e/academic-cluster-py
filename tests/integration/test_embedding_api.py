@@ -5,7 +5,6 @@
 """
 
 import pytest
-import httpx
 
 from academic_cluster.config import get_settings
 from academic_cluster.graphs.nodes.embedding import generate_embedding
@@ -49,7 +48,7 @@ async def test_embedding_consistency():
     assert len(embedding1) == len(embedding2)
 
     # 验证值相似（由于 API 可能有微小差异，使用近似比较）
-    for v1, v2 in zip(embedding1[:10], embedding2[:10]):
+    for v1, v2 in zip(embedding1[:10], embedding2[:10], strict=False):
         assert abs(v1 - v2) < 0.01
 
     print("Embedding consistency test passed")

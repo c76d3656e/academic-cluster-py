@@ -1,5 +1,7 @@
-from academic_cluster.graphs.nodes.community_memory import synthesize_community_memory
-from academic_cluster.graphs.nodes.community_memory import community_memory_node
+from academic_cluster.graphs.nodes.community_memory import (
+    community_memory_node,
+    synthesize_community_memory,
+)
 
 
 def test_synthesize_community_memory_contains_required_fields():
@@ -7,8 +9,18 @@ def test_synthesize_community_memory_contains_required_fields():
         project_id="project-1",
         cluster={"id": "cluster-1", "name": "cluster", "paper_ids": ["p1", "p2"]},
         papers=[
-            {"id": "p1", "title": "Foundation Paper", "citation_count": 100, "publication_date": "2014-01-01"},
-            {"id": "p2", "title": "Frontier Paper", "citation_count": 10, "publication_date": "2025-01-01"},
+            {
+                "id": "p1",
+                "title": "Foundation Paper",
+                "citation_count": 100,
+                "publication_date": "2014-01-01",
+            },
+            {
+                "id": "p2",
+                "title": "Frontier Paper",
+                "citation_count": 10,
+                "publication_date": "2025-01-01",
+            },
         ],
         evidence_cards=[
             {
@@ -21,11 +33,25 @@ def test_synthesize_community_memory_contains_required_fields():
             }
         ],
         kg_entities=[
-            {"id": "e1", "name": "Method A", "entity_type": "method", "paper_ids": ["p1"]},
-            {"id": "e2", "name": "Open Problem", "entity_type": "limitation", "paper_ids": ["p2"]},
+            {
+                "id": "e1",
+                "name": "Method A",
+                "entity_type": "method",
+                "paper_ids": ["p1"],
+            },
+            {
+                "id": "e2",
+                "name": "Open Problem",
+                "entity_type": "limitation",
+                "paper_ids": ["p2"],
+            },
         ],
         kg_relations=[
-            {"id": "r1", "relation_type": "addresses_limitation", "paper_ids": ["p1", "p2"]},
+            {
+                "id": "r1",
+                "relation_type": "addresses_limitation",
+                "paper_ids": ["p1", "p2"],
+            },
         ],
     )
 
@@ -72,10 +98,19 @@ class _FakeCommunityMemoryDb:
         return [{"id": "cluster-1", "name": "cluster", "paper_ids": ["p1"]}]
 
     async def get_papers_by_ids(self, ids):
-        return [{"id": "p1", "title": "Paper", "abstract": "Abstract", "publication_date": "2024-01-01"}]
+        return [
+            {
+                "id": "p1",
+                "title": "Paper",
+                "abstract": "Abstract",
+                "publication_date": "2024-01-01",
+            }
+        ]
 
     async def get_evidence_cards_by_ids(self, ids):
-        return [{"id": "card-1", "paper_id": "p1", "claim": "Claim", "limitation": "Limit"}]
+        return [
+            {"id": "card-1", "paper_id": "p1", "claim": "Claim", "limitation": "Limit"}
+        ]
 
     async def get_kg_entities_by_ids(self, ids):
         return []
@@ -110,7 +145,7 @@ async def test_community_memory_node_falls_back_when_llm_times_out(monkeypatch):
     )
     monkeypatch.setattr(
         "academic_cluster.graphs.nodes.community_memory.get_llm_available_slots",
-        lambda default=10: 10,
+        lambda **_: 10,
     )
     monkeypatch.setattr(
         "academic_cluster.graphs.nodes.community_memory.send_progress",
@@ -161,7 +196,7 @@ async def test_community_memory_node_can_skip_llm_by_limit(monkeypatch):
     )
     monkeypatch.setattr(
         "academic_cluster.graphs.nodes.community_memory.get_llm_available_slots",
-        lambda default=10: 10,
+        lambda **_: 10,
     )
     monkeypatch.setattr(
         "academic_cluster.graphs.nodes.community_memory.send_progress",

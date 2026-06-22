@@ -15,7 +15,9 @@ class _FakeGapDb:
         return []
 
     async def get_papers_by_ids(self, ids):
-        return [{"id": pid, "title": f"Paper {pid}", "abstract": "Abstract"} for pid in ids]
+        return [
+            {"id": pid, "title": f"Paper {pid}", "abstract": "Abstract"} for pid in ids
+        ]
 
 
 async def test_gap_analysis_timeout_keeps_pipeline_moving(monkeypatch):

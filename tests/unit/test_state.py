@@ -2,8 +2,6 @@
 状态模型单元测试
 """
 
-import pytest
-
 from academic_cluster.graphs.state import PipelineState
 
 

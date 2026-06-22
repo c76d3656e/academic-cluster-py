@@ -4,15 +4,12 @@
 使用真实的 API 调用进行测试，不使用虚假数据。
 """
 
-import asyncio
-
 import pytest
-import httpx
 
 from academic_cluster.tools.academic_search import (
-    search_semantic_scholar,
-    search_arxiv,
     search_all_sources,
+    search_arxiv,
+    search_semantic_scholar,
 )
 
 

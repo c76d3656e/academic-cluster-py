@@ -1,9 +1,9 @@
-from academic_cluster.graphs.nodes.write_review import _section_citation_payload
-from academic_cluster.services.citation_planner import SectionCitationPlan
+import pytest
+
 from academic_cluster.agents import writing
 from academic_cluster.agents.section_outline import _normalize_paragraph_word_budget
-
-import pytest
+from academic_cluster.graphs.nodes.write_review import _section_citation_payload
+from academic_cluster.services.citation_planner import SectionCitationPlan
 
 
 def test_section_citation_payload_includes_candidate_paper_details():
@@ -86,9 +86,27 @@ async def test_write_section_units_calls_one_unit_per_paragraph(monkeypatch):
             "core_question": "q",
             "narrative_arc": "arc",
             "paragraphs": [
-                {"index": 1, "task_type": "context", "direction": "a", "target_words": 300, "synthesis_instruction": "x"},
-                {"index": 2, "task_type": "comparison", "direction": "b", "target_words": 300, "synthesis_instruction": "y"},
-                {"index": 3, "task_type": "limitation", "direction": "c", "target_words": 300, "synthesis_instruction": "z"},
+                {
+                    "index": 1,
+                    "task_type": "context",
+                    "direction": "a",
+                    "target_words": 300,
+                    "synthesis_instruction": "x",
+                },
+                {
+                    "index": 2,
+                    "task_type": "comparison",
+                    "direction": "b",
+                    "target_words": 300,
+                    "synthesis_instruction": "y",
+                },
+                {
+                    "index": 3,
+                    "task_type": "limitation",
+                    "direction": "c",
+                    "target_words": 300,
+                    "synthesis_instruction": "z",
+                },
             ],
         },
     )
@@ -122,8 +140,20 @@ async def test_write_section_units_refinement_is_opt_in(monkeypatch):
             "core_question": "q",
             "narrative_arc": "arc",
             "paragraphs": [
-                {"index": 1, "task_type": "context", "direction": "a", "target_words": 300, "synthesis_instruction": "x"},
-                {"index": 2, "task_type": "comparison", "direction": "b", "target_words": 300, "synthesis_instruction": "y"},
+                {
+                    "index": 1,
+                    "task_type": "context",
+                    "direction": "a",
+                    "target_words": 300,
+                    "synthesis_instruction": "x",
+                },
+                {
+                    "index": 2,
+                    "task_type": "comparison",
+                    "direction": "b",
+                    "target_words": 300,
+                    "synthesis_instruction": "y",
+                },
             ],
         },
     )

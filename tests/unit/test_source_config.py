@@ -16,11 +16,18 @@ class _FakeSession:
     async def execute(self, statement, params=None):
         sql = str(statement)
         params = params or {}
-        if "CREATE TABLE" in sql or "CREATE INDEX" in sql or "CREATE TRIGGER" in sql or "DO $$" in sql:
+        if (
+            "CREATE TABLE" in sql
+            or "CREATE INDEX" in sql
+            or "CREATE TRIGGER" in sql
+            or "DO $$" in sql
+        ):
             return _FakeResult()
         if "SELECT key, label, value_enc" in sql:
             keys = params.get("keys") or []
-            return _FakeResult([self.db.rows[key] for key in keys if key in self.db.rows])
+            return _FakeResult(
+                [self.db.rows[key] for key in keys if key in self.db.rows]
+            )
         if "INSERT INTO source_registry" in sql:
             self.db.upserts.append(params)
         return _FakeResult()
@@ -70,17 +77,19 @@ async def test_effective_source_value_uses_env_when_no_db_row(monkeypatch):
 
 async def test_disabled_db_row_suppresses_env_fallback(monkeypatch):
     monkeypatch.setattr(source_config, "get_settings", lambda: _FakeSettings())
-    db = _FakeDb(rows={
-        "semantic_scholar_api_key": _FakeRow(
-            key="semantic_scholar_api_key",
-            label="Semantic Scholar API Key",
-            value_enc=None,
-            is_enabled=False,
-            metadata={},
-            created_at=None,
-            updated_at=None,
-        )
-    })
+    db = _FakeDb(
+        rows={
+            "semantic_scholar_api_key": _FakeRow(
+                key="semantic_scholar_api_key",
+                label="Semantic Scholar API Key",
+                value_enc=None,
+                is_enabled=False,
+                metadata={},
+                created_at=None,
+                updated_at=None,
+            )
+        }
+    )
 
     value = await source_config.get_effective_source_value(
         "semantic_scholar_api_key",
