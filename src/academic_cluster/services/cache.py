@@ -25,7 +25,7 @@ class CacheService:
         if redis_url is None:
             redis_url = settings.redis.url
 
-        self.redis = redis.from_url(
+        self.redis = redis.from_url(  # type: ignore[no-untyped-call]
             redis_url,
             decode_responses=True,
         )
@@ -75,7 +75,8 @@ class CacheService:
     async def exists(self, key: str) -> bool:
         """检查缓存是否存在"""
         try:
-            return await self.redis.exists(key) > 0
+            result: int = await self.redis.exists(key)
+            return result > 0
         except Exception:
             return False
 

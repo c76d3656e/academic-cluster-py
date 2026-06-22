@@ -95,8 +95,9 @@ async def get_checkpointer() -> BaseCheckpointSaver[Any]:
         conn = await AsyncConnection.connect(
             conn_string, autocommit=True, prepare_threshold=0, row_factory=dict_row
         )
-        checkpointer = AsyncPostgresSaver(conn)
-        await checkpointer.setup()
+        asyncpg_checkpointer = AsyncPostgresSaver(conn)
+        await asyncpg_checkpointer.setup()
+        checkpointer: BaseCheckpointSaver[Any] = asyncpg_checkpointer
         _default_checkpointer = checkpointer
 
         logger.info(
