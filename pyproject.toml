@@ -139,6 +139,8 @@ ignore = [
     "S101",   # use of assert (allowed in tests)
     "S105",   # hardcoded password (false positive for config/settings)
     "S110",   # try-except-pass (common in parsing fallbacks)
+    "S311",   # pseudo-random (random.choices for load balancing, not crypto)
+    "S314",   # xml parsing (arXiv API is trusted source)
     "S603",   # subprocess call (too noisy for CLI tools)
     "S607",   # partial executable path
     "S608",   # SQL injection (using SQLAlchemy ORM, not raw SQL)

@@ -149,8 +149,8 @@ onMounted(async () => {
     <!-- Logout -->
     <div class="px-3 py-3">
       <button
-        @click="handleLogout"
         class="sidebar-link text-destructive hover:text-destructive w-full"
+        @click="handleLogout"
       >
         <span class="sidebar-icon">&#x2192;</span>
         {{ t('auth.logout') }}

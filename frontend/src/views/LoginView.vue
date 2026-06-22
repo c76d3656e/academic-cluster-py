@@ -43,7 +43,7 @@ async function handleLogin() {
           <CardDescription>{{ t('auth.loginDesc') }}</CardDescription>
         </CardHeader>
         <CardContent class="pt-2">
-          <form @submit.prevent="handleLogin" class="space-y-5">
+          <form class="space-y-5" @submit.prevent="handleLogin">
             <div class="space-y-2">
               <Label for="email">{{ t('auth.email') }}</Label>
               <Input id="email" v-model="email" type="email" required placeholder="your@email.com" />

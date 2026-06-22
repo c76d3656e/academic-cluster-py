@@ -164,8 +164,8 @@ function scrollToReferences() {
       <div class="nature-article">
         <section
           v-for="(section, idx) in sections"
-          :key="section.id"
           :id="`section-${idx}`"
+          :key="section.id"
           class="mb-10 scroll-mt-20"
         >
           <h2 class="nature-section-heading">
@@ -177,7 +177,7 @@ function scrollToReferences() {
           <div
             class="nature-prose"
             v-html="renderSection(section.content)"
-          ></div>
+          />
         </section>
       </div>
 
@@ -188,8 +188,8 @@ function scrollToReferences() {
         <ol class="space-y-4">
           <li
             v-for="(ref, idx) in references"
-            :key="`${ref.paper_id || idx}-${ref.new_number || idx}`"
             :id="`ref-${idx + 1}`"
+            :key="`${ref.paper_id || idx}-${ref.new_number || idx}`"
             class="ref-card scroll-mt-20"
           >
             <div class="flex gap-3">

@@ -24,8 +24,8 @@ const pipelineStages = PIPELINE_STAGES
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
           <span v-if="isRunning" class="relative flex h-2 w-2">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
           </span>
           <span class="text-sm font-medium">
             {{ isRunning ? t('pipeline.executing') : projectStatus === 'completed' ? t('pipeline.done') : t('pipeline.stopped') }}
@@ -42,7 +42,7 @@ const pipelineStages = PIPELINE_STAGES
           class="progress-bar-fill"
           :class="{ 'progress-bar-failed': projectStatus === 'failed' }"
           :style="{ width: Math.round((completedNodes.size / pipelineStages.length) * 100) + '%' }"
-        ></div>
+        />
       </div>
 
       <!-- Current Stage -->

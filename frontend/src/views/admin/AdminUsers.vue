@@ -95,8 +95,8 @@ async function changeRole(u: User, newRole: string) {
               <TableCell>
                 <Select
                   :model-value="u.role"
-                  @update:model-value="(val: any) => { if (typeof val === 'string') changeRole(u, val) }"
                   :disabled="u.id === user?.id"
+                  @update:model-value="(val: any) => { if (typeof val === 'string') changeRole(u, val) }"
                 >
                   <SelectTrigger class="w-20 md:w-24 h-8">
                     <SelectValue />
@@ -118,9 +118,9 @@ async function changeRole(u: User, newRole: string) {
               <TableCell>
                 <Button
                   v-if="u.id !== user?.id"
-                  @click="toggleActive(u)"
                   :variant="u.is_active ? 'destructive' : 'default'"
                   size="sm"
+                  @click="toggleActive(u)"
                 >
                   {{ u.is_active ? t('admin.deactivate') : t('admin.activate') }}
                 </Button>

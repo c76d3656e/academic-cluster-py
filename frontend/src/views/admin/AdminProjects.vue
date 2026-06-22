@@ -95,18 +95,18 @@ async function handleDelete(id: string, name: string) {
               </TableCell>
               <TableCell>
                 <div class="flex gap-1 flex-wrap">
-                <Button variant="ghost" size="sm" @click="router.push(`/projects/${p.id}`)">
-                  {{ t('common.view') }}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="text-destructive hover:text-destructive"
-                  :disabled="deletingId === p.id"
-                  @click="handleDelete(p.id, p.name)"
-                >
-                  {{ deletingId === p.id ? t('common.deleting') : t('common.delete') }}
-                </Button>
+                  <Button variant="ghost" size="sm" @click="router.push(`/projects/${p.id}`)">
+                    {{ t('common.view') }}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-destructive hover:text-destructive"
+                    :disabled="deletingId === p.id"
+                    @click="handleDelete(p.id, p.name)"
+                  >
+                    {{ deletingId === p.id ? t('common.deleting') : t('common.delete') }}
+                  </Button>
                 </div>
               </TableCell>
             </TableRow>

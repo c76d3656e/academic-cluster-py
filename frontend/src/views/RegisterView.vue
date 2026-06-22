@@ -50,7 +50,7 @@ async function handleRegister() {
           <CardDescription>{{ t('auth.registerDesc') }}</CardDescription>
         </CardHeader>
         <CardContent class="pt-2">
-          <form @submit.prevent="handleRegister" class="space-y-5">
+          <form class="space-y-5" @submit.prevent="handleRegister">
             <div class="space-y-2">
               <Label for="fullName">{{ t('auth.fullName') }}</Label>
               <Input id="fullName" v-model="fullName" type="text" :placeholder="t('auth.fullNamePlaceholder')" />

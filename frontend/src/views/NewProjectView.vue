@@ -54,7 +54,7 @@ async function handleSubmit() {
           <CardTitle class="text-heading">{{ t('project.projectInfo') }}</CardTitle>
         </CardHeader>
         <CardContent>
-          <form @submit.prevent="handleSubmit" class="space-y-6">
+          <form class="space-y-6" @submit.prevent="handleSubmit">
             <div class="space-y-2">
               <Label for="name">{{ t('project.projectName') }}</Label>
               <Input id="name" v-model="name" type="text" required :placeholder="t('project.projectNamePlaceholder')" />

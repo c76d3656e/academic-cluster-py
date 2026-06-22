@@ -80,11 +80,11 @@ function segmentValue(item: UsageTrendPoint, type: 'llm' | 'embedding' | 'rerank
         <button
           v-for="mode in ([['tokens', 'Token'], ['cost', '费用']] as const)"
           :key="mode[0]"
-          @click="trendMode = mode[0]"
           class="px-2 py-1 text-[0.65rem] rounded transition-colors"
           :class="trendMode === mode[0]
             ? 'bg-foreground text-background'
             : 'text-muted-foreground hover:text-foreground hover:bg-muted'"
+          @click="trendMode = mode[0]"
         >
           {{ mode[1] }}
         </button>
@@ -99,9 +99,9 @@ function segmentValue(item: UsageTrendPoint, type: 'llm' | 'embedding' | 'rerank
       </div>
       <div v-else>
         <div class="flex gap-4 mb-3 text-[0.65rem] text-muted-foreground">
-          <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm" :class="callTypeChartClass.llm"></span>LLM</span>
-          <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm" :class="callTypeChartClass.embedding"></span>Embedding</span>
-          <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm" :class="callTypeChartClass.rerank"></span>Rerank</span>
+          <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm" :class="callTypeChartClass.llm" />LLM</span>
+          <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm" :class="callTypeChartClass.embedding" />Embedding</span>
+          <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-sm" :class="callTypeChartClass.rerank" />Rerank</span>
         </div>
         <div class="h-56 flex items-end gap-1">
           <div

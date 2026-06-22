@@ -208,7 +208,7 @@ onMounted(async () => {
     <header class="border-b border-border sticky top-0 z-10 bg-background/80 backdrop-blur-sm">
       <div class="max-w-[1100px] mx-auto px-4 md:px-6 py-2.5 flex items-center gap-2 md:gap-3">
         <router-link to="/console/overview" class="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6" /></svg>
           {{ t('common.back') }}
         </router-link>
         <Separator orientation="vertical" class="h-5" />
@@ -218,9 +218,9 @@ onMounted(async () => {
         </Badge>
         <!-- Download button -->
         <div v-if="hasReview" class="ml-auto">
-          <div class="relative" ref="downloadMenuRef">
+          <div ref="downloadMenuRef" class="relative">
             <Button variant="outline" size="sm" class="gap-1.5 text-xs" @click="showDownloadMenu = !showDownloadMenu">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
               {{ t('article.download') }}
             </Button>
             <div v-if="showDownloadMenu" class="absolute right-0 top-full mt-1 w-44 bg-card border border-border rounded-lg shadow-lg py-1 z-20">
@@ -268,7 +268,7 @@ onMounted(async () => {
       <!-- Not started yet -->
       <div v-if="project.status === 'created'" class="my-12 text-center">
         <p class="text-muted-foreground mb-4">{{ t('pipeline.ready') }}</p>
-        <Button @click="startPipeline" :disabled="isStarting" size="lg">
+        <Button :disabled="isStarting" size="lg" @click="startPipeline">
           {{ isStarting ? t('pipeline.starting') : t('pipeline.startPipeline') }}
         </Button>
       </div>
@@ -292,7 +292,7 @@ onMounted(async () => {
       <!-- Empty state for completed but no content -->
       <div v-else-if="project.status === 'completed'" class="text-center py-20">
         <div class="text-muted-foreground/60 mb-2">
-          <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="mx-auto"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="mx-auto"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg>
         </div>
         <p class="text-foreground font-medium">{{ t('pipeline.noContent') }}</p>
         <p class="text-sm text-muted-foreground mt-1">{{ t('pipeline.noContentDesc') }}</p>
@@ -301,7 +301,7 @@ onMounted(async () => {
       <!-- Interrupted state -->
       <div v-else-if="project.status === 'interrupted' && !hasReview" class="text-center py-16">
         <div class="text-muted-foreground/60 mb-2">
-          <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="mx-auto"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="mx-auto"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
         </div>
         <p class="text-foreground font-medium">{{ t('pipeline.taskInterrupted') }}</p>
         <p class="text-sm text-muted-foreground mt-1">{{ t('pipeline.taskInterruptedDesc') }}</p>

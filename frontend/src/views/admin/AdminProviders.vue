@@ -309,11 +309,11 @@ onMounted(loadData)
       <button
         v-for="tab in (['llm', 'embedding', 'rerank', 'source'] as const)"
         :key="tab"
-        @click="activeTab = tab"
         class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px shrink-0"
         :class="activeTab === tab
           ? 'border-foreground text-foreground'
           : 'border-transparent text-muted-foreground hover:text-foreground'"
+        @click="activeTab = tab"
       >
         {{ providerTabLabel(tab) }}
       </button>
@@ -353,7 +353,7 @@ onMounted(loadData)
               <td class="py-3 px-4 text-right font-mono text-xs hidden lg:table-cell">{{ formatPrice(p.input_price_per_m) }}</td>
               <td class="py-3 px-4 text-right font-mono text-xs hidden lg:table-cell">{{ formatPrice(p.output_price_per_m) }}</td>
               <td class="py-3 px-4">
-                <button @click="handleToggle(p)" class="cursor-pointer">
+                <button class="cursor-pointer" @click="handleToggle(p)">
                   <Badge :variant="p.is_enabled ? 'default' : 'outline'" class="text-[0.65rem]">
                     {{ p.is_enabled ? t('common.enabled') : t('common.disabled') }}
                   </Badge>

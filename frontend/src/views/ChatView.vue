@@ -262,9 +262,9 @@ onUnmounted(() => {
         <button
           v-for="project in projects"
           :key="project.id"
-          @click="loadProjectChat(project)"
           class="w-full text-left p-2.5 rounded-lg text-sm transition-colors hover:bg-muted group"
           :class="{ 'bg-muted': currentProjectId === project.id }"
+          @click="loadProjectChat(project)"
         >
           <div class="flex items-start gap-2">
             <span class="mt-0.5 shrink-0" :class="getStatusColor(project.status)">
@@ -325,8 +325,8 @@ onUnmounted(() => {
                 'Federated learning privacy',
               ]"
               :key="topic"
-              @click="input = topic"
               class="text-left p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-sm"
+              @click="input = topic"
             >
               {{ topic }}
             </button>
@@ -382,7 +382,7 @@ onUnmounted(() => {
 
           <!-- View result button -->
           <div v-if="hasResult" class="flex justify-center pt-4">
-            <Button @click="viewResult" class="gap-2">
+            <Button class="gap-2" @click="viewResult">
               {{ t('pipeline.viewFullReview') }}
             </Button>
           </div>
@@ -396,19 +396,19 @@ onUnmounted(() => {
             <div class="flex-1 relative">
               <textarea
                 v-model="input"
-                @keydown.enter.exact.prevent="handleSubmit"
                 :placeholder="t('pipeline.inputPlaceholder')"
                 :disabled="isProcessing"
                 rows="1"
                 class="w-full resize-none rounded-xl border border-border bg-muted/50 px-4 py-3 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                 style="min-height: 48px; max-height: 120px;"
+                @keydown.enter.exact.prevent="handleSubmit"
               />
             </div>
             <Button
-              @click="handleSubmit"
               :disabled="!input.trim() || isProcessing"
               size="icon"
               class="rounded-xl size-12 shrink-0"
+              @click="handleSubmit"
             >
               <span v-if="isProcessing" class="animate-spin">&#8635;</span>
               <span v-else>&#9654;</span>

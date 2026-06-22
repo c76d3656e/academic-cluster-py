@@ -136,36 +136,36 @@ async function handleDelete(projectId: string, name: string) {
               </TableCell>
               <TableCell>
                 <div class="flex gap-1 flex-wrap">
-                <Button variant="ghost" size="sm" @click="router.push(`/projects/${p.id}`)">
-                  {{ t('common.view') }}
-                </Button>
-                <Button
-                  v-if="isRunning(p.status)"
-                  variant="ghost"
-                  size="sm"
-                  :disabled="actionLoading === p.id"
-                  @click="handlePause(p.id)"
-                >
-                  {{ actionLoading === p.id ? t('common.processing') : t('project.pause') }}
-                </Button>
-                <Button
-                  v-if="showResume(p.status)"
-                  variant="ghost"
-                  size="sm"
-                  :disabled="actionLoading === p.id"
-                  @click="handleResume(p.id)"
-                >
-                  {{ actionLoading === p.id ? t('common.processing') : t('project.resume') }}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="text-destructive hover:text-destructive"
-                  :disabled="actionLoading === p.id"
-                  @click="handleDelete(p.id, p.name)"
-                >
-                  {{ actionLoading === p.id ? t('common.processing') : t('common.delete') }}
-                </Button>
+                  <Button variant="ghost" size="sm" @click="router.push(`/projects/${p.id}`)">
+                    {{ t('common.view') }}
+                  </Button>
+                  <Button
+                    v-if="isRunning(p.status)"
+                    variant="ghost"
+                    size="sm"
+                    :disabled="actionLoading === p.id"
+                    @click="handlePause(p.id)"
+                  >
+                    {{ actionLoading === p.id ? t('common.processing') : t('project.pause') }}
+                  </Button>
+                  <Button
+                    v-if="showResume(p.status)"
+                    variant="ghost"
+                    size="sm"
+                    :disabled="actionLoading === p.id"
+                    @click="handleResume(p.id)"
+                  >
+                    {{ actionLoading === p.id ? t('common.processing') : t('project.resume') }}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-destructive hover:text-destructive"
+                    :disabled="actionLoading === p.id"
+                    @click="handleDelete(p.id, p.name)"
+                  >
+                    {{ actionLoading === p.id ? t('common.processing') : t('common.delete') }}
+                  </Button>
                 </div>
               </TableCell>
             </TableRow>

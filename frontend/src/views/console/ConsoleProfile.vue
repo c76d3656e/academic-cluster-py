@@ -80,7 +80,7 @@ async function changePassword() {
           <Label for="fullName" class="text-caption text-muted-foreground">{{ t('auth.nickname') }}</Label>
           <Input id="fullName" v-model="fullName" class="mt-1" :placeholder="t('auth.nicknamePlaceholder')" />
         </div>
-        <Button @click="saveProfile" :disabled="isSaving" size="sm">
+        <Button :disabled="isSaving" size="sm" @click="saveProfile">
           {{ isSaving ? t('common.saving') : t('common.save') }}
         </Button>
       </CardContent>
@@ -104,7 +104,7 @@ async function changePassword() {
           <Label for="confirmPwd" class="text-caption text-muted-foreground">{{ t('auth.confirmPassword') }}</Label>
           <Input id="confirmPwd" v-model="confirmPassword" type="password" class="mt-1" />
         </div>
-        <Button @click="changePassword" :disabled="isChangingPassword" size="sm">
+        <Button :disabled="isChangingPassword" size="sm" @click="changePassword">
           {{ isChangingPassword ? t('auth.changing') : t('auth.changePassword') }}
         </Button>
       </CardContent>
