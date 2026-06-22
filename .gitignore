@@ -101,7 +101,6 @@ tests/screenshots/
 .claude-code/
 
 # Large data files
-jcrdata/
 data/token.txt
 data/*.json
 
