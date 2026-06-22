@@ -59,7 +59,7 @@ logger = structlog.get_logger()
 
 
 def _split_finalized_body_by_section(
-    body_markdown: str, sections: list[dict]
+    body_markdown: str, sections: list[dict[str, Any]]
 ) -> list[str]:
     """Split finalized review body back into section bodies for UI storage."""
     if not body_markdown or not sections:
@@ -94,11 +94,11 @@ def _split_finalized_body_by_section(
     return ["\n".join(chunk).strip() for chunk in chunks]
 
 
-def _paper_id_to_global_number(papers: list[dict]) -> dict[str, int]:
+def _paper_id_to_global_number(papers: list[dict[str, Any]]) -> dict[str, int]:
     return {str(p.get("id")): idx + 1 for idx, p in enumerate(papers) if p.get("id")}
 
 
-def _paper_year(paper: dict) -> str:
+def _paper_year(paper: dict[str, Any]) -> str:
     year = paper.get("year")
     if year:
         return str(year)
@@ -108,7 +108,9 @@ def _paper_year(paper: dict) -> str:
     return ""
 
 
-def _section_citation_payload(plan, paper_map: dict[str, dict]) -> dict:
+def _section_citation_payload(
+    plan: Any, paper_map: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     details_by_id = {
         detail.get("paper_id"): detail
         for detail in getattr(plan, "candidate_details", [])
@@ -141,11 +143,11 @@ def _section_citation_payload(plan, paper_map: dict[str, dict]) -> dict:
 
 
 def _build_cluster_context(
-    plan,
-    section: dict,
-    evidence_plan: dict,
-    clusters: list[dict],
-    kg_entities: list[dict],
+    plan: Any,
+    section: dict[str, Any],
+    evidence_plan: dict[str, Any],
+    clusters: list[dict[str, Any]],
+    kg_entities: list[dict[str, Any]],
 ) -> str:
     # key_clusters 用数字索引代替 UUID
     cluster_id_to_idx = {str(c.get("id")): i + 1 for i, c in enumerate(clusters)}
@@ -189,7 +191,9 @@ def _build_cluster_context(
     return "\n".join(parts) or "暂无聚类数据"
 
 
-def _build_sample_context(plan, paper_map: dict, ec_by_paper: dict) -> str:
+def _build_sample_context(
+    plan: Any, paper_map: dict[str, Any], ec_by_paper: dict[str, Any]
+) -> str:
     import json as _json
 
     samples = []
@@ -223,14 +227,20 @@ def _build_sample_context(plan, paper_map: dict, ec_by_paper: dict) -> str:
 
 
 async def _revise_section(
-    content: str, evaluation: dict, section_outline: dict, references: str
+    content: str,
+    evaluation: dict[str, Any],
+    section_outline: dict[str, Any],
+    references: str,
 ) -> str:
+    import json as _json
+
     from ...agents.section_evaluator import revise_section as _do_revise
 
-    return await _do_revise(content, evaluation, section_outline, references)
+    revision_instructions = _json.dumps(evaluation, ensure_ascii=False, default=str)
+    return await _do_revise(content, revision_instructions, section_outline, references)
 
 
-async def write_review_node(state: PipelineState) -> dict:
+async def write_review_node(state: PipelineState) -> dict[str, Any]:
     """
     写作综述
 
@@ -334,7 +344,7 @@ async def write_review_node(state: PipelineState) -> dict:
             }
 
         # 构建 evidence_cards 按 paper_id 索引
-        ec_by_paper = {}
+        ec_by_paper: dict[str, list[dict[str, Any]]] = {}
         for card in evidence_cards:
             pid = card.get("paper_id", "")
             if pid:
@@ -430,7 +440,7 @@ async def write_review_node(state: PipelineState) -> dict:
                 pending_plans.append((plan_idx, plan, section))
 
         # 预构建所有章节的上下文数据（非 LLM，纯数据组装）
-        section_contexts: list[dict] = []
+        section_contexts: list[dict[str, Any]] = []
         for plan_idx, plan, section in pending_plans:
             si = plan.section_index
             next_section_data = sections[si + 1] if si + 1 < len(sections) else None
@@ -482,9 +492,9 @@ async def write_review_node(state: PipelineState) -> dict:
         # Phase 1: 并行生成所有章节大纲
         outline_concurrency = max(1, min(4, len(section_contexts)))
         outline_semaphore = asyncio.Semaphore(outline_concurrency)
-        section_outlines: list[dict | None] = [None] * len(section_contexts)
+        section_outlines: list[dict[str, Any] | None] = [None] * len(section_contexts)
 
-        async def _gen_outline(ctx: dict, idx: int) -> dict:
+        async def _gen_outline(ctx: dict[str, Any], idx: int) -> dict[str, Any]:
             prev_outline = section_outlines[idx - 1] if idx > 0 else None
             async with outline_semaphore:
                 return await plan_section_outline(
@@ -502,22 +512,22 @@ async def write_review_node(state: PipelineState) -> dict:
             *[_gen_outline(ctx, i) for i, ctx in enumerate(section_contexts)],
             return_exceptions=True,
         )
-        for i, (ctx, result) in enumerate(
+        for i, (ctx, outline_item) in enumerate(
             zip(section_contexts, outline_results, strict=False)
         ):
-            if isinstance(result, Exception):
+            if isinstance(outline_item, BaseException):
                 logger.error(
                     "Section outline failed",
                     title=ctx["section"].get("title"),
-                    error=str(result)[:200],
+                    error=str(outline_item)[:200],
                 )
-                raise result
-            section_outlines[i] = result
+                raise outline_item
+            section_outlines[i] = outline_item
             logger.info(
                 "Section outline planned",
                 title=ctx["section"].get("title"),
-                paragraphs=len(result.get("paragraphs", [])),
-                core_question=result.get("core_question", "")[:80],
+                paragraphs=len(outline_item.get("paragraphs", [])),
+                core_question=outline_item.get("core_question", "")[:80],
             )
 
         # 基于全部大纲构建 prev_summary
@@ -537,7 +547,7 @@ async def write_review_node(state: PipelineState) -> dict:
         write_concurrency = max(1, min(4, len(section_contexts)))
         write_semaphore = asyncio.Semaphore(write_concurrency)
 
-        async def _write_and_save(ctx: dict, idx: int) -> dict:
+        async def _write_and_save(ctx: dict[str, Any], idx: int) -> dict[str, Any]:
             outline = section_outlines[idx]
             async with write_semaphore:
                 content = await write_section_units(
@@ -600,7 +610,7 @@ async def write_review_node(state: PipelineState) -> dict:
                         "title", f"章节 {ctx['plan_idx'] + 1}"
                     ),
                     section_draft=content,
-                    section_outline=outline,
+                    section_outline=outline or {},
                     target_words=ctx["section"].get("target_words", 2000),
                     prev_summary=full_prev_summary,
                     next_outline=next_outline_data,
@@ -608,7 +618,7 @@ async def write_review_node(state: PipelineState) -> dict:
                 )
                 if ref_attempt < max_refinement and evaluation.get("score", 0) < 70:
                     content = await _revise_section(
-                        content, evaluation, outline, ctx["section_refs"]
+                        content, evaluation, outline or {}, ctx["section_refs"]
                     )
                 else:
                     break
@@ -640,7 +650,7 @@ async def write_review_node(state: PipelineState) -> dict:
         # 按原始顺序组装结果
         written_sections: list[str] = []
         written_section_ids: list[str] = []
-        section_evaluations: list[dict] = []
+        section_evaluations: list[dict[str, Any]] = []
 
         write_idx = 0
         for _plan_idx, plan in enumerate(citation_plans):
@@ -651,18 +661,18 @@ async def write_review_node(state: PipelineState) -> dict:
                 written_sections.append(ex["content"])
                 written_section_ids.append(ex["id"])
             else:
-                result = write_results[write_idx]
+                write_item = write_results[write_idx]
                 write_idx += 1
-                if isinstance(result, Exception):
+                if isinstance(write_item, BaseException):
                     logger.error(
                         "Section write failed",
                         title=section.get("title"),
-                        error=str(result)[:200],
+                        error=str(write_item)[:200],
                     )
-                    raise result
-                written_sections.append(result["content"])
-                written_section_ids.append(result["section_id"])
-                section_evaluations.append(result["evaluation"])
+                    raise write_item
+                written_sections.append(write_item["content"])
+                written_section_ids.append(write_item["section_id"])
+                section_evaluations.append(write_item["evaluation"])
 
         logger.info(
             "All sections written",
@@ -683,13 +693,13 @@ async def write_review_node(state: PipelineState) -> dict:
 
         try:
             for i, content in enumerate(written_sections):
-                result = validate_citations(content, valid_paper_count)
-                if result["invalid_numbers"]:
-                    all_invalid.update(result["invalid_numbers"])
+                citation_result = validate_citations(content, valid_paper_count)
+                if citation_result["invalid_numbers"]:
+                    all_invalid.update(citation_result["invalid_numbers"])
                     logger.warning(
                         "Invalid citations found",
                         section=i,
-                        invalid=result["invalid_numbers"],
+                        invalid=citation_result["invalid_numbers"],
                     )
         except Exception as e:
             logger.error(
@@ -787,6 +797,7 @@ async def write_review_node(state: PipelineState) -> dict:
             logger.error("Finalization failed", error=str(e), step="finalization")
             raise
 
+        route = "unknown"
         try:
             from ...services.citation_utils import (
                 _CITATION_RE,
@@ -878,7 +889,7 @@ async def write_review_node(state: PipelineState) -> dict:
             references=len(ref_mappings),
         )
 
-        result = {
+        final_result: dict[str, Any] = {
             "written_section_ids": written_section_ids,
             "final_review_id": final_review_id,
             "final_review": final_review,
@@ -889,7 +900,7 @@ async def write_review_node(state: PipelineState) -> dict:
             "weighted_coverage_bp": coverage_result.weighted_coverage_bp
             if coverage_result is not None
             else 0,
-            "coverage_route": route if "route" in locals() else "unknown",
+            "coverage_route": route,
             "invalid_citation_count": final_validation["invalid_count"]
             if "final_validation" in locals()
             else 0,
@@ -907,7 +918,7 @@ async def write_review_node(state: PipelineState) -> dict:
                     "references": len(ref_mappings),
                 },
             )
-        return result
+        return final_result
 
     except Exception as e:
         import traceback as tb_mod
@@ -925,7 +936,7 @@ async def write_review_node(state: PipelineState) -> dict:
         raise
 
 
-def _render_citation_plan_summary(plan, paper_map: dict) -> str:
+def _render_citation_plan_summary(plan: Any, paper_map: dict[str, Any]) -> str:
     """
     渲染 citation plan 摘要（对齐 Rust 版 render_section_citation_plan_summary）。
 
@@ -961,7 +972,7 @@ def _render_citation_plan_summary(plan, paper_map: dict) -> str:
     )
 
 
-def _generate_bibtex(papers: list[dict]) -> str:
+def _generate_bibtex(papers: list[dict[str, Any]]) -> str:
     """生成 BibTeX 引用"""
     entries = []
     for i, paper in enumerate(papers):

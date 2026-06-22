@@ -2,7 +2,9 @@
 FastAPI 主应用
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import structlog
 from fastapi import FastAPI
@@ -13,7 +15,7 @@ from ..config import get_settings
 logger = structlog.get_logger()
 
 
-async def _seed_admin(db, settings):
+async def _seed_admin(db: Any, settings: Any) -> None:
     """启动时确保存在管理员账户（幂等）"""
     from sqlalchemy import text
 
@@ -72,7 +74,7 @@ async def _seed_admin(db, settings):
                 )
 
 
-async def _seed_providers(db, settings):
+async def _seed_providers(db: Any, settings: Any) -> None:
     """启动时将 .env 中的 Provider 配置同步到 provider_registry 表（幂等）"""
     from sqlalchemy import text
 
@@ -176,7 +178,7 @@ async def _seed_providers(db, settings):
             )
 
 
-async def _ensure_community_memory_schema(db):
+async def _ensure_community_memory_schema(db: Any) -> None:
     """Create community memory persistence for existing databases."""
     from sqlalchemy import text
 
@@ -217,7 +219,7 @@ async def _ensure_community_memory_schema(db):
         )
 
 
-async def _ensure_evidence_card_schema(db):
+async def _ensure_evidence_card_schema(db: Any) -> None:
     """Add project-scoped evidence-card persistence for existing databases."""
     from sqlalchemy import text
 
@@ -267,7 +269,7 @@ async def _ensure_evidence_card_schema(db):
         )
 
 
-async def _ensure_observability_schema(db):
+async def _ensure_observability_schema(db: Any) -> None:
     """Add request-level usage/audit fields for existing databases."""
     from sqlalchemy import text
 
@@ -330,7 +332,7 @@ async def _ensure_observability_schema(db):
             await session.execute(text(index_sql))
 
 
-async def _ensure_source_registry_schema(db):
+async def _ensure_source_registry_schema(db: Any) -> None:
     """Create source_registry for existing databases."""
     from ..services.source_config import ensure_source_registry_schema
 
@@ -338,7 +340,7 @@ async def _ensure_source_registry_schema(db):
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """应用生命周期管理"""
     settings = get_settings()
 
@@ -492,7 +494,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix="/api")
 
     @app.get("/health")
-    async def health():
+    async def health() -> dict[str, str]:
         return {"status": "healthy"}
 
     return app

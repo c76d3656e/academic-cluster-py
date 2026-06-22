@@ -84,8 +84,8 @@ def _lexical_overlap(context: str, evidence: str) -> float:
 
 def audit_citation_support(
     section_text: str,
-    evidence_cards: list[dict],
-    citation_mentions: list[dict] | None = None,
+    evidence_cards: list[dict[str, Any]],
+    citation_mentions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Audit whether citations in section_text are supported by evidence cards.
@@ -131,7 +131,7 @@ def audit_citation_support(
                     }
                 )
 
-    details: list[dict] = []
+    details: list[dict[str, Any]] = []
     supported = 0
     weak = 0
     unsupported = 0
@@ -142,7 +142,7 @@ def audit_citation_support(
 
         # Get evidence card (0-indexed)
         card_idx = ref_num - 1
-        card: dict | None = None
+        card: dict[str, Any] | None = None
         if 0 <= card_idx < len(evidence_cards):
             card = evidence_cards[card_idx]
 

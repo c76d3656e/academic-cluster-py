@@ -11,6 +11,7 @@
 import contextlib
 import re
 import traceback
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -35,7 +36,7 @@ _MAX_LLM_REVISION_ATTEMPTS = 1
 def _find_sentences_with_invalid_citations(
     content: str,
     invalid_numbers: set[int],
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     找出包含无效引用的句子（对齐 Rust 版 citation_verifier）。
 
@@ -76,7 +77,7 @@ def _find_sentences_with_invalid_citations(
 
 async def _llm_rewrite_invalid_sentences(
     section_content: str,
-    invalid_sentences: list[dict],
+    invalid_sentences: list[dict[str, Any]],
     valid_references: str,
     topic: str,
 ) -> str:
@@ -129,12 +130,14 @@ async def _llm_rewrite_invalid_sentences(
         ]
         response = await ainvoke_with_callbacks(llm, messages)
 
-        content = response.content
-        if isinstance(content, list):
+        raw_content: Any = response.content
+        if isinstance(raw_content, list):
             content = "".join(
                 block.get("text", "") if isinstance(block, dict) else str(block)
-                for block in content
+                for block in raw_content
             )
+        else:
+            content = str(raw_content)
 
         # 验证修订后的内容质量：至少保留原始内容的 70%
         if len(content.strip()) < len(section_content.strip()) * 0.7:
@@ -154,7 +157,7 @@ async def _llm_rewrite_invalid_sentences(
         return section_content
 
 
-async def section_revision_node(state: PipelineState) -> dict:
+async def section_revision_node(state: PipelineState) -> dict[str, Any]:
     """
      章节修订（对齐 Rust 版 section_revision.rs）
 

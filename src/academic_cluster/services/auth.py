@@ -8,6 +8,7 @@ import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import jwt
 import structlog
@@ -22,7 +23,7 @@ logger = structlog.get_logger()
 class PasswordService:
     """密码哈希服务 (Argon2id)"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._hasher = PasswordHasher(
             time_cost=3,
             memory_cost=65536,
@@ -48,7 +49,7 @@ class PasswordService:
 class TokenService:
     """JWT Token 服务"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         settings = get_settings()
         self.secret_key = settings.jwt_secret_key
         self.algorithm = settings.jwt_algorithm
@@ -76,7 +77,7 @@ class TokenService:
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         return raw_token, token_hash
 
-    def decode_access_token(self, token: str) -> dict:
+    def decode_access_token(self, token: str) -> dict[str, Any]:
         """解码 Access Token"""
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])

@@ -13,9 +13,10 @@
 import json
 import os
 import re
+from typing import Any
 
 import structlog
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -55,8 +56,8 @@ def _compact_section_inputs(
     references: str,
     community_context: str | None,
     evidence_limitations: str | None,
-    evidence_cards: list[dict] | None,
-) -> tuple[str, str, str, str | None, str | None, list[dict] | None]:
+    evidence_cards: list[dict[str, Any]] | None,
+) -> tuple[str, str, str, str | None, str | None, list[dict[str, Any]] | None]:
     return (
         _clip_text_block(cluster_data, 9000),
         _clip_text_block(sample_papers, 12000),
@@ -84,9 +85,9 @@ def _should_refine_section_units() -> bool:
 
 
 def _fallback_section_text(
-    section_plan: dict,
+    section_plan: dict[str, Any],
     references: str,
-    evidence_cards: list[dict] | None = None,
+    evidence_cards: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build a grounded fallback paragraph when the writing LLM cannot finish."""
     title = str(section_plan.get("title") or "本节").strip()
@@ -176,11 +177,11 @@ def detect_paper_stacking(text: str) -> list[str]:
 
 
 async def _ainvoke_with_retry(
-    agent,
-    messages,
-    max_retries=2,
+    agent: ChatOpenAI,
+    messages: list[BaseMessage],
+    max_retries: int = 2,
     timeout_s: float = DEFAULT_WRITING_TIMEOUT_S,
-):
+) -> Any:
     """带重试的 LLM 调用"""
     from ..services.llm_client import ainvoke_with_callbacks
 
@@ -189,7 +190,7 @@ async def _ainvoke_with_retry(
         wait=wait_exponential(multiplier=2, min=3, max=30),
         reraise=True,
     )
-    async def _call():
+    async def _call() -> Any:
         return await ainvoke_with_callbacks(agent, messages, timeout=timeout_s)
 
     return await _call()
@@ -229,12 +230,12 @@ def create_writing_agent(
 
 async def generate_outline(
     topic: str,
-    clusters: list[dict],
-    kg_summary: dict,
-    evidence_cards: list[dict] | None = None,
-    community_summaries: list[dict] | None = None,
+    clusters: list[dict[str, Any]],
+    kg_summary: dict[str, Any],
+    evidence_cards: list[dict[str, Any]] | None = None,
+    community_summaries: list[dict[str, Any]] | None = None,
     cluster_layers: dict[str, str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     生成综述大纲
 
@@ -318,7 +319,7 @@ async def generate_outline(
     kg_parts = []
     entities = kg_summary.get("entities", [])
     if entities:
-        entity_counts = {}
+        entity_counts: dict[str, int] = {}
         for e in entities[:50]:
             name = e.get("name", "")
             if name:
@@ -509,10 +510,10 @@ async def generate_outline(
 
         outline = _default_outline(topic)
 
-    return outline
+    return outline  # type: ignore[no-any-return]
 
 
-def _try_repair_truncated_json(content: str) -> dict:
+def _try_repair_truncated_json(content: str) -> dict[str, Any]:
     """
     尝试修复被 LLM 截断的 JSON。
 
@@ -582,16 +583,16 @@ def _try_repair_truncated_json(content: str) -> dict:
 async def write_section(
     topic: str,
     review_title: str,
-    section_plan: dict,
+    section_plan: dict[str, Any],
     cluster_data: str,
     sample_papers: str,
     references: str,
-    evidence_cards: list[dict] | None = None,
+    evidence_cards: list[dict[str, Any]] | None = None,
     community_context: str | None = None,
     evidence_limitations: str | None = None,
-    section_outline: dict | None = None,
+    section_outline: dict[str, Any] | None = None,
     prev_summary: str = "",
-    next_outline: dict | None = None,
+    next_outline: dict[str, Any] | None = None,
 ) -> str:
     """
     撰写一个章节（对齐 Rust 版 write_section_user_with_communities）
@@ -751,16 +752,16 @@ async def write_section(
         return _fallback_section_text(section_plan, references, evidence_cards)
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
-    content = response.content
+    content: str | list[Any] = response.content
     if isinstance(content, list):
         content = "".join(
             block.get("text", "") if isinstance(block, dict) else str(block)
             for block in content
         )
-    return content
+    return str(content)
 
 
-def _coerce_llm_text(content) -> str:
+def _coerce_llm_text(content: str | list[Any] | None) -> str:
     if isinstance(content, list):
         return "".join(
             block.get("text", "") if isinstance(block, dict) else str(block)
@@ -787,15 +788,17 @@ def _as_single_unit(text: str) -> str:
     return " ".join(lines).strip()
 
 
-def _unit_outline(section_outline: dict, paragraph: dict) -> dict:
+def _unit_outline(
+    section_outline: dict[str, Any], paragraph: dict[str, Any]
+) -> dict[str, Any]:
     outline = dict(section_outline or {})
     outline["paragraphs"] = [paragraph]
     return outline
 
 
 def _next_unit_hint(
-    paragraphs: list[dict], index: int, next_outline: dict | None
-) -> dict | None:
+    paragraphs: list[dict[str, Any]], index: int, next_outline: dict[str, Any] | None
+) -> dict[str, Any] | None:
     if index + 1 < len(paragraphs):
         para = paragraphs[index + 1]
         return {
@@ -815,7 +818,7 @@ def _next_unit_hint(
 
 async def refine_section_units_local_coherence(
     units: list[str],
-    section_outline: dict,
+    section_outline: dict[str, Any],
     references: str,
 ) -> list[str]:
     """
@@ -887,16 +890,16 @@ NEXT paragraph:
 async def write_section_units(
     topic: str,
     review_title: str,
-    section_plan: dict,
+    section_plan: dict[str, Any],
     cluster_data: str,
     sample_papers: str,
     references: str,
-    evidence_cards: list[dict] | None = None,
+    evidence_cards: list[dict[str, Any]] | None = None,
     community_context: str | None = None,
     evidence_limitations: str | None = None,
-    section_outline: dict | None = None,
+    section_outline: dict[str, Any] | None = None,
     prev_summary: str = "",
-    next_outline: dict | None = None,
+    next_outline: dict[str, Any] | None = None,
 ) -> str:
     """
     Write a section as paragraph/subsection units instead of one monolithic call.
@@ -1052,13 +1055,13 @@ async def revise_section(
         return section_content
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
-    content = response.content
+    content: str | list[Any] = response.content
     if isinstance(content, list):
         content = "".join(
             block.get("text", "") if isinstance(block, dict) else str(block)
             for block in content
         )
-    return content
+    return str(content)
 
 
 # =============================================================================
@@ -1067,11 +1070,11 @@ async def revise_section(
 
 
 def render_section_community_context(
-    section_plan: dict,
-    clusters: list[dict],
-    papers: list[dict],
-    evidence_cards: list[dict] | None = None,
-    kg_entities: list[dict] | None = None,
+    section_plan: dict[str, Any],
+    clusters: list[dict[str, Any]],
+    papers: list[dict[str, Any]],
+    evidence_cards: list[dict[str, Any]] | None = None,
+    kg_entities: list[dict[str, Any]] | None = None,
 ) -> str:
     """
     渲染章节的社区上下文摘要（对齐 Rust 版 render_section_community_context）。
@@ -1145,8 +1148,8 @@ def render_section_community_context(
 
 
 def render_section_evidence_limitations(
-    section_plan: dict,
-    evidence_cards: list[dict] | None = None,
+    section_plan: dict[str, Any],
+    evidence_cards: list[dict[str, Any]] | None = None,
 ) -> str:
     """
     渲染证据局限性说明（对齐 Rust 版 render_section_evidence_limitations）。
@@ -1182,7 +1185,7 @@ def render_section_evidence_limitations(
 async def assemble_review(
     topic: str,
     review_title: str,
-    sections: list[dict],
+    sections: list[dict[str, Any]],
     references: str,
     citation_style: str = "IEEE",
 ) -> str:

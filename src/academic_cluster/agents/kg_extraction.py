@@ -11,6 +11,7 @@ import json
 import re
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -27,19 +28,19 @@ logger = structlog.get_logger()
 class TokenUsageTracker:
     """累计追踪 LLM token 用量"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.total_tokens = 0
         self.call_count = 0
 
-    def add(self, usage: dict):
+    def add(self, usage: dict[str, Any]) -> None:
         self.prompt_tokens += usage.get("prompt_tokens", 0)
         self.completion_tokens += usage.get("completion_tokens", 0)
         self.total_tokens += usage.get("total_tokens", 0)
         self.call_count += 1
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, int]:
         return {
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
@@ -56,7 +57,7 @@ def get_token_tracker() -> TokenUsageTracker:
     return _token_tracker
 
 
-def reset_token_tracker():
+def reset_token_tracker() -> None:
     global _token_tracker
     _token_tracker = TokenUsageTracker()
 
@@ -412,7 +413,7 @@ def fix_json(json_str: str) -> str:
     return json_str
 
 
-def parse_kg_response(response: str) -> dict:
+def parse_kg_response(response: str) -> dict[str, Any]:
     """
     解析 LLM 的知识图谱提取响应
 
@@ -426,19 +427,19 @@ def parse_kg_response(response: str) -> dict:
     extracted = _extract_json_object(response)
     if extracted:
         try:
-            return json.loads(extracted, strict=False)
+            return json.loads(extracted, strict=False)  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             pass
 
     try:
-        return json.loads(response, strict=False)
+        return json.loads(response, strict=False)  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         pass
 
     # 第二轮：用 fix_json 修复后重试
     try:
         fixed = fix_json(response)
-        return json.loads(fixed, strict=False)
+        return json.loads(fixed, strict=False)  # type: ignore[no-any-return]
     except json.JSONDecodeError as e:
         logger.error(
             "Failed to parse KG response", error=str(e), response=response[:500]
@@ -471,10 +472,10 @@ def create_kg_extraction_agent(
 
 
 async def extract_kg_from_papers_batch(
-    papers: list[dict],
+    papers: list[dict[str, Any]],
     max_entities_per_paper: int = 12,
     max_relations_per_paper: int = 12,
-) -> dict:
+) -> dict[str, Any]:
     """
     从一批论文提取知识图谱（多篇打包成一个 prompt，对齐 Rust 版）
 
@@ -557,12 +558,12 @@ async def extract_kg_from_papers_batch(
 
 
 async def extract_kg_batch(
-    papers: list[dict],
+    papers: list[dict[str, Any]],
     batch_size: int = 12,
-    progress_callback: Callable | None = None,
+    progress_callback: Callable[..., Any] | None = None,
     max_entities_per_paper: int = 12,
     max_relations_per_paper: int = 12,
-) -> dict:
+) -> dict[str, Any]:
     """
     批量提取知识图谱
 
@@ -659,9 +660,9 @@ async def extract_kg_batch(
 
 
 def normalize_kg(
-    raw_entities: list[dict],
-    raw_relations: list[dict],
-) -> dict:
+    raw_entities: list[dict[str, Any]],
+    raw_relations: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     规范化知识图谱（对齐 Rust 版 normalize_kg）
 
@@ -670,7 +671,7 @@ def normalize_kg(
     - 按 confidence 降序排列
     """
     # === 实体规范化 ===
-    entity_map: dict[str, dict] = {}
+    entity_map: dict[str, dict[str, Any]] = {}
 
     for raw in raw_entities:
         name = (raw.get("name") or "").strip()
@@ -782,7 +783,9 @@ def normalize_kg(
         )
 
     # 按 confidence 降序排列
-    relations.sort(key=lambda r: (-r["confidence"], r["source"], r["target"]))
+    relations.sort(
+        key=lambda r: (-float(str(r["confidence"])), str(r["source"]), str(r["target"]))
+    )
 
     return {
         "entities": entities,

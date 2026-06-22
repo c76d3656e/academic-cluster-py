@@ -8,6 +8,7 @@
 import contextlib
 import traceback
 from datetime import datetime
+from typing import Any
 
 import structlog
 
@@ -21,7 +22,9 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 
-def _community_memories_to_summaries(memories: list[dict]) -> list[dict]:
+def _community_memories_to_summaries(
+    memories: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     summaries = []
     for memory in memories:
         summaries.append(
@@ -59,11 +62,11 @@ def _community_memories_to_summaries(memories: list[dict]) -> list[dict]:
 
 
 def _normalize_outline_word_budget(
-    outline_data: dict,
+    outline_data: dict[str, Any],
     total_target_words: int,
     *,
     min_section_words: int = 300,
-) -> dict:
+) -> dict[str, Any]:
     """Force section target_words to sum to the configured review budget."""
     sections = outline_data.get("sections") or []
     if not isinstance(sections, list) or not sections:
@@ -121,10 +124,10 @@ def _normalize_outline_word_budget(
 
 
 def _normalize_outline_sections(
-    outline_data: dict,
-    community_memories: list[dict],
+    outline_data: dict[str, Any],
+    community_memories: list[dict[str, Any]],
     total_target_words: int | None = None,
-) -> dict:
+) -> dict[str, Any]:
     sections = outline_data.get("sections") or []
     if not isinstance(sections, list):
         sections = []
@@ -261,10 +264,10 @@ _ENTITY_TYPE_LAYER_MAP: dict[str, str] = {
 
 
 def _classify_cluster_layers(
-    clusters: list[dict],
-    kg_entities: list[dict],
-    core_papers: list[dict],
-    evidence_cards: list[dict] | None = None,
+    clusters: list[dict[str, Any]],
+    kg_entities: list[dict[str, Any]],
+    core_papers: list[dict[str, Any]],
+    evidence_cards: list[dict[str, Any]] | None = None,
 ) -> dict[str, str]:
     """
     对聚类进行 Foundation / Development / Frontier 层次分类。
@@ -299,7 +302,7 @@ def _classify_cluster_layers(
             entity_types_by_paper.setdefault(pid, []).append(etype)
 
     # cluster_id -> evidence cards
-    cards_by_cluster: dict[str, list[dict]] = {}
+    cards_by_cluster: dict[str, list[dict[str, Any]]] = {}
     if evidence_cards:
         for card in evidence_cards:
             cid = card.get("cluster_id", "")
@@ -404,7 +407,7 @@ def _classify_cluster_layers(
     return result
 
 
-async def outline_generation_node(state: PipelineState) -> dict:
+async def outline_generation_node(state: PipelineState) -> dict[str, Any]:
     """
     生成综述大纲
 
@@ -492,7 +495,7 @@ async def outline_generation_node(state: PipelineState) -> dict:
         # 为每个聚类附加论文信息和实体（对齐 Rust 版 render_cluster_stats）
         paper_map = {p.get("id"): p for p in core_papers}
         # 构建 paper_id -> entity names 映射
-        paper_entities = {}
+        paper_entities: dict[str, list[str]] = {}
         for e in kg_entities:
             for pid in e.get("paper_ids") or []:
                 paper_entities.setdefault(pid, []).append(e.get("name", ""))
@@ -626,8 +629,8 @@ async def outline_generation_node(state: PipelineState) -> dict:
 
 
 def _build_community_summaries(
-    clusters: list[dict], evidence_cards: list[dict]
-) -> list[dict]:
+    clusters: list[dict[str, Any]], evidence_cards: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     """
     从 evidence cards 聚合每个聚类的摘要信息。
 
@@ -636,7 +639,7 @@ def _build_community_summaries(
     - representative_methods: evidence cards 的 method（去重前 3 个）
     """
     # 按 cluster_id 分组 evidence cards
-    cards_by_cluster: dict[str, list[dict]] = {}
+    cards_by_cluster: dict[str, list[dict[str, Any]]] = {}
     for card in evidence_cards:
         cid = card.get("cluster_id", "")
         if cid:
@@ -681,7 +684,7 @@ def _build_community_summaries(
     return summaries
 
 
-def _default_outline(topic: str, total_target_words: int = 3700) -> dict:
+def _default_outline(topic: str, total_target_words: int = 3700) -> dict[str, Any]:
     """LLM 返回无效时的 fallback 大纲（对齐 Rust 版 default_outline_sections）"""
     return {
         "title": f"{topic} 综述",

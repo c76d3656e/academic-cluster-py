@@ -3,6 +3,7 @@
 """
 
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -16,7 +17,7 @@ logger = structlog.get_logger()
 OUTPUT_DIR = Path(__file__).resolve().parent / ".." / ".." / ".." / ".." / "output"
 
 
-async def finalize_node(state: PipelineState) -> dict:
+async def finalize_node(state: PipelineState) -> dict[str, Any]:
     """
     终结 Pipeline
 

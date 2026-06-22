@@ -31,18 +31,20 @@ class LiteLLMPool:
     - 健康检查 + cooldown
     """
 
-    def __init__(self, service_name: str, model_list: list[dict], **router_kwargs):
+    def __init__(
+        self, service_name: str, model_list: list[dict[str, Any]], **router_kwargs: Any
+    ) -> None:
         self.service_name = service_name
         self._model_list = model_list
         self._router_kwargs = router_kwargs
-        self._router = None
+        self._router: Any = None
 
-    def _ensure_router(self):
+    def _ensure_router(self) -> None:
         """延迟初始化 Router（避免导入时就需要 litellm）"""
         if self._router is not None:
             return
 
-        from litellm import Router
+        from litellm import Router  # type: ignore[attr-defined]
 
         self._router = Router(
             model_list=self._model_list,
@@ -60,24 +62,25 @@ class LiteLLMPool:
         )
 
     @property
-    def router(self):
+    def router(self) -> Any:
         self._ensure_router()
         return self._router
 
-    def get_first_deployment(self) -> dict:
+    def get_first_deployment(self) -> dict[str, Any]:
         """获取第一个部署的配置（用于创建 ChatOpenAI 等 LangChain 客户端）"""
         if not self._model_list:
             raise RuntimeError(f"No deployments in {self.service_name} pool")
-        return self._model_list[0]["litellm_params"]
+        result: dict[str, Any] = self._model_list[0]["litellm_params"]
+        return result
 
     def get_model_name(self) -> str:
         """获取模型别名"""
         if not self._model_list:
             raise RuntimeError(f"No deployments in {self.service_name} pool")
-        return self._model_list[0]["model_name"]
+        return str(self._model_list[0]["model_name"])
 
     @property
-    def deployments(self) -> list[dict]:
+    def deployments(self) -> list[dict[str, Any]]:
         """获取所有部署配置"""
         return self._model_list
 
@@ -93,7 +96,7 @@ class LiteLLMPool:
             total += max(1, rpm)
         return max(1, total)
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, Any]:
         """获取池统计"""
         return {
             "service": self.service_name,
@@ -189,9 +192,9 @@ class RerankPool:
                     error=str(e)[:200],
                 )
 
-        raise last_error
+        raise last_error  # type: ignore[misc]
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, Any]:
         return {
             "service": "rerank",
             "providers": [
@@ -216,7 +219,7 @@ _embedding_pool: LiteLLMPool | None = None
 _rerank_pool: RerankPool | None = None
 
 
-def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict]:
+def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict[str, Any]]:
     """解析 JSON provider 配置为 LiteLLM model_list 格式"""
     if not json_str:
         return []
@@ -290,7 +293,7 @@ def _parse_rerank_providers(json_str: str) -> list[RerankProvider]:
 
 
 async def _load_enabled_provider_configs_from_db() -> tuple[
-    dict[str, list[dict]], bool
+    dict[str, list[dict[str, Any]]], bool
 ]:
     """Load enabled provider configs from provider_registry.
 
@@ -318,7 +321,11 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
         )
         rows = result.fetchall()
 
-    configs: dict[str, list[dict]] = {"llm": [], "embedding": [], "rerank": []}
+    configs: dict[str, list[dict[str, Any]]] = {
+        "llm": [],
+        "embedding": [],
+        "rerank": [],
+    }
     for row in rows:
         kind = row[0]
         if kind not in configs:
@@ -348,7 +355,7 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
     return configs, registry_has_rows
 
 
-def _set_pools_from_configs(configs: dict[str, list[dict]]) -> int:
+def _set_pools_from_configs(configs: dict[str, list[dict[str, Any]]]) -> int:
     """Replace runtime pools from normalized provider configs."""
     global _llm_pool, _embedding_pool, _rerank_pool
 
@@ -389,7 +396,7 @@ async def reload_pools_from_db() -> int:
     return reloaded
 
 
-async def init_pools():
+async def init_pools() -> None:
     """Initialize provider pools.
 
     provider_registry is the runtime source of truth once it has rows. Environment
@@ -421,7 +428,7 @@ async def init_pools():
 
     # --- LLM Pool ---
     llm_model_list = _parse_litellm_model_list(
-        getattr(settings, "llm_providers_json", None), "llm"
+        str(getattr(settings, "llm_providers_json", None) or ""), "llm"
     )
     if not llm_model_list and settings.llm_api_key:
         # 单 provider fallback：从现有 settings 构建
@@ -447,7 +454,7 @@ async def init_pools():
 
     # --- Embedding Pool ---
     emb_model_list = _parse_litellm_model_list(
-        getattr(settings, "embedding_providers_json", None), "embedding"
+        str(getattr(settings, "embedding_providers_json", None) or ""), "embedding"
     )
     if not emb_model_list and settings.embedding_api_key:
         base = settings.embedding_api_url.rstrip("/")
@@ -471,7 +478,7 @@ async def init_pools():
 
     # --- Rerank Pool（自定义，不走 LiteLLM）---
     rerank_providers = _parse_rerank_providers(
-        getattr(settings, "rerank_providers_json", None)
+        str(getattr(settings, "rerank_providers_json", None) or "")
     )
     if not rerank_providers and settings.rerank_api_key:
         rerank_providers = [
@@ -494,7 +501,7 @@ async def init_pools():
     )
 
 
-async def close_pools():
+async def close_pools() -> None:
     """关闭所有池"""
     global _llm_pool, _embedding_pool, _rerank_pool
     _llm_pool = None

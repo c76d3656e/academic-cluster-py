@@ -63,7 +63,7 @@ class PipelineState(BaseModel):
     # === 聚类阶段 ===
     cluster_ids: list[str] = Field(default_factory=list)
     hybrid_graph_id: str | None = None
-    community_visualization: dict | None = None  # 推送给前端的可视化数据
+    community_visualization: dict[str, Any] | None = None  # 推送给前端的可视化数据
 
     # === 证据阶段 ===
     evidence_card_ids: list[str] = Field(default_factory=list)
@@ -75,7 +75,7 @@ class PipelineState(BaseModel):
 
     # === 写作阶段 ===
     outline_id: str | None = None
-    outline_data: dict | None = None  # 大纲内容（用于 write_review 节点）
+    outline_data: dict[str, Any] | None = None  # 大纲内容（用于 write_review 节点）
     section_plan_ids: list[str] = Field(default_factory=list)
     citation_plan_ids: list[str] = Field(default_factory=list)
     written_section_ids: list[str] = Field(default_factory=list)
@@ -100,7 +100,7 @@ class PipelineState(BaseModel):
     # 通过 get_current_tracker() 获取
 
     # === 配置 ===
-    config: dict = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         """Pydantic 配置"""
@@ -113,7 +113,7 @@ class SearchState(BaseModel):
 
     query: str
     source: str
-    raw_results: list[dict] = Field(default_factory=list)
+    raw_results: list[dict[str, Any]] = Field(default_factory=list)
     processed_ids: list[str] = Field(default_factory=list)
     error: str | None = None
 
@@ -130,7 +130,7 @@ class ClusteringState(BaseModel):
 
     hybrid_graph_id: str | None = None
     cluster_ids: list[str] = Field(default_factory=list)
-    visualization: dict | None = None
+    visualization: dict[str, Any] | None = None
 
 
 class WritingState(BaseModel):

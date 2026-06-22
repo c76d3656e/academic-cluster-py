@@ -6,6 +6,7 @@ Section Evaluator Agent
 
 import math
 import re
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -106,18 +107,20 @@ def _load_blind_prompt_template() -> str:
     return ""
 
 
-def _extract_text_content(response) -> str:
+def _extract_text_content(response: Any) -> str:
     """从 LLM 响应中提取纯文本内容"""
-    content = response.content
+    content: str | list[Any] = response.content
     if isinstance(content, list):
         return "".join(
             block.get("text", "") if isinstance(block, dict) else str(block)
             for block in content
         )
-    return content
+    return str(content)
 
 
-def _compute_weighted_score(dimensions: dict, weights: dict | None = None) -> int:
+def _compute_weighted_score(
+    dimensions: dict[str, Any], weights: dict[str, float] | None = None
+) -> int:
     """
     根据各维度分数和权重计算加权总分。
 
@@ -139,10 +142,10 @@ def _compute_weighted_score(dimensions: dict, weights: dict | None = None) -> in
 
 
 def _validate_evaluation(
-    result: dict,
-    dimension_weights: dict | None = None,
+    result: dict[str, Any],
+    dimension_weights: dict[str, float] | None = None,
     default_instructions: str = "请重新审视段落结构和引用质量",
-) -> dict:
+) -> dict[str, Any]:
     """
     验证并修正评估结果的结构完整性。
 
@@ -183,7 +186,7 @@ def _validate_evaluation(
     return result
 
 
-def _paragraph_plan_text(section_outline: dict) -> str:
+def _paragraph_plan_text(section_outline: dict[str, Any]) -> str:
     paragraph_plan = section_outline.get("paragraph_plan")
     if paragraph_plan in (None, ""):
         paragraph_plan = section_outline.get("paragraphs", "")
@@ -227,9 +230,9 @@ def _paragraph_plan_text(section_outline: dict) -> str:
 # ─── 写作质量自检（词表来自 prompts.writing_rules） ───────────────────────────
 
 
-def _check_ai_words(draft: str) -> list[dict]:
+def _check_ai_words(draft: str) -> list[dict[str, Any]]:
     """检测 AI 高频词，返回命中列表。"""
-    findings: list[dict] = []
+    findings: list[dict[str, Any]] = []
     draft_lower = draft.lower()
 
     for word in AI_WORDS_EN:
@@ -261,9 +264,9 @@ def _check_ai_words(draft: str) -> list[dict]:
     return findings
 
 
-def _check_throat_clearing(draft: str) -> list[dict]:
+def _check_throat_clearing(draft: str) -> list[dict[str, Any]]:
     """检测清喉式开头，返回命中列表（含大致位置）。"""
-    findings: list[dict] = []
+    findings: list[dict[str, Any]] = []
 
     # 按句号/问号/感叹号/换行分句，保留分隔符位置信息
     sentences = re.split(r"(?<=[。！？.!?\n])", draft)
@@ -308,7 +311,7 @@ def _split_sentences(draft: str) -> list[str]:
     return [s.strip() for s in parts if s.strip()]
 
 
-def _check_burstiness(draft: str) -> dict:
+def _check_burstiness(draft: str) -> dict[str, Any]:
     """
     Burstiness 检测：检查句子长度变化是否过于均匀。
 
@@ -355,7 +358,7 @@ def _check_burstiness(draft: str) -> dict:
     }
 
 
-def _check_punctuation(draft: str) -> dict:
+def _check_punctuation(draft: str) -> dict[str, Any]:
     """检测破折号和分号过度使用。"""
     char_count = len(draft)
     if char_count == 0:
@@ -397,7 +400,7 @@ def _check_punctuation(draft: str) -> dict:
     }
 
 
-def _check_citation_format(draft: str) -> dict:
+def _check_citation_format(draft: str) -> dict[str, Any]:
     """
     检测引用格式违规：author-year 格式、UUID 引用、meta-commentary、括号化引用说明。
     """
@@ -470,7 +473,7 @@ def _check_citation_format(draft: str) -> dict:
     }
 
 
-def _check_writing_quality(draft: str) -> dict:
+def _check_writing_quality(draft: str) -> dict[str, Any]:
     """
     写作质量自检入口：汇总四项检查结果。
 
@@ -553,12 +556,12 @@ def _check_writing_quality(draft: str) -> dict:
 
 async def evaluate_section_blind(
     section_title: str,
-    section_outline: dict,
+    section_outline: dict[str, Any],
     references: str,
     target_words: int,
     prev_summary: str = "",
-    next_outline: dict | None = None,
-) -> dict:
+    next_outline: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Paper-blind 评估：只看大纲规划和引用列表，不看正文。
 
@@ -686,11 +689,11 @@ async def evaluate_section_blind(
 async def evaluate_section_visible(
     section_title: str,
     section_draft: str,
-    section_outline: dict,
+    section_outline: dict[str, Any],
     target_words: int,
     prev_summary: str,
-    next_outline: dict | None,
-) -> dict:
+    next_outline: dict[str, Any] | None,
+) -> dict[str, Any]:
     """
     Paper-visible 评估：评估完整正文的写作质量。
 
@@ -860,12 +863,12 @@ async def evaluate_section_visible(
 async def evaluate_section(
     section_title: str,
     section_draft: str,
-    section_outline: dict,
+    section_outline: dict[str, Any],
     target_words: int,
     prev_summary: str,
-    next_outline: dict | None,
+    next_outline: dict[str, Any] | None,
     references: str = "",
-) -> dict:
+) -> dict[str, Any]:
     """
     综合评估（Generator-Evaluator 物理隔离）。
 
@@ -954,7 +957,7 @@ async def evaluate_section(
 async def revise_section(
     section_draft: str,
     revision_instructions: str,
-    section_outline: dict,
+    section_outline: dict[str, Any],
     references: str,
 ) -> str:
     """

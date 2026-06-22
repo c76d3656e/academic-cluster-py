@@ -7,6 +7,8 @@
 3. 短标题（<10字符）使用 source:external_id 作为兜底 key
 """
 
+from typing import Any
+
 import structlog
 
 from ...services.database import get_database
@@ -32,7 +34,7 @@ def _normalize_title_for_dedup(title: str) -> str:
     )
 
 
-def _make_dedup_key(paper: dict) -> str:
+def _make_dedup_key(paper: dict[str, Any]) -> str:
     """
     为论文生成去重 key（对齐 Rust 版 dedup_candidates 逻辑）。
 
@@ -67,7 +69,7 @@ def _make_dedup_key(paper: dict) -> str:
     return f"source:{source}:{ext_id}"
 
 
-async def deduplicate_node(state: PipelineState) -> dict:
+async def deduplicate_node(state: PipelineState) -> dict[str, Any]:
     """
     去除重复论文
 

@@ -4,6 +4,8 @@
 这是一个特殊的节点，图会在此处中断，等待用户确认大纲后继续执行。
 """
 
+from typing import Any
+
 import structlog
 
 from ..state import PipelineState
@@ -11,7 +13,7 @@ from ..state import PipelineState
 logger = structlog.get_logger()
 
 
-async def user_confirm_node(state: PipelineState) -> dict:
+async def user_confirm_node(state: PipelineState) -> dict[str, Any]:
     """
     用户确认大纲
 

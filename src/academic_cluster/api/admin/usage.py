@@ -4,6 +4,8 @@
 提供 Token/成本趋势、按 Provider 分组统计、最近 LLM 调用记录等端点。
 """
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -86,7 +88,7 @@ class RecentCallItem(BaseModel):
     latency_ms: float | None = None
     input_preview: str | None = None
     output_preview: str | None = None
-    request_metadata: dict | None = None
+    request_metadata: dict[str, Any] | None = None
     created_at: str | None = None
     # input/output 拆分 (prompt_tokens = input, completion_tokens = output)
 
@@ -99,9 +101,9 @@ class RecentCallItem(BaseModel):
 @router.get("/trend", response_model=list[UsageTrendItem])
 async def get_usage_trend(
     days: int = 30,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> list[UsageTrendItem]:
     """获取每日 Token/成本趋势"""
     days = max(1, min(days, 365))
 
@@ -152,9 +154,9 @@ async def get_usage_trend(
 @router.get("/by-provider", response_model=list[ProviderUsageItem])
 async def get_usage_by_provider(
     days: int = 30,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> list[ProviderUsageItem]:
     """获取按 Provider/模型分组的用量统计"""
     days = max(1, min(days, 365))
 
@@ -183,9 +185,9 @@ async def get_usage_by_provider(
 @router.get("/recent-calls", response_model=list[RecentCallItem])
 async def get_recent_calls(
     limit: int = 50,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> list[RecentCallItem]:
     """获取最近的 LLM 调用记录"""
     limit = max(1, min(limit, 200))
 

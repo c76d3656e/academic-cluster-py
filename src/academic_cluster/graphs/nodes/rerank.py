@@ -7,6 +7,7 @@
 
 import asyncio
 import traceback
+from typing import Any
 
 import httpx
 import structlog
@@ -27,7 +28,7 @@ _QUALITY_WEIGHT_REL2 = 0.10
 _CURRENT_YEAR = 2026  # 用于 recency 计算
 
 
-def _metadata_completeness(paper: dict) -> int:
+def _metadata_completeness(paper: dict[str, Any]) -> int:
     """
     计算论文元数据完整度（对齐 Rust 版 metadata_completeness）。
 
@@ -50,7 +51,7 @@ def _metadata_completeness(paper: dict) -> int:
     return score
 
 
-def _compute_quality_score(paper: dict) -> float:
+def _compute_quality_score(paper: dict[str, Any]) -> float:
     """
     计算论文质量分数（对齐 Rust 版 score_and_tier_papers）。
 
@@ -86,7 +87,8 @@ def _compute_quality_score(paper: dict) -> float:
         + _QUALITY_WEIGHT_REL2 * rel2
     )
 
-    return round(quality, 4)
+    result: float = round(quality, 4)
+    return result
 
 
 def _quality_tier(score: float) -> str:
@@ -101,8 +103,8 @@ def _quality_tier(score: float) -> str:
 
 
 async def rerank_papers(
-    query: str, papers: list[dict], timeout: float = 120.0
-) -> list[dict]:
+    query: str, papers: list[dict[str, Any]], timeout: float = 120.0
+) -> list[dict[str, Any]]:
     """
     使用 Rerank 模型对论文进行重排序
 
@@ -115,7 +117,9 @@ async def rerank_papers(
     pool = get_rerank_pool()
     BATCH_SIZE = 100  # 每批最多 100 篇，避免超长上下文导致 400
 
-    async def _rerank_batch(batch_papers: list[dict], batch_idx: int) -> list[dict]:
+    async def _rerank_batch(
+        batch_papers: list[dict[str, Any]], batch_idx: int
+    ) -> list[dict[str, Any]]:
         # 构建文档列表
         documents = []
         for paper in batch_papers:
@@ -123,7 +127,7 @@ async def rerank_papers(
             abstract = paper.get("abstract", "")
             documents.append(f"{title} {abstract}".strip())
 
-        async def _do_rerank(provider) -> list[dict]:
+        async def _do_rerank(provider: Any) -> list[dict[str, Any]]:
             base = provider.api_url.rstrip("/")
             url = f"{base}/v1/rerank" if not base.endswith("/v1") else f"{base}/rerank"
             headers = {
@@ -195,7 +199,7 @@ async def rerank_papers(
     return all_reranked
 
 
-async def rerank_node(state: PipelineState) -> dict:
+async def rerank_node(state: PipelineState) -> dict[str, Any]:
     """
     重排序论文
 

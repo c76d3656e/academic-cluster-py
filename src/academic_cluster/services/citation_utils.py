@@ -60,8 +60,8 @@ def strip_revision_commentary(content: str) -> str:
 
     content = _THINK_BLOCK_RE.sub("", content)
 
-    def _drop_meta_block(match: re.Match) -> str:
-        block = match.group(0)
+    def _drop_meta_block(match: re.Match[str]) -> str:
+        block = str(match.group(0))
         return "" if _looks_like_revision_commentary(block) else block
 
     content = _FULLWIDTH_META_BLOCK_RE.sub(_drop_meta_block, content)
@@ -99,7 +99,7 @@ _PRECISE_METRIC_RE = re.compile(
 )
 
 
-def _evidence_metric_text(evidence_cards: list[dict] | None) -> str:
+def _evidence_metric_text(evidence_cards: list[dict[str, Any]] | None) -> str:
     if not evidence_cards:
         return ""
     fields = (
@@ -125,7 +125,7 @@ def _evidence_metric_text(evidence_cards: list[dict] | None) -> str:
 
 def strip_unsupported_precise_metrics(
     content: str,
-    evidence_cards: list[dict] | None,
+    evidence_cards: list[dict[str, Any]] | None,
 ) -> str:
     """Drop sentences containing precise metrics absent from section evidence cards.
 
@@ -269,8 +269,8 @@ def parse_citation_numbers(text: str) -> list[int]:
 
 def renumber_citations_by_first_use(
     markdown: str,
-    paper_map: dict,
-) -> tuple[str, list[dict]]:
+    paper_map: dict[Any, dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
     """Renumber citations sequentially by first appearance.
 
     Parameters
@@ -299,7 +299,7 @@ def renumber_citations_by_first_use(
             next_num += 1
         return first_appearance[orig]
 
-    def _replace_token(match: re.Match) -> str:
+    def _replace_token(match: re.Match[str]) -> str:
         inner = match.group(1)
         # If the inner text is a year, leave it alone.
         if _YEAR_BRACKET_RE.fullmatch(match.group(0)):
@@ -317,7 +317,7 @@ def renumber_citations_by_first_use(
     renumbered = _CITATION_RE.sub(_replace_token, markdown)
 
     # Build the reference mapping list in new-number order.
-    mappings: list[dict] = []
+    mappings: list[dict[str, Any]] = []
     for orig, new in sorted(first_appearance.items(), key=lambda kv: kv[1]):
         paper_info = paper_map.get(orig, paper_map.get(str(orig), {}))
         mappings.append(
@@ -425,8 +425,8 @@ def strip_invalid_citations(
     preserved.
     """
 
-    def _clean_token(match: re.Match) -> str:
-        original = match.group(0)
+    def _clean_token(match: re.Match[str]) -> str:
+        original = str(match.group(0))
         # Preserve year brackets.
         if _YEAR_BRACKET_RE.fullmatch(original):
             return original
@@ -469,8 +469,8 @@ def replace_uuid_citations(
         Markdown with UUID citations replaced by [N] numbers.
     """
 
-    def _replace_uuid(match: re.Match) -> str:
-        uuid = match.group(1)
+    def _replace_uuid(match: re.Match[str]) -> str:
+        uuid = str(match.group(1))
         num = paper_id_to_number.get(uuid)
         if num is not None:
             return f"[{num}]"
@@ -491,8 +491,8 @@ def normalize_citation_surface(content: str) -> str:
     if not content:
         return ""
 
-    def _unwrap_numeric_citation(match: re.Match) -> str:
-        inner = re.sub(r"\]\s*\[", ",", match.group(1).strip())
+    def _unwrap_numeric_citation(match: re.Match[str]) -> str:
+        inner = re.sub(r"\]\s*\[", ",", str(match.group(1)).strip())
         return inner
 
     content = _PAREN_NUMERIC_CITATION_RE.sub(_unwrap_numeric_citation, content)
@@ -512,8 +512,8 @@ def normalize_citation_surface(content: str) -> str:
 
 
 def render_reference_list(
-    papers: list[dict],
-    mappings: list[dict] | None = None,
+    papers: list[dict[str, Any]],
+    mappings: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render a numbered reference list in IEEE format.
 
@@ -846,8 +846,8 @@ def strip_body_structure_leakage(content: str) -> str:
     if not content:
         return ""
 
-    def _heading_to_sentence(match: re.Match) -> str:
-        heading = match.group(1).strip()
+    def _heading_to_sentence(match: re.Match[str]) -> str:
+        heading = str(match.group(1)).strip()
         if not heading:
             return ""
         if heading[-1] not in ".!?。！？；;":

@@ -2,6 +2,8 @@
 pgvector KNN 节点 - 存储嵌入并计算 KNN 图
 """
 
+from typing import Any
+
 import structlog
 
 from ...services.database import get_database
@@ -11,7 +13,7 @@ from ..state import PipelineState
 logger = structlog.get_logger()
 
 
-async def pgvector_knn_node(state: PipelineState) -> dict:
+async def pgvector_knn_node(state: PipelineState) -> dict[str, Any]:
     """
     计算 KNN 图
 

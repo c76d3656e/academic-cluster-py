@@ -4,6 +4,8 @@
 使用 PostgreSQL pgvector 进行向量存储和检索。
 """
 
+from typing import Any
+
 import structlog
 from sqlalchemy import text
 
@@ -15,7 +17,7 @@ logger = structlog.get_logger()
 class VectorStoreService:
     """基于 pgvector 的向量存储服务"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.db = get_database()
         logger.info("Vector store service initialized (pgvector)")
 
@@ -24,7 +26,7 @@ class VectorStoreService:
         paper_ids: list[str],
         embeddings: list[list[float]],
         model_name: str = "bge-m3",
-    ):
+    ) -> None:
         """
         添加嵌入向量
 
@@ -58,7 +60,7 @@ class VectorStoreService:
         query_embedding: list[float],
         limit: int = 10,
         threshold: float = 0.5,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         搜索相似向量
 
@@ -92,7 +94,7 @@ class VectorStoreService:
         paper_ids: list[str],
         k: int = 10,
         threshold: float = 0.5,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         获取 KNN 图
 
@@ -144,7 +146,7 @@ class VectorStoreService:
         logger.info("KNN graph built", edges=len(edges))
         return edges
 
-    async def close(self):
+    async def close(self) -> None:
         """关闭连接"""
         logger.info("Vector store connection closed")
 
@@ -159,3 +161,11 @@ def get_vector_store() -> VectorStoreService:
     if _vector_store is None:
         _vector_store = VectorStoreService()
     return _vector_store
+
+
+async def close_vector_store() -> None:
+    """关闭向量存储连接"""
+    global _vector_store
+    if _vector_store is not None:
+        await _vector_store.close()
+        _vector_store = None

@@ -292,7 +292,7 @@ DEFAULT_CONFIG = {
 # =============================================================================
 
 
-async def init_pipeline_config_table():
+async def init_pipeline_config_table() -> None:
     """创建 pipeline_config 表（如果不存在）"""
     db = get_database()
     async with db.session() as session:
@@ -312,7 +312,7 @@ async def init_pipeline_config_table():
         await session.commit()
 
 
-async def _ensure_defaults():
+async def _ensure_defaults() -> None:
     """确保默认配置项存在"""
     db = get_database()
     async with db.session() as session:
@@ -381,8 +381,8 @@ async def _ensure_defaults():
         for key, col, cn_val in cn_migrations:
             await session.execute(
                 text(
-                    f"UPDATE pipeline_config SET {col} = :val, updated_at = NOW() WHERE key = :key"
-                ),  # nosec B608
+                    f"UPDATE pipeline_config SET {col} = :val, updated_at = NOW() WHERE key = :key"  # nosec B608
+                ),
                 {"key": key, "val": cn_val},
             )
         await session.commit()
@@ -414,7 +414,7 @@ async def get_pipeline_config_value(key: str, default: str = "") -> str:
     return row[0] if row else default
 
 
-def build_node_config(raw: dict[str, str]) -> dict:
+def build_node_config(raw: dict[str, str]) -> dict[str, object]:
     """
     将扁平的 key-value 配置转换为各节点读取的 config dict。
 
@@ -512,7 +512,7 @@ class PipelineConfigUpdate(BaseModel):
 
 
 @router.get("/features")
-async def get_features():
+async def get_features() -> dict[str, object]:
     """获取UI功能开关配置（无需认证，前端启动时读取）"""
     db = get_database()
     async with db.session() as session:
@@ -527,7 +527,7 @@ async def get_features():
 
 
 @router.get("", response_model=list[PipelineConfigItem])
-async def list_pipeline_config():
+async def list_pipeline_config() -> list[PipelineConfigItem]:
     """获取所有 pipeline 配置"""
     await _ensure_defaults()
     db = get_database()
@@ -554,7 +554,9 @@ async def list_pipeline_config():
 
 
 @router.put("/{key}")
-async def update_pipeline_config(key: str, body: PipelineConfigUpdate):
+async def update_pipeline_config(
+    key: str, body: PipelineConfigUpdate
+) -> dict[str, str]:
     """更新单个 pipeline 配置"""
     db = get_database()
     async with db.session() as session:
@@ -581,7 +583,7 @@ async def update_pipeline_config(key: str, body: PipelineConfigUpdate):
 
 
 @router.post("/reset")
-async def reset_pipeline_config():
+async def reset_pipeline_config() -> dict[str, str]:
     """重置所有 pipeline 配置为默认值"""
     db = get_database()
     async with db.session() as session:

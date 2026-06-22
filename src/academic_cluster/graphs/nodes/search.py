@@ -15,6 +15,7 @@
 import asyncio
 import traceback
 import uuid
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -51,7 +52,7 @@ def _normalize_title_for_dedup(title: str) -> str:
     )
 
 
-def _make_dedup_key(paper: dict) -> str:
+def _make_dedup_key(paper: dict[str, Any]) -> str:
     """为论文生成去重 key（对齐 Rust 版 dedup_candidates）"""
     # 1. 尝试 DOI
     doi = paper.get("doi")
@@ -77,7 +78,7 @@ def _make_dedup_key(paper: dict) -> str:
     return f"source:{source}:{ext_id}"
 
 
-def _deduplicate_papers(papers: list[dict]) -> list[dict]:
+def _deduplicate_papers(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """去重（对齐 Rust 版 dedup_candidates）"""
     seen_keys: set[str] = set()
     unique = []
@@ -89,7 +90,7 @@ def _deduplicate_papers(papers: list[dict]) -> list[dict]:
     return unique
 
 
-def _is_topic_relevant(topic: str, queries: list[str], paper: dict) -> bool:
+def _is_topic_relevant(topic: str, queries: list[str], paper: dict[str, Any]) -> bool:
     """
     主题相关性过滤 - 快速关键词匹配（第一层）。
 
@@ -125,9 +126,9 @@ def _is_topic_relevant(topic: str, queries: list[str], paper: dict) -> bool:
 
 async def _llm_topic_relevance_filter(
     topic: str,
-    papers: list[dict],
+    papers: list[dict[str, Any]],
     batch_size: int = 30,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     LLM 主题相关性过滤（对齐 Rust 版 is_topic_relevant_with_queries）。
 
@@ -205,7 +206,7 @@ async def _llm_topic_relevance_filter(
     return relevant_papers
 
 
-def _build_paper_summaries(papers: list[dict], max_count: int = 30) -> str:
+def _build_paper_summaries(papers: list[dict[str, Any]], max_count: int = 30) -> str:
     """构建论文摘要列表（用于覆盖度评估）"""
     lines = []
     for i, p in enumerate(papers[:max_count], 1):
@@ -259,9 +260,9 @@ async def _generate_search_queries(
 
         data = try_parse_json(content)
         if data:
-            queries = data.get("final_queries", [])
-            if queries:
-                return queries[:max_queries]
+            raw_queries: list[str] = data.get("final_queries", [])
+            if raw_queries:
+                return raw_queries[:max_queries]
 
         return [topic]
 
@@ -275,8 +276,8 @@ async def _generate_search_queries(
 async def _evaluate_coverage(
     topic: str,
     queries: list[str],
-    papers: list[dict],
-) -> dict:
+    papers: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     评估搜索结果的覆盖度（对齐 Rust 版 llm_source_coverage_judge）。
 
@@ -379,9 +380,9 @@ async def _refine_queries(
 
         data = try_parse_json(content)
         if data:
-            new_queries = data.get("new_queries", [])
-            if new_queries:
-                return new_queries[:max_queries]
+            raw_new_queries: list[str] = data.get("new_queries", [])
+            if raw_new_queries:
+                return raw_new_queries[:max_queries]
 
     except Exception as e:
         logger.warning("Query refinement failed", error=str(e))
@@ -389,7 +390,7 @@ async def _refine_queries(
     return []
 
 
-async def search_node(state: PipelineState) -> dict:
+async def search_node(state: PipelineState) -> dict[str, Any]:
     """
     搜索学术论文（对齐 Rust 版多轮搜索）
 
@@ -442,7 +443,7 @@ async def search_node(state: PipelineState) -> dict:
         )
 
         # Phase 2: 多轮搜索循环
-        all_papers: list[dict] = []
+        all_papers: list[dict[str, Any]] = []
         source_counts: dict[str, int] = dict.fromkeys(sources, 0)
 
         for round_num in range(1, max_rounds + 1):
@@ -651,7 +652,7 @@ async def search_node(state: PipelineState) -> dict:
                 await tracker.end_node("search", "failed", error_message=error_msg)
             raise ValueError(error_msg)
 
-        result = {
+        final_result: dict[str, Any] = {
             "paper_ids": paper_ids,
             "total_searched": len(all_papers),
             "status": "searched",
@@ -667,7 +668,7 @@ async def search_node(state: PipelineState) -> dict:
                     "sources": sources,
                 },
             )
-        return result
+        return final_result
 
     except Exception as e:
         error_msg = f"Search node failed: {type(e).__name__}: {e!s}"

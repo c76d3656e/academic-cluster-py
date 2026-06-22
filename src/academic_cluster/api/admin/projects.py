@@ -4,6 +4,8 @@
 提供项目列表、删除等管理端点。
 """
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -48,9 +50,9 @@ class AdminProjectListResponse(BaseModel):
 async def list_all_projects(
     skip: int = 0,
     limit: int = 20,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> AdminProjectListResponse:
     """列出所有项目"""
     skip = max(0, skip)
     limit = max(1, min(limit, 100))
@@ -77,9 +79,9 @@ async def list_all_projects(
 async def delete_project(
     project_id: str,
     request: Request,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """删除项目"""
     project = await db.get_project(project_id)
     if not project:

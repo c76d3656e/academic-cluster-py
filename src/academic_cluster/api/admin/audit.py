@@ -4,6 +4,8 @@
 提供用户活动日志查询端点。
 """
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -30,7 +32,7 @@ class AuditLogItem(BaseModel):
     action: str
     resource_type: str | None = None
     resource_id: str | None = None
-    details: dict | None = None
+    details: dict[str, Any] | None = None
     ip_address: str | None = None
     created_at: str | None = None
 
@@ -53,9 +55,9 @@ async def get_audit_logs(
     action: str | None = None,
     skip: int = 0,
     limit: int = 50,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> AuditLogListResponse:
     """查询用户活动日志
 
     支持按 user_id 和 action 过滤，分页查询。
@@ -67,7 +69,7 @@ async def get_audit_logs(
 
     # 构建动态查询条件
     conditions = []
-    params: dict = {"limit": limit, "skip": skip}
+    params: dict[str, Any] = {"limit": limit, "skip": skip}
 
     if user_id:
         conditions.append("ua.user_id = :user_id")
@@ -122,4 +124,4 @@ async def get_audit_logs(
             )
         )
 
-    return AuditLogListResponse(logs=logs, total=total)
+    return AuditLogListResponse(logs=logs, total=total or 0)

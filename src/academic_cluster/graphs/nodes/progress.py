@@ -14,9 +14,9 @@ async def send_progress(
     project_id: str,
     node: str,
     message: str,
-    detail: dict | None = None,
+    detail: dict[str, object] | None = None,
     progress: float = 0.0,
-):
+) -> None:
     """发送节点级进度事件（容错：失败不影响节点执行）
 
     Args:

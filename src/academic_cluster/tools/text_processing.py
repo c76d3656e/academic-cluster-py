@@ -29,10 +29,10 @@ class BM25:
     def __init__(self, k1: float = 1.5, b: float = 0.75):
         self.k1 = k1
         self.b = b
-        self.corpus = []
-        self.doc_freqs = {}
-        self.doc_lens = []
-        self.avg_doc_len = 0
+        self.corpus: list[list[str]] = []
+        self.doc_freqs: Counter[str] = Counter()
+        self.doc_lens: list[int] = []
+        self.avg_doc_len: float = 0.0
         self.n_docs = 0
 
     def _tokenize(self, text: str) -> list[str]:
@@ -41,7 +41,7 @@ class BM25:
         text = re.sub(r"[^\w\s]", " ", text)
         return text.split()
 
-    def fit(self, corpus: list[str]):
+    def fit(self, corpus: list[str]) -> None:
         """
         拟合语料库
 
@@ -107,9 +107,9 @@ class BM25:
 
 async def bm25_search(
     query: str,
-    documents: list[dict],
+    documents: list[dict[str, object]],
     top_k: int = 100,
-) -> list[dict]:
+) -> list[dict[str, object]]:
     """
     BM25 搜索接口
 
@@ -197,13 +197,13 @@ def extract_keywords_tfidf(
     tokenized_docs = [re.sub(r"[^\w\s]", " ", doc.lower()).split() for doc in documents]
 
     # 计算 TF
-    tf = Counter()
+    tf: Counter[str] = Counter()
     for doc in tokenized_docs:
         tf.update(doc)
 
     # 计算 IDF
     n_docs = len(tokenized_docs)
-    doc_freq = Counter()
+    doc_freq: Counter[str] = Counter()
     for doc in tokenized_docs:
         for term in set(doc):
             doc_freq[term] += 1

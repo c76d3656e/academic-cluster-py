@@ -69,8 +69,8 @@ def remap_section_local_citations(
     """
     invalid_local_numbers: set[int] = set()
 
-    def _replace_token(match) -> str:
-        original = match.group(0)
+    def _replace_token(match: re.Match[str]) -> str:
+        original = str(match.group(0))
         if _YEAR_BRACKET_RE.fullmatch(original):
             return original
 
@@ -100,7 +100,7 @@ def remap_section_local_citations(
 
 def assemble_review_deterministic(
     review_title: str,
-    sections: list[dict],
+    sections: list[dict[str, Any]],
     section_bodies: list[str],
     max_reference_count: int,
 ) -> tuple[str, AssemblyReport]:
@@ -140,7 +140,7 @@ def assemble_review_deterministic(
 
 def finalize_review_markdown(
     review_title: str,
-    sections: list[dict],
+    sections: list[dict[str, Any]],
     section_bodies: list[str],
     paper_metadata_map: dict[int, dict[str, Any]],
 ) -> FinalizedReview:

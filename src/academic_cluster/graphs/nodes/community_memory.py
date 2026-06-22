@@ -24,11 +24,11 @@ DEFAULT_COMMUNITY_MEMORY_TIMEOUT_S = 90
 DEFAULT_COMMUNITY_MEMORY_LLM_LIMIT = 16
 
 
-def _as_list(value: Any) -> list:
+def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _paper_year(paper: dict) -> int:
+def _paper_year(paper: dict[str, Any]) -> int:
     value = paper.get("year") or paper.get("publication_date")
     if value:
         try:
@@ -56,7 +56,7 @@ def _json_text(value: Any, max_chars: int = 800) -> str:
     return text[:max_chars]
 
 
-def _parse_json_object(content: Any) -> dict:
+def _parse_json_object(content: Any) -> dict[str, Any]:
     if isinstance(content, list):
         content = "".join(
             block.get("text", "") if isinstance(block, dict) else str(block)
@@ -79,7 +79,7 @@ def _parse_json_object(content: Any) -> dict:
     return value
 
 
-def _int_config(config: dict | None, key: str, default: int) -> int:
+def _int_config(config: dict[str, Any] | None, key: str, default: int) -> int:
     value = (config or {}).get(key, default)
     if isinstance(value, str) and value.strip().lower() in {"auto", ""}:
         return default
@@ -89,7 +89,9 @@ def _int_config(config: dict | None, key: str, default: int) -> int:
         return default
 
 
-def _normalize_memory_enrichment(raw: dict, fallback: dict) -> dict:
+def _normalize_memory_enrichment(
+    raw: dict[str, Any], fallback: dict[str, Any]
+) -> dict[str, Any]:
     """Normalize LLM community synthesis while preserving deterministic IDs."""
     enriched = dict(fallback)
     metadata = dict(enriched.get("metadata") or {})
@@ -164,10 +166,10 @@ def _normalize_memory_enrichment(raw: dict, fallback: dict) -> dict:
 
 
 def _compute_cross_community_links(
-    clusters: list[dict],
-    kg_entities: list[dict],
+    clusters: list[dict[str, Any]],
+    kg_entities: list[dict[str, Any]],
     top_k: int = 5,
-) -> dict[str, list[dict]]:
+) -> dict[str, list[dict[str, Any]]]:
     """Deterministic cross-community link discovery via shared KG entities.
 
     For each cluster, finds other clusters that share the most KG entities.
@@ -183,7 +185,7 @@ def _compute_cross_community_links(
         cluster_paper_map[cid] = pids
 
     # Build entity → cluster_ids by checking which clusters contain the entity's papers
-    entity_to_clusters = {}
+    entity_to_clusters: dict[str, set[str]] = {}
     for entity in kg_entities:
         eid = str(entity.get("id") or entity.get("name", ""))
         if not eid:
@@ -198,7 +200,7 @@ def _compute_cross_community_links(
                 entity_to_clusters.setdefault(eid, set()).add(cid)
 
     # For each cluster, count shared entities with every other cluster
-    links: dict[str, list[dict]] = {}
+    links: dict[str, list[dict[str, Any]]] = {}
     for cluster in clusters:
         cid = str(cluster.get("id"))
         neighbor_counts: dict[
@@ -235,12 +237,12 @@ def _compute_cross_community_links(
 def synthesize_community_memory(
     *,
     project_id: str,
-    cluster: dict,
-    papers: list[dict],
-    evidence_cards: list[dict],
-    kg_entities: list[dict],
-    kg_relations: list[dict],
-) -> dict:
+    cluster: dict[str, Any],
+    papers: list[dict[str, Any]],
+    evidence_cards: list[dict[str, Any]],
+    kg_entities: list[dict[str, Any]],
+    kg_relations: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Build deterministic structured memory for one community."""
     cluster_id = str(cluster.get("id"))
     paper_by_id = {str(p.get("id")): p for p in papers if p.get("id")}
@@ -284,10 +286,12 @@ def synthesize_community_memory(
     limitations = _top_unique([c.get("limitation") for c in cards], 10)
     if not limitations:
         limitations = _top_unique(
-            e.get("name")
-            for e in entities
-            if str(e.get("entity_type", "")).lower()
-            in {"limitation", "open_problem", "open problem"}
+            [
+                e.get("name")
+                for e in entities
+                if str(e.get("entity_type", "")).lower()
+                in {"limitation", "open_problem", "open problem"}
+            ]
         )
 
     future_directions = [f"Address limitation: {item}" for item in limitations[:5]] or [
@@ -373,13 +377,13 @@ def synthesize_community_memory(
 async def enrich_community_memory_with_llm(
     *,
     topic: str,
-    fallback_memory: dict,
-    cluster: dict,
-    papers: list[dict],
-    evidence_cards: list[dict],
-    kg_entities: list[dict],
-    kg_relations: list[dict],
-) -> dict:
+    fallback_memory: dict[str, Any],
+    cluster: dict[str, Any],
+    papers: list[dict[str, Any]],
+    evidence_cards: list[dict[str, Any]],
+    kg_entities: list[dict[str, Any]],
+    kg_relations: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Produce SurveyG-style community synthesis from KG and evidence cards."""
     cluster_paper_ids = {str(pid) for pid in cluster.get("paper_ids") or []}
     cluster_papers = [p for p in papers if str(p.get("id")) in cluster_paper_ids][:24]
@@ -492,7 +496,7 @@ Return strict JSON:
     return _normalize_memory_enrichment(raw, fallback_memory)
 
 
-async def community_memory_node(state: PipelineState) -> dict:
+async def community_memory_node(state: PipelineState) -> dict[str, Any]:
     """Persist one structured memory per cluster."""
     db = get_database()
     logger.info("Starting community memory synthesis", clusters=len(state.cluster_ids))
@@ -542,7 +546,7 @@ async def community_memory_node(state: PipelineState) -> dict:
     kg_entities = await db.get_kg_entities_by_ids(state.kg_entity_ids)
     kg_relations = await db.get_kg_relations_by_ids(state.kg_relation_ids)
 
-    def _cluster_size(cluster: dict) -> int:
+    def _cluster_size(cluster: dict[str, Any]) -> int:
         return len(cluster.get("paper_ids") or [])
 
     llm_limit = max(
@@ -558,7 +562,7 @@ async def community_memory_node(state: PipelineState) -> dict:
         for cluster in sorted(clusters, key=_cluster_size, reverse=True)[:llm_limit]
     }
 
-    async def _build_memory(cluster: dict) -> dict:
+    async def _build_memory(cluster: dict[str, Any]) -> dict[str, Any]:
         fallback = synthesize_community_memory(
             project_id=state.project_id,
             cluster=cluster,
@@ -639,7 +643,7 @@ async def community_memory_node(state: PipelineState) -> dict:
     total_to_process = len(remaining_clusters)
     completed_lock = asyncio.Lock()
 
-    async def _bounded(idx: int, cluster: dict) -> dict:
+    async def _bounded(idx: int, cluster: dict[str, Any]) -> dict[str, Any]:
         nonlocal completed_count
         async with semaphore:
             result = await _build_memory(cluster)

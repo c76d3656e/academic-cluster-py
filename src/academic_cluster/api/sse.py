@@ -23,12 +23,12 @@ router = APIRouter()
 class SSEManager:
     """SSE 连接管理器"""
 
-    def __init__(self):
-        self._connections: dict[str, list[asyncio.Queue]] = {}
+    def __init__(self) -> None:
+        self._connections: dict[str, list[asyncio.Queue[dict[str, object]]]] = {}
 
-    async def connect(self, project_id: str) -> asyncio.Queue:
+    async def connect(self, project_id: str) -> asyncio.Queue[dict[str, object]]:
         """创建新的 SSE 连接"""
-        queue = asyncio.Queue()
+        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
 
         if project_id not in self._connections:
             self._connections[project_id] = []
@@ -38,7 +38,9 @@ class SSEManager:
         logger.info("SSE client connected", project_id=project_id)
         return queue
 
-    async def disconnect(self, project_id: str, queue: asyncio.Queue):
+    async def disconnect(
+        self, project_id: str, queue: asyncio.Queue[dict[str, object]]
+    ) -> None:
         """断开 SSE 连接"""
         if project_id in self._connections:
             self._connections[project_id].remove(queue)
@@ -47,7 +49,9 @@ class SSEManager:
 
         logger.info("SSE client disconnected", project_id=project_id)
 
-    async def send_event(self, project_id: str, event_type: str, data: dict):
+    async def send_event(
+        self, project_id: str, event_type: str, data: dict[str, object]
+    ) -> None:
         """
         发送事件到指定项目的所有连接
 
@@ -59,7 +63,7 @@ class SSEManager:
         if project_id not in self._connections:
             return
 
-        event = {
+        event: dict[str, object] = {
             "type": event_type,
             "data": data,
         }
@@ -81,10 +85,10 @@ class SSEManager:
         status: str,
         progress: float = 0.0,
         message: str = "",
-        detail: dict | None = None,
-    ):
+        detail: dict[str, object] | None = None,
+    ) -> None:
         """发送进度事件"""
-        data = {
+        data: dict[str, object] = {
             "node": node,
             "status": status,
             "progress": progress,
@@ -94,19 +98,21 @@ class SSEManager:
             data["detail"] = detail
         await self.send_event(project_id, "progress", data)
 
-    async def send_community_visualization(self, project_id: str, visualization: dict):
+    async def send_community_visualization(
+        self, project_id: str, visualization: dict[str, object]
+    ) -> None:
         """发送社区可视化数据"""
         await self.send_event(project_id, "community_visualization", visualization)
 
-    async def send_outline(self, project_id: str, outline: dict):
+    async def send_outline(self, project_id: str, outline: dict[str, object]) -> None:
         """发送大纲数据"""
         await self.send_event(project_id, "outline", outline)
 
-    async def send_error(self, project_id: str, error: str):
+    async def send_error(self, project_id: str, error: str) -> None:
         """发送错误事件"""
         await self.send_event(project_id, "error", {"message": error})
 
-    async def send_complete(self, project_id: str, result: dict):
+    async def send_complete(self, project_id: str, result: dict[str, object]) -> None:
         """发送完成事件"""
         await self.send_event(project_id, "complete", result)
 
@@ -162,7 +168,7 @@ async def stream_events(
     project_id: str,
     request: Request,
     token: str = Query(..., description="JWT access token"),
-):
+) -> StreamingResponse:
     """
     SSE 端点
 

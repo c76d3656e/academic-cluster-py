@@ -7,9 +7,11 @@ Section Outline Planner Agent
 
 import json
 import re
+from typing import Any
 
 import structlog
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..prompts import get_section_outline_prompt
@@ -20,7 +22,9 @@ logger = structlog.get_logger()
 DEFAULT_SECTION_OUTLINE_TIMEOUT_S = 180.0
 
 
-def _normalize_paragraph_word_budget(outline: dict, target_words: int) -> dict:
+def _normalize_paragraph_word_budget(
+    outline: dict[str, Any], target_words: int
+) -> dict[str, Any]:
     """Normalize paragraph target_words so their sum follows the section budget."""
     paragraphs = outline.get("paragraphs") if isinstance(outline, dict) else None
     if not isinstance(paragraphs, list) or not paragraphs:
@@ -79,11 +83,11 @@ def _normalize_paragraph_word_budget(outline: dict, target_words: int) -> dict:
 
 
 async def _ainvoke_with_retry(
-    agent,
-    messages,
-    max_retries=2,
+    agent: ChatOpenAI,
+    messages: list[BaseMessage],
+    max_retries: int = 2,
     timeout_s: float = DEFAULT_SECTION_OUTLINE_TIMEOUT_S,
-):
+) -> Any:
     """带重试的 LLM 调用"""
 
     @retry(
@@ -91,7 +95,7 @@ async def _ainvoke_with_retry(
         wait=wait_exponential(multiplier=2, min=3, max=30),
         reraise=True,
     )
-    async def _call():
+    async def _call() -> Any:
         return await ainvoke_with_callbacks(agent, messages, timeout=timeout_s)
 
     return await _call()
@@ -103,9 +107,9 @@ async def _ainvoke_with_retry(
 
 
 def _build_cluster_context(
-    clusters: list[dict],
-    papers_by_cluster: dict,
-    evidence_cards: list[dict],
+    clusters: list[dict[str, Any]],
+    papers_by_cluster: dict[Any, list[dict[str, Any]]],
+    evidence_cards: list[dict[str, Any]],
 ) -> str:
     """
     构建该 section 关联的聚类上下文文本。
@@ -116,7 +120,7 @@ def _build_cluster_context(
         return "暂无聚类数据"
 
     # 构建 evidence_cards 的 paper_id 索引
-    evidence_by_paper: dict[str, list[dict]] = {}
+    evidence_by_paper: dict[str, list[dict[str, Any]]] = {}
     for card in evidence_cards:
         pid = card.get("paper_id", "")
         if pid:
@@ -175,7 +179,7 @@ def _build_cluster_context(
     return "\n\n".join(parts)
 
 
-def _build_evidence_context(evidence_cards: list[dict]) -> str:
+def _build_evidence_context(evidence_cards: list[dict[str, Any]]) -> str:
     """构建 evidence cards 上下文文本"""
     if not evidence_cards:
         return "暂无证据卡片"
@@ -214,7 +218,9 @@ def _build_evidence_context(evidence_cards: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _build_kg_context(kg_entities: list[dict], kg_relations: list[dict]) -> str:
+def _build_kg_context(
+    kg_entities: list[dict[str, Any]], kg_relations: list[dict[str, Any]]
+) -> str:
     """构建知识图谱上下文文本"""
     parts = []
 
@@ -246,7 +252,7 @@ def _build_kg_context(kg_entities: list[dict], kg_relations: list[dict]) -> str:
     return "\n\n".join(parts) if parts else "暂无知识图谱数据"
 
 
-def _build_prev_context(prev_outline: dict | None) -> str:
+def _build_prev_context(prev_outline: dict[str, Any] | None) -> str:
     """
     构建前序 section 的上下文。
 
@@ -275,7 +281,7 @@ def _build_prev_context(prev_outline: dict | None) -> str:
     return "\n".join(lines)
 
 
-def _build_next_hint(next_section: dict | None) -> str:
+def _build_next_hint(next_section: dict[str, Any] | None) -> str:
     """
     构建后序 section 的提示。
 
@@ -301,7 +307,7 @@ def _build_next_hint(next_section: dict | None) -> str:
 # =============================================================================
 
 
-def _try_repair_section_outline_json(content: str, target_words: int) -> dict:
+def _try_repair_section_outline_json(content: str, target_words: int) -> dict[str, Any]:
     """
     尝试修复被 LLM 截断的 section outline JSON。
 
@@ -400,7 +406,7 @@ def _try_repair_section_outline_json(content: str, target_words: int) -> dict:
     raise ValueError(f"LLM returned invalid JSON for section outline: {content[:200]}")
 
 
-def _parse_response(raw_content: str, target_words: int) -> dict:
+def _parse_response(raw_content: str, target_words: int) -> dict[str, Any]:
     """解析 LLM 响应为 section outline dict，含多层容错"""
     if isinstance(raw_content, list):
         raw_content = "".join(
@@ -410,14 +416,14 @@ def _parse_response(raw_content: str, target_words: int) -> dict:
 
     # 策略 1: 直接 JSON 解析
     try:
-        return json.loads(raw_content)
+        return json.loads(raw_content)  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         pass
 
     # 策略 2: 去除 markdown 代码块后解析
     content = raw_content.replace("```json", "").replace("```", "").strip()
     try:
-        return json.loads(content)
+        return json.loads(content)  # type: ignore[no-any-return]
     except json.JSONDecodeError:
         pass
 
@@ -426,14 +432,14 @@ def _parse_response(raw_content: str, target_words: int) -> dict:
     end = content.rfind("}")
     if start != -1 and end > start:
         try:
-            return json.loads(content[start : end + 1])
+            return json.loads(content[start : end + 1])  # type: ignore[no-any-return]
         except json.JSONDecodeError:
             pass
 
     # 策略 4: 使用 try_parse_json 工具
     parsed = try_parse_json(raw_content)
     if parsed is not None:
-        return parsed
+        return parsed  # type: ignore[no-any-return]
 
     # 策略 5: 正则修复截断 JSON
     if start != -1:
@@ -449,7 +455,7 @@ def _parse_response(raw_content: str, target_words: int) -> dict:
 # =============================================================================
 
 
-def _fallback_outline(section_plan: dict) -> dict:
+def _fallback_outline(section_plan: dict[str, Any]) -> dict[str, Any]:
     """
     JSON 解析失败时的 fallback 规划。
 
@@ -511,15 +517,15 @@ def _fallback_outline(section_plan: dict) -> dict:
 
 
 async def plan_section_outline(
-    section_plan: dict,
-    citation_plan: dict,
-    prev_outline: dict | None,
-    next_section: dict | None,
-    clusters: list[dict],
-    evidence_cards: list[dict],
-    kg_entities: list[dict],
-    kg_relations: list[dict],
-) -> dict:
+    section_plan: dict[str, Any],
+    citation_plan: dict[str, Any],
+    prev_outline: dict[str, Any] | None,
+    next_section: dict[str, Any] | None,
+    clusters: list[dict[str, Any]],
+    evidence_cards: list[dict[str, Any]],
+    kg_entities: list[dict[str, Any]],
+    kg_relations: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     为单个 section 生成详细的段落级写作规划。
 
@@ -558,7 +564,7 @@ async def plan_section_outline(
             paper_map[pid] = p
 
     # 为聚类附加论文详情
-    papers_by_cluster: dict[object, list[dict]] = {}
+    papers_by_cluster: dict[Any, list[dict[str, Any]]] = {}
     key_clusters = section_plan.get("target_communities") or section_plan.get(
         "key_clusters", []
     )

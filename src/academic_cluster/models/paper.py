@@ -3,6 +3,7 @@
 """
 
 from datetime import datetime
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -16,7 +17,7 @@ class Paper(BaseModel):
     source: str  # 'semantic_scholar', 'pubmed', 'arxiv', 'openalex', 'crossref'
     title: str
     abstract: str | None = None
-    authors: list[dict] = Field(default_factory=list)
+    authors: list[dict[str, Any]] = Field(default_factory=list)
     publication_date: datetime | None = None
     journal: str | None = None
     doi: str | None = None
@@ -26,9 +27,7 @@ class Paper(BaseModel):
     reference_count: int = 0
     influential_citation_count: int = 0
     fields_of_study: list[str] = Field(default_factory=list)
-    metadata: dict = Field(default_factory=dict)
-
-    # 处理状态
+    metadata: dict[str, Any] = Field(default_factory=dict)
     embedding_id: str | None = None
     quality_score: float | None = None
     rerank_score: float | None = None
@@ -46,7 +45,7 @@ class KGEntity(BaseModel):
     entity_type: str  # 'ResearchProblem', 'Method', 'Dataset', 'Metric', 'Material', 'Concept', 'Domain'
     normalized_name: str
     paper_ids: list[str] = Field(default_factory=list)
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class KGRelation(BaseModel):
@@ -58,7 +57,7 @@ class KGRelation(BaseModel):
     relation_type: str  # 'uses', 'evaluated_on', 'improves', 'applied_to', 'based_on', 'proposes', 'compares_with'
     paper_ids: list[str] = Field(default_factory=list)
     confidence: float = 1.0
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Embedding(BaseModel):

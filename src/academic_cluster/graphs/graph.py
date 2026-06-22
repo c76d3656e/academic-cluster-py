@@ -6,9 +6,13 @@ LangGraph 图定义
 """
 
 import contextlib
+from typing import Any
 
 import structlog
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from ..services.observability import (
     LLMCallbackHandler,
@@ -54,10 +58,10 @@ logger = structlog.get_logger()
 # Checkpointer 绠＄悊
 # =============================================================================
 
-_default_checkpointer = None
+_default_checkpointer: BaseCheckpointSaver[Any] | None = None
 
 
-async def get_checkpointer():
+async def get_checkpointer() -> BaseCheckpointSaver[Any]:
     """Get or create the graph checkpointer."""
     global _default_checkpointer
     if _default_checkpointer is not None:
@@ -111,7 +115,7 @@ async def get_checkpointer():
         return _default_checkpointer
 
 
-async def close_checkpointer():
+async def close_checkpointer() -> None:
     """Close the graph checkpointer."""
     global _default_checkpointer
     if _default_checkpointer is not None:
@@ -208,7 +212,7 @@ def should_retry_on_error(state: PipelineState) -> str:
 # 鍥炬瀯寤?# =============================================================================
 
 
-def create_pipeline_graph() -> StateGraph:
+def create_pipeline_graph() -> StateGraph[PipelineState]:
     """Create the review-generation pipeline graph."""
     workflow = StateGraph(PipelineState)
 
@@ -302,26 +306,24 @@ def create_pipeline_graph() -> StateGraph:
 
 
 def compile_graph(
-    checkpointer,
+    checkpointer: BaseCheckpointSaver[Any],
     debug: bool = True,
     interrupt_before: list[str] | None = None,
     interrupt_after: list[str] | None = None,
-    callbacks: list | None = None,
-):
+    callbacks: list[Any] | None = None,
+) -> CompiledStateGraph[PipelineState, Any, Any, Any]:
     """Compile the pipeline graph."""
     if interrupt_before is None:
         interrupt_before = ["user_confirm"]
 
     workflow = create_pipeline_graph()
 
-    compile_kwargs = {
-        "checkpointer": checkpointer,
-        "debug": debug,
-        "interrupt_before": interrupt_before,
-        "interrupt_after": interrupt_after,
-    }
-
-    compiled = workflow.compile(**compile_kwargs)
+    compiled = workflow.compile(
+        checkpointer=checkpointer,
+        debug=debug,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+    )
 
     logger.info(
         "Graph compiled",
@@ -338,7 +340,7 @@ def compile_graph(
 # =============================================================================
 
 
-def get_default_graph():
+def get_default_graph() -> CompiledStateGraph[PipelineState, Any, Any, Any]:
     """Get the default graph for tests."""
     from langgraph.checkpoint.memory import MemorySaver
 
@@ -348,11 +350,11 @@ def get_default_graph():
 async def run_pipeline(
     query: str,
     project_id: str,
-    config: dict | None = None,
-    sse_manager=None,
+    config: dict[str, Any] | None = None,
+    sse_manager: Any = None,
     auto_confirm: bool = True,
     resume: bool = False,
-):
+) -> dict[str, Any] | None:
     """Run or resume a pipeline."""
     from ..services.database import get_database
 
@@ -373,7 +375,7 @@ async def run_pipeline(
         prompt_tokens: int,
         completion_tokens: int,
         latency_ms: int,
-    ):
+    ) -> None:
         """Persist one LLM call record."""
         try:
             exec_id = tracker._node_ids.get(node_name)
@@ -444,7 +446,7 @@ async def run_pipeline(
     )
 
     # LangGraph thread_id = project_id锛宑allbacks 閫氳繃 config 娉ㄥ叆
-    thread_config = {
+    thread_config: RunnableConfig = {
         "configurable": {"thread_id": project_id},
         "callbacks": [llm_callback, status_callback],
     }
@@ -478,6 +480,7 @@ async def run_pipeline(
             input_data,
             config=thread_config,
             stream_mode="updates",
+            version="v1",
         ):
             for node_name, node_output in event.items():
                 # 立项目状态为当前节点
@@ -552,7 +555,7 @@ async def run_pipeline(
     return result
 
 
-def _build_progress_message(node_name: str, state: dict) -> str:
+def _build_progress_message(node_name: str, state: dict[str, Any]) -> str:
     """Build a concise progress message for SSE clients."""
     if node_name == "search":
         return f"搜索完成，共 {len(state.get('paper_ids', []))} 篇论文"

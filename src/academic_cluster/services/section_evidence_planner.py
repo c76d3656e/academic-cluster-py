@@ -44,7 +44,7 @@ def _score_overlap(query_tokens: set[str], value: Any) -> float:
     )
 
 
-def _as_list(value: Any) -> list:
+def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
@@ -58,7 +58,7 @@ def _source_weight(source: str) -> float:
     return 0.0
 
 
-def _section_query(section: dict, memories: list[dict]) -> str:
+def _section_query(section: dict[str, Any], memories: list[dict[str, Any]]) -> str:
     target = {
         str(x)
         for x in (
@@ -92,7 +92,7 @@ def _section_query(section: dict, memories: list[dict]) -> str:
     return _text(parts)
 
 
-def _memory_by_cluster(memories: list[dict]) -> dict[str, dict]:
+def _memory_by_cluster(memories: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {
         str(memory.get("cluster_id")): memory
         for memory in memories
@@ -100,8 +100,10 @@ def _memory_by_cluster(memories: list[dict]) -> dict[str, dict]:
     }
 
 
-def _cards_by_paper(evidence_cards: list[dict]) -> dict[str, list[dict]]:
-    grouped: dict[str, list[dict]] = {}
+def _cards_by_paper(
+    evidence_cards: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for card in evidence_cards:
         pid = str(card.get("paper_id") or "")
         if pid:
@@ -109,7 +111,7 @@ def _cards_by_paper(evidence_cards: list[dict]) -> dict[str, list[dict]]:
     return grouped
 
 
-def _paper_cluster_map(clusters: list[dict]) -> dict[str, str]:
+def _paper_cluster_map(clusters: list[dict[str, Any]]) -> dict[str, str]:
     result: dict[str, str] = {}
     for cluster in clusters:
         cid = str(cluster.get("id"))
@@ -121,11 +123,11 @@ def _paper_cluster_map(clusters: list[dict]) -> dict[str, str]:
 def _support_item(
     *,
     paper_id: str,
-    card: dict | None,
-    paper: dict,
+    card: dict[str, Any] | None,
+    paper: dict[str, Any],
     score: float,
     source: str,
-) -> dict:
+) -> dict[str, Any]:
     return {
         "paper_id": paper_id,
         "title": paper.get("title", ""),
@@ -141,7 +143,9 @@ def _support_item(
     }
 
 
-def _render_community_context(section: dict, memories: list[dict]) -> str:
+def _render_community_context(
+    section: dict[str, Any], memories: list[dict[str, Any]]
+) -> str:
     target = {
         str(x)
         for x in (
@@ -183,21 +187,21 @@ def _render_community_context(section: dict, memories: list[dict]) -> str:
 def plan_section_evidence(
     *,
     topic: str,
-    sections: list[dict],
+    sections: list[dict[str, Any]],
     citation_plans: list[SectionCitationPlan],
-    evidence_cards: list[dict],
-    community_memories: list[dict],
-    paper_map: dict[str, dict],
-    clusters: list[dict],
+    evidence_cards: list[dict[str, Any]],
+    community_memories: list[dict[str, Any]],
+    paper_map: dict[str, dict[str, Any]],
+    clusters: list[dict[str, Any]],
     max_references_per_section: int = 18,
     min_references_per_section: int = 8,
-) -> tuple[list[SectionCitationPlan], dict[int, dict]]:
+) -> tuple[list[SectionCitationPlan], dict[int, dict[str, Any]]]:
     """Filter citation plans and build per-section support matrices."""
     cards_by_pid = _cards_by_paper(evidence_cards)
     paper_to_cluster = _paper_cluster_map(clusters)
     memory_map = _memory_by_cluster(community_memories)
     filtered_plans: list[SectionCitationPlan] = []
-    evidence_plans: dict[int, dict] = {}
+    evidence_plans: dict[int, dict[str, Any]] = {}
     topic_tokens = _tokens(topic)
 
     for plan in citation_plans:
@@ -216,7 +220,7 @@ def plan_section_evidence(
             )
         }
 
-        scored: list[tuple[float, int, dict]] = []
+        scored: list[tuple[float, int, dict[str, Any]]] = []
         for rank, detail in enumerate(plan.candidate_details):
             pid = str(detail.get("paper_id") or "")
             if not pid:
@@ -271,7 +275,7 @@ def plan_section_evidence(
         for score, _, detail in selected:
             pid = str(detail.get("paper_id") or "")
             paper = paper_map.get(pid, {})
-            cards = cards_by_pid.get(pid) or [None]
+            cards = cards_by_pid.get(pid) or [None]  # type: ignore[list-item]
             best_card = max(
                 cards,
                 key=lambda card: _score_overlap(query_tokens, card) if card else 0.0,
@@ -308,7 +312,9 @@ def plan_section_evidence(
     return filtered_plans, evidence_plans
 
 
-def cards_from_support_matrix(support_matrix: list[dict]) -> list[dict]:
+def cards_from_support_matrix(
+    support_matrix: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Convert support matrix rows back to evidence-card-like rows for writers."""
     cards = []
     for item in support_matrix:

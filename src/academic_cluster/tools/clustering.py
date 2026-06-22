@@ -7,6 +7,7 @@
 import math
 import uuid
 from collections import defaultdict
+from typing import Any
 
 import networkx as nx
 import structlog
@@ -14,18 +15,18 @@ import structlog
 logger = structlog.get_logger()
 
 
-def _plain_float(value, default: float = 0.0) -> float:
+def _plain_float(value: object, default: float = 0.0) -> float:
     """Return a checkpoint-safe Python float from numpy or numeric values."""
     try:
-        return float(value)
+        return float(str(value))
     except (TypeError, ValueError):
         return default
 
 
-def _plain_int(value, default: int = 0) -> int:
+def _plain_int(value: object, default: int = 0) -> int:
     """Return a checkpoint-safe Python int from numpy or numeric values."""
     try:
-        return int(value)
+        return int(str(value))
     except (TypeError, ValueError):
         return default
 
@@ -36,10 +37,10 @@ def _plain_int(value, default: int = 0) -> int:
 
 
 def build_hybrid_graph(
-    knn_edges: list[dict],
-    kg_relations: list[dict],
-    kg_entities: list[dict],
-    evidence_cards: list[dict],
+    knn_edges: list[dict[str, Any]],
+    kg_relations: list[dict[str, Any]],
+    kg_entities: list[dict[str, Any]],
+    evidence_cards: list[dict[str, Any]],
     core_paper_ids: list[str],
     weights: dict[str, float] | None = None,
 ) -> nx.Graph:
@@ -152,7 +153,7 @@ def build_hybrid_graph(
     # 4. 添加证据边
     evidence_to_papers = defaultdict(list)
     for card in evidence_cards:
-        paper_id = card.get("paper_id")
+        paper_id = str(card.get("paper_id", ""))
         # 使用 claim 的前 50 字符作为证据标识
         evidence_key = card.get("claim", "")[:50]
         if paper_id:
@@ -198,7 +199,7 @@ def community_detection(
     resolution: float = 1.0,
     seed: int = 42,
     max_iterations: int = 100,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     社区检测入口，支持多种算法。
 
@@ -255,12 +256,12 @@ def community_detection(
 
 
 def _run_leiden(
-    ig_graph,
-    nodes: list,
+    ig_graph: Any,
+    nodes: list[str],
     resolution: float,
     seed: int,
     max_iterations: int,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """igraph 原生 Leiden 社区检测。"""
     partition = ig_graph.community_leiden(
         objective_function="modularity",
@@ -284,7 +285,7 @@ def _run_leiden(
     return clusters
 
 
-def _run_walktrap(ig_graph, nodes: list) -> list[dict]:
+def _run_walktrap(ig_graph: Any, nodes: list[str]) -> list[dict[str, Any]]:
     """igraph 原生 Walktrap 社区检测。"""
     dendrogram = ig_graph.community_walktrap(weights="weight")
     partition = dendrogram.as_clustering()
@@ -303,7 +304,7 @@ def _run_walktrap(ig_graph, nodes: list) -> list[dict]:
     return clusters
 
 
-def _fallback_clustering(graph: nx.Graph) -> list[dict]:
+def _fallback_clustering(graph: nx.Graph) -> list[dict[str, Any]]:
     """备用聚类：连通分量（无边或 igraph 不可用时使用）。"""
     clusters = []
     for i, component in enumerate(nx.connected_components(graph)):
@@ -325,10 +326,10 @@ def _fallback_clustering(graph: nx.Graph) -> list[dict]:
 
 def generate_community_visualization(
     graph: nx.Graph,
-    clusters: list[dict],
-    papers: list[dict],
+    clusters: list[dict[str, Any]],
+    papers: list[dict[str, Any]],
     layout: str = "force",
-) -> dict:
+) -> dict[str, Any]:
     """
     生成社区可视化数据
 

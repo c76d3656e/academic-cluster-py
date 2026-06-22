@@ -10,6 +10,7 @@
 import asyncio
 import re
 from hashlib import sha256
+from typing import Any
 
 import structlog
 from langchain_core.messages import AIMessage
@@ -26,7 +27,7 @@ _THINK_BLOCK_RE = re.compile(
 )
 
 
-def _messages_to_openai(input) -> list[dict]:
+def _messages_to_openai(input: Any) -> list[dict[str, Any]]:
     """将 LangChain 消息或字符串转为 OpenAI 消息 dict 列表（供 Router 使用）。"""
     from langchain_core.messages.utils import convert_to_openai_messages
 
@@ -37,7 +38,7 @@ def _messages_to_openai(input) -> list[dict]:
     return [{"role": "user", "content": str(input)}]
 
 
-def _router_response_to_aimessage(response, provider_alias: str = "") -> AIMessage:
+def _router_response_to_aimessage(response: Any, provider_alias: str = "") -> AIMessage:
     """将 LiteLLM Router 的响应 dict 转为 LangChain AIMessage。"""
     choices = getattr(response, "choices", None) or response.get("choices", [])
     choice = choices[0] if choices else {}
@@ -84,7 +85,7 @@ def _router_response_to_aimessage(response, provider_alias: str = "") -> AIMessa
     )
 
 
-def strip_llm_reasoning_content(content):
+def strip_llm_reasoning_content(content: Any) -> Any:
     """Strip <think> tags while preserving normal content."""
     if isinstance(content, str):
         cleaned = _THINK_BLOCK_RE.sub("", content)
@@ -107,7 +108,7 @@ def strip_llm_reasoning_content(content):
     return content
 
 
-def sanitize_llm_response(response):
+def sanitize_llm_response(response: Any) -> Any:
     """Best-effort response sanitizer for models that return visible thinking."""
     try:
         response.content = strip_llm_reasoning_content(response.content)
@@ -116,14 +117,14 @@ def sanitize_llm_response(response):
     return response
 
 
-def _preview_value(value, limit: int = 50000) -> str:
+def _preview_value(value: Any, limit: int = 50000) -> str:
     text = str(value)
     if len(text) > limit:
         return text[:limit] + "...[truncated]"
     return text
 
 
-def _safe_attr(obj, *names, default=None):
+def _safe_attr(obj: Any, *names: str, default: Any = None) -> Any:
     for name in names:
         try:
             value = getattr(obj, name, None)
@@ -134,7 +135,7 @@ def _safe_attr(obj, *names, default=None):
     return default
 
 
-def _api_key_hint(llm) -> str | None:
+def _api_key_hint(llm: Any) -> str | None:
     key = _safe_attr(llm, "openai_api_key", "api_key", default=None)
     if not key:
         return None
@@ -206,30 +207,30 @@ def create_llm(
         temperature=temperature,
         api_key=params["api_key"],
         base_url=params.get("api_base"),
-        max_tokens=max_tokens,
+        max_tokens=max_tokens,  # type: ignore[call-arg]
         timeout=240,  # 单次 HTTP 请求超时 4 分钟
     )
     # 在 llm 对象上附加 provider 别名和路由分组名，供 ainvoke_with_callbacks 读取
     model_info = deployment.get("model_info", {}) or {}
-    llm._litellm_model = deployment.get(
+    llm._litellm_model = deployment.get(  # type: ignore[attr-defined]
         "model_name", actual_model
     )  # 路由分组名（如 "Qwen3-8B"），传给 Router
-    llm._provider_alias = model_info.get("provider_alias", "") or deployment.get(
+    llm._provider_alias = model_info.get("provider_alias", "") or deployment.get(  # type: ignore[attr-defined]
         "model_name", ""
     )
-    llm._provider_rpm_limit = int(params.get("rpm") or 10)
-    llm._requested_model = actual_model
-    llm._upstream_model = actual_model
-    llm._api_base_url = params.get("api_base")
-    llm._temperature = temperature
-    llm._max_tokens = max_tokens
+    llm._provider_rpm_limit = int(params.get("rpm") or 10)  # type: ignore[attr-defined]
+    llm._requested_model = actual_model  # type: ignore[attr-defined]
+    llm._upstream_model = actual_model  # type: ignore[attr-defined]
+    llm._api_base_url = params.get("api_base")  # type: ignore[attr-defined]
+    llm._temperature = temperature  # type: ignore[attr-defined]
+    llm._max_tokens = max_tokens  # type: ignore[attr-defined]
 
     return llm
 
 
 async def ainvoke_with_callbacks(
-    llm, input, config=None, timeout: float = 300.0, **kwargs
-):
+    llm: Any, input: Any, config: Any = None, timeout: float = 300.0, **kwargs: Any
+) -> Any:
     """
     包装 LLM 调用，手动追踪 token 用量和持久化到 DB。
 
@@ -500,7 +501,7 @@ def create_llm_with_retry(
     temperature: float = 0.7,
     max_tokens: int | None = None,
     max_retries: int = 3,
-):
+) -> Any:
     """
     创建带重试的 LLM 调用包装器。
 
@@ -510,7 +511,7 @@ def create_llm_with_retry(
         async callable: _invoke(messages) -> response
     """
 
-    async def _invoke(messages):
+    async def _invoke(messages: Any) -> Any:
         from tenacity import (
             retry,
             stop_after_attempt,
@@ -522,7 +523,7 @@ def create_llm_with_retry(
             wait=wait_exponential(multiplier=2, min=3, max=30),
             reraise=True,
         )
-        async def _call():
+        async def _call() -> Any:
             llm = create_llm(temperature=temperature, max_tokens=max_tokens)
             return await ainvoke_with_callbacks(llm, messages)
 
@@ -532,10 +533,10 @@ def create_llm_with_retry(
 
 
 async def invoke_llm(
-    messages: list,
+    messages: list[Any],
     temperature: float = 0.7,
     max_tokens: int | None = None,
-):
+) -> Any:
     """
     便捷函数：创建 LLM 并调用，自动注入 callback。
 

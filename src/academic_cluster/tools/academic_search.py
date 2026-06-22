@@ -18,6 +18,7 @@
 
 import asyncio
 import time
+from typing import Any
 
 import httpx
 import structlog
@@ -172,7 +173,7 @@ async def _request_with_retry(
     source: str,
     max_retries: int = 3,
     _skip_rate_limit: bool = False,
-    **kwargs,
+    **kwargs: Any,
 ) -> httpx.Response:
     """
     带速率限制和 429 退避的 HTTP 请求。
@@ -230,7 +231,7 @@ async def search_semantic_scholar(
     limit: int = 100,
     year_range: tuple[int, int] | None = None,
     fields_of_study: list[str] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     搜索 Semantic Scholar
 
@@ -358,7 +359,7 @@ async def search_pubmed(
     limit: int = 100,
     min_date: str | None = None,
     max_date: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     搜索 PubMed
 
@@ -505,7 +506,7 @@ async def search_arxiv(
     limit: int = 100,
     categories: list[str] | None = None,
     sort_by: str = "relevance",
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     搜索 arXiv
 
@@ -549,9 +550,9 @@ async def search_arxiv(
 
             papers = []
             for entry in root.findall("atom:entry", ns):
-                title = entry.find("atom:title", ns)
-                summary = entry.find("atom:summary", ns)
-                published = entry.find("atom:published", ns)
+                title_elem = entry.find("atom:title", ns)
+                summary_elem = entry.find("atom:summary", ns)
+                published_elem = entry.find("atom:published", ns)
 
                 authors = []
                 for author in entry.findall("atom:author", ns):
@@ -561,9 +562,8 @@ async def search_arxiv(
 
                 # 提取 arXiv ID
                 entry_id = entry.find("atom:id", ns)
-                arxiv_id = (
-                    entry_id.text.split("/abs/")[-1] if entry_id is not None else ""
-                )
+                entry_id_text = entry_id.text if entry_id is not None else ""
+                arxiv_id = entry_id_text.split("/abs/")[-1] if entry_id_text else ""
 
                 # 提取链接
                 links = entry.findall("atom:link", ns)
@@ -581,22 +581,23 @@ async def search_arxiv(
                 # 优先使用 DOI 作为 external_id
                 external_id = doi if doi and is_valid_doi(doi) else f"arXiv:{arxiv_id}"
 
+                published_text = (
+                    published_elem.text if published_elem is not None else ""
+                )
                 papers.append(
                     {
                         "external_id": external_id,
                         "source": "arxiv",
-                        "title": title.text.strip().replace("\n", " ")
-                        if title is not None
+                        "title": title_elem.text.strip().replace("\n", " ")
+                        if title_elem is not None and title_elem.text
                         else "",
-                        "abstract": summary.text.strip().replace("\n", " ")
-                        if summary is not None
+                        "abstract": summary_elem.text.strip().replace("\n", " ")
+                        if summary_elem is not None and summary_elem.text
                         else "",
                         "authors": authors,
-                        "publication_date": published.text
-                        if published is not None
-                        else "",
-                        "year": published.text[:4] if published is not None else "",
-                        "url": entry_id.text if entry_id is not None else "",
+                        "publication_date": published_text,
+                        "year": published_text[:4] if published_text else "",
+                        "url": entry_id_text,
                         "pdf_url": pdf_url,
                         "doi": doi,
                         "citation_count": 0,  # arXiv API 不提供引用数
@@ -628,7 +629,7 @@ async def search_arxiv(
 # =============================================================================
 
 
-def _get_openalex_journal(work: dict) -> str | None:
+def _get_openalex_journal(work: dict[str, Any]) -> str | None:
     """从 OpenAlex work 中安全提取期刊名称"""
     primary_location = work.get("primary_location")
     if not primary_location:
@@ -636,7 +637,8 @@ def _get_openalex_journal(work: dict) -> str | None:
     source = primary_location.get("source")
     if not source:
         return None
-    return source.get("display_name")
+    result: str | None = source.get("display_name")
+    return result
 
 
 async def search_openalex(
@@ -644,7 +646,7 @@ async def search_openalex(
     limit: int = 100,
     from_year: int | None = None,
     to_year: int | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     搜索 OpenAlex
 
@@ -750,7 +752,7 @@ async def search_crossref(
     limit: int = 200,
     from_year: int | None = None,
     to_year: int | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     搜索 Crossref
 
@@ -766,9 +768,10 @@ async def search_crossref(
     }
 
     if from_year:
-        params["filter"] = f"from-pub-date:{from_year}"
+        filter_str = f"from-pub-date:{from_year}"
         if to_year:
-            params["filter"] += f",until-pub-date:{to_year}"
+            filter_str += f",until-pub-date:{to_year}"
+        params["filter"] = filter_str
 
     pubmed_email = await get_effective_source_value("pubmed_email")
     headers = {}
@@ -891,7 +894,7 @@ async def search_all_sources(
     sources: list[str] | None = None,
     timeout: float = 120.0,
     per_source_limits: dict[str, int] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     并行搜索所有数据源
 
@@ -910,7 +913,7 @@ async def search_all_sources(
     if sources is None:
         sources = ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"]
 
-    search_functions = {
+    search_functions: dict[str, Any] = {
         "semantic_scholar": search_semantic_scholar,
         "pubmed": search_pubmed,
         "arxiv": search_arxiv,
@@ -918,8 +921,8 @@ async def search_all_sources(
         "crossref": search_crossref,
     }
 
-    tasks = []
-    active_sources = []
+    tasks: list[Any] = []
+    active_sources: list[str] = []
     for source in sources:
         if source in search_functions:
             limit = (
@@ -932,7 +935,7 @@ async def search_all_sources(
 
     # 使用 wait_for 添加总体超时，避免某个源卡住阻塞整个搜索
     source_counts: dict[str, int] = {}
-    all_papers = []
+    all_papers: list[dict[str, Any]] = []
     try:
         results = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True),
@@ -949,8 +952,11 @@ async def search_all_sources(
                 )
                 source_counts[source_name] = 0
                 continue
-            source_counts[source_name] = len(result)
-            all_papers.extend(result)
+            if isinstance(result, list):
+                source_counts[source_name] = len(result)
+                all_papers.extend(result)
+            else:
+                source_counts[source_name] = 0
     except TimeoutError:
         logger.error(
             "Multi-source search timed out",

@@ -2,6 +2,8 @@
 社区可视化节点 - 生成并推送可视化数据给前端
 """
 
+from typing import Any
+
 import structlog
 
 from ...services.database import get_database
@@ -11,7 +13,7 @@ from ..state import PipelineState
 logger = structlog.get_logger()
 
 
-async def visualize_community_node(state: PipelineState) -> dict:
+async def visualize_community_node(state: PipelineState) -> dict[str, Any]:
     """
     生成社区聚类可视化
 

@@ -5,6 +5,7 @@ Console 用量路由
 """
 
 from datetime import datetime
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, Query
@@ -77,7 +78,7 @@ class LLMCallRecord(BaseModel):
     latency_ms: int = 0
     input_preview: str | None = None
     output_preview: str | None = None
-    request_metadata: dict | None = None
+    request_metadata: dict[str, Any] | None = None
     created_at: datetime | None = None
 
 
@@ -97,9 +98,9 @@ class LLMCallListResponse(BaseModel):
 async def get_usage_trend(
     days: int = Query(7, ge=1, le=90),
     granularity: str = Query("day", pattern="^(day|hour)$"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> UsageTrendResponse:
     """获取用户用量趋势，支持 day/hour 粒度"""
     user_id = current_user["id"]
 
@@ -238,9 +239,9 @@ async def get_usage_calls(
     node_name: str | None = Query(None),
     status: str | None = Query(None),
     call_type: str | None = Query(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> LLMCallListResponse:
     """获取用户的 LLM 调用记录"""
     user_id = current_user["id"]
 
@@ -251,7 +252,7 @@ async def get_usage_calls(
         if is_admin
         else "(p.user_id = :user_id OR lc.project_id IN (SELECT id FROM projects WHERE user_id = :user_id))"
     )
-    params: dict = {"user_id": user_id, "limit": limit}
+    params: dict[str, Any] = {"user_id": user_id, "limit": limit}
     project_filter = ""
     if project_id:
         project_filter = "AND COALESCE(lc.project_id, pr.project_id) = :project_id"

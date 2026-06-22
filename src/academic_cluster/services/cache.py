@@ -32,7 +32,7 @@ class CacheService:
 
         logger.info("Cache service initialized")
 
-    async def close(self):
+    async def close(self) -> None:
         """关闭 Redis 连接"""
         await self.redis.close()
         logger.info("Cache connection closed")
@@ -95,7 +95,7 @@ class CacheService:
         key = f"embedding:{model_name}:{paper_id}"
         return await self.set(key, embedding, expire=expire)
 
-    async def get_paper(self, paper_id: str) -> dict | None:
+    async def get_paper(self, paper_id: str) -> dict[str, Any] | None:
         """获取缓存的论文"""
         key = f"paper:{paper_id}"
         return await self.get(key)
@@ -103,14 +103,14 @@ class CacheService:
     async def set_paper(
         self,
         paper_id: str,
-        paper_data: dict,
+        paper_data: dict[str, Any],
         expire: int = 3600,
     ) -> bool:
         """缓存论文"""
         key = f"paper:{paper_id}"
         return await self.set(key, paper_data, expire=expire)
 
-    async def get_search_results(self, query_hash: str) -> list[dict] | None:
+    async def get_search_results(self, query_hash: str) -> list[dict[str, Any]] | None:
         """获取缓存的搜索结果"""
         key = f"search:{query_hash}"
         return await self.get(key)
@@ -118,7 +118,7 @@ class CacheService:
     async def set_search_results(
         self,
         query_hash: str,
-        results: list[dict],
+        results: list[dict[str, Any]],
         expire: int = 1800,
     ) -> bool:
         """缓存搜索结果"""
@@ -138,7 +138,7 @@ def get_cache() -> CacheService:
     return _cache_service
 
 
-async def close_cache():
+async def close_cache() -> None:
     """关闭缓存连接"""
     global _cache_service
     if _cache_service is not None:

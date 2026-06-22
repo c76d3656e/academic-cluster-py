@@ -61,9 +61,9 @@ def create_evidence_agent(
 
 
 async def generate_evidence_card(
-    paper: dict,
+    paper: dict[str, Any],
     cluster_topics: list[str] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
     为单篇论文生成证据卡片
 
@@ -131,7 +131,7 @@ async def generate_evidence_card(
     # 添加论文 ID
     result["paper_id"] = paper.get("id")
 
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 def _clean_text(value: Any) -> str:
@@ -142,7 +142,7 @@ def _truncate_text(value: Any, max_chars: int) -> str:
     return _clean_text(value)[:max_chars]
 
 
-def _paper_year(paper: dict) -> int | None:
+def _paper_year(paper: dict[str, Any]) -> int | None:
     year = paper.get("year")
     if year:
         try:
@@ -173,7 +173,7 @@ def _clamp_confidence(value: Any) -> float:
     return max(0.0, min(1.0, confidence))
 
 
-def fallback_missing_card(paper: dict) -> dict:
+def fallback_missing_card(paper: dict[str, Any]) -> dict[str, Any]:
     title = _clean_text(paper.get("title")) or "Untitled"
     abstract = _clean_text(paper.get("abstract")) or title
     return {
@@ -191,7 +191,9 @@ def fallback_missing_card(paper: dict) -> dict:
     }
 
 
-def normalize_evidence_card(raw_card: dict | None, paper: dict) -> dict:
+def normalize_evidence_card(
+    raw_card: dict[str, Any] | None, paper: dict[str, Any]
+) -> dict[str, Any]:
     if not isinstance(raw_card, dict):
         return fallback_missing_card(paper)
 
@@ -220,12 +222,12 @@ def normalize_evidence_card(raw_card: dict | None, paper: dict) -> dict:
 
 
 async def generate_evidence_cards_batch(
-    papers: list[dict],
+    papers: list[dict[str, Any]],
     cluster_topics: dict[str, list[str]] | None = None,
     concurrency: int | None = None,
     timeout_s: int = DEFAULT_EVIDENCE_CARD_TIMEOUT_S,
     progress_callback: Callable[[int, int], None] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     批量生成证据卡片
 
@@ -245,13 +247,15 @@ async def generate_evidence_cards_batch(
     max_concurrency = max(1, int(concurrency or len(papers) or 1))
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    async def _bounded_generate(idx: int, paper: dict):
+    async def _bounded_generate(
+        idx: int, paper: dict[str, Any]
+    ) -> tuple[int, dict[str, Any] | None, Exception | None]:
         async with semaphore:
             try:
                 card = await asyncio.wait_for(
                     generate_evidence_card(
                         paper=paper,
-                        cluster_topics=cluster_topics.get(paper.get("id")),
+                        cluster_topics=cluster_topics.get(str(paper.get("id", ""))),
                     ),
                     timeout=max(1, timeout_s),
                 )
@@ -260,7 +264,7 @@ async def generate_evidence_cards_batch(
                 return idx, None, e
 
     tasks = [_bounded_generate(i, paper) for i, paper in enumerate(papers)]
-    evidence_cards = [None] * len(papers)
+    evidence_cards: list[dict[str, Any] | None] = [None] * len(papers)
     total = len(papers)
 
     for completed, future in enumerate(asyncio.as_completed(tasks), 1):
@@ -278,13 +282,13 @@ async def generate_evidence_cards_batch(
         if progress_callback:
             progress_callback(completed, total)
 
-    evidence_cards = [c for c in evidence_cards if c is not None]
+    result_cards = [c for c in evidence_cards if c is not None]
 
     logger.info(
         "Evidence cards generated",
         total=total,
-        successful=len(evidence_cards),
+        successful=len(result_cards),
         concurrency=max_concurrency,
     )
 
-    return evidence_cards
+    return result_cards

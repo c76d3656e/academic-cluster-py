@@ -4,6 +4,8 @@ Console 个人资料路由
 提供用户个人资料查询和修改端点。
 """
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -52,8 +54,8 @@ class PasswordChangeRequest(BaseModel):
 
 @router.get("/profile", response_model=ProfileResponse)
 async def get_profile(
-    current_user: dict = Depends(get_current_user),
-):
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> ProfileResponse:
     """获取当前用户个人资料"""
     return ProfileResponse(
         id=current_user["id"],
@@ -67,14 +69,16 @@ async def get_profile(
 @router.patch("/profile", response_model=ProfileResponse)
 async def update_profile(
     body: ProfileUpdateRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> ProfileResponse:
     """更新当前用户个人资料（仅 full_name）"""
     if body.full_name is not None:
         await db.update_user(current_user["id"], {"full_name": body.full_name})
 
     user = await db.get_user_by_id(current_user["id"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     return ProfileResponse(
         id=user["id"],
         email=user["email"],
@@ -87,10 +91,10 @@ async def update_profile(
 @router.post("/profile/password")
 async def change_password(
     body: PasswordChangeRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
     password_service: PasswordService = Depends(get_password_service),
-):
+) -> dict[str, str]:
     """修改密码"""
     # 验证当前密码
     if not password_service.verify_password(

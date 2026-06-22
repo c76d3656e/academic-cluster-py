@@ -21,7 +21,7 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 
-def _paper_year(paper: dict) -> int:
+def _paper_year(paper: dict[str, Any]) -> int:
     value = paper.get("year") or paper.get("publication_date")
     if value:
         try:
@@ -31,7 +31,7 @@ def _paper_year(paper: dict) -> int:
     return 0
 
 
-def _paper_rank_score(paper: dict, centrality: float = 0.0) -> float:
+def _paper_rank_score(paper: dict[str, Any], centrality: float = 0.0) -> float:
     from .rerank import _compute_quality_score
 
     quality = paper.get("quality_score")
@@ -58,8 +58,8 @@ def _paper_rank_score(paper: dict, centrality: float = 0.0) -> float:
 
 
 def select_community_balanced_papers(
-    clusters: list[dict],
-    reranked_papers: list[dict],
+    clusters: list[dict[str, Any]],
+    reranked_papers: list[dict[str, Any]],
     core_count: int = 160,
     auxiliary_count: int = 160,
 ) -> tuple[list[str], list[str]]:
@@ -164,7 +164,7 @@ def select_community_balanced_papers(
     return selected, auxiliary
 
 
-async def community_detection_node(state: PipelineState) -> dict:
+async def community_detection_node(state: PipelineState) -> dict[str, Any]:
     """Run initial community detection without KG/evidence and choose core 160."""
     config = state.config or {}
     algorithm = config.get("clustering_algorithm", "leiden")

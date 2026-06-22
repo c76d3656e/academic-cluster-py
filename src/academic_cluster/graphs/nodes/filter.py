@@ -2,6 +2,8 @@
 过滤节点 - 基于质量标准过滤论文
 """
 
+from typing import Any
+
 import structlog
 
 from ...services.database import get_database
@@ -11,7 +13,7 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 
-async def filter_node(state: PipelineState) -> dict:
+async def filter_node(state: PipelineState) -> dict[str, Any]:
     """
     过滤论文
 

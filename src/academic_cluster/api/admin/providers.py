@@ -4,6 +4,8 @@
 提供 LLM Provider 的 CRUD、健康检查、热重载端点。
 """
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -72,7 +74,7 @@ class ProviderCreateRequest(BaseModel):
     output_price_per_m: float = Field(
         default=0, ge=0, description="输出价格 $/M tokens"
     )
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class ProviderUpdateRequest(BaseModel):
@@ -92,7 +94,7 @@ class ProviderUpdateRequest(BaseModel):
     test_model: str | None = None
     input_price_per_m: float | None = None
     output_price_per_m: float | None = None
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class ProviderResponse(BaseModel):
@@ -118,7 +120,7 @@ class ProviderResponse(BaseModel):
     test_model: str | None = None
     input_price_per_m: float = 0
     output_price_per_m: float = 0
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
     extra_key_count: int = 0
     created_by: str | None = None
     created_at: str | None = None
@@ -153,7 +155,7 @@ class ReloadResult(BaseModel):
 # =============================================================================
 
 
-def _row_to_provider(row, extra_keys_raw=None) -> ProviderResponse:
+def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
     """将数据库行转换为 ProviderResponse（支持 tuple 或 RowMapping）"""
     m = row._mapping if hasattr(row, "_mapping") else row
 
@@ -215,12 +217,12 @@ def _row_to_provider(row, extra_keys_raw=None) -> ProviderResponse:
 @router.get("", response_model=ProviderListResponse)
 async def list_providers(
     kind: str | None = None,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> ProviderListResponse:
     """列出所有 Provider"""
     conditions = []
-    params: dict = {}
+    params: dict[str, Any] = {}
 
     if kind:
         conditions.append("kind = :kind")
@@ -252,9 +254,9 @@ async def list_providers(
 @router.post("", response_model=ProviderResponse)
 async def create_provider(
     body: ProviderCreateRequest,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> ProviderResponse:
     """创建 Provider"""
     import json
 
@@ -307,6 +309,8 @@ async def create_provider(
             },
         )
         row = result.fetchone()
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to create provider")
         provider_id = str(row[0])
 
     logger.info(
@@ -342,15 +346,15 @@ async def create_provider(
 async def update_provider(
     provider_id: str,
     body: ProviderUpdateRequest,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> ProviderResponse:
     """更新 Provider"""
     import json
 
     # 构建动态 UPDATE
     updates = []
-    params: dict = {"id": provider_id}
+    params: dict[str, Any] = {"id": provider_id}
 
     if body.display_name is not None:
         updates.append("display_name = :display_name")
@@ -428,9 +432,9 @@ async def update_provider(
 @router.delete("/{provider_id}")
 async def delete_provider(
     provider_id: str,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """删除 Provider"""
     async with db.session() as session:
         result = await session.execute(
@@ -448,9 +452,9 @@ async def delete_provider(
 @router.post("/{provider_id}/test", response_model=HealthTestResponse)
 async def test_provider(
     provider_id: str,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> HealthTestResponse:
     """测试 Provider 健康状态"""
     import time
 
@@ -531,7 +535,7 @@ async def test_provider(
         )
 
 
-async def _test_llm(base_url: str, api_key: str, model: str):
+async def _test_llm(base_url: str, api_key: str, model: str) -> None:
     """测试 LLM 端点（发送最小请求）"""
     import httpx
 
@@ -557,7 +561,7 @@ async def _test_llm(base_url: str, api_key: str, model: str):
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
 
-async def _test_embedding(base_url: str, api_key: str, model: str):
+async def _test_embedding(base_url: str, api_key: str, model: str) -> None:
     """测试 Embedding 端点"""
     import httpx
 
@@ -579,7 +583,7 @@ async def _test_embedding(base_url: str, api_key: str, model: str):
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
 
-async def _test_rerank(base_url: str, api_key: str, model: str):
+async def _test_rerank(base_url: str, api_key: str, model: str) -> None:
     """测试 Rerank 端点"""
     import httpx
 
@@ -603,7 +607,7 @@ async def _test_rerank(base_url: str, api_key: str, model: str):
 
 async def _update_health(
     db: DatabaseService, provider_id: str, status: str, error: str | None
-):
+) -> None:
     """更新 Provider 健康状态"""
     is_healthy = status == "healthy"
     async with db.session() as session:
@@ -705,9 +709,9 @@ async def get_provider_pricing(
 
 @router.post("/reload", response_model=ReloadResult)
 async def reload_providers(
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> ReloadResult:
     """热重载 Provider 配置。DB 中 enabled provider 是运行时唯一来源。"""
     reloaded = await _reload_runtime_pools()
     return ReloadResult(reloaded=reloaded, message=f"成功重载 {reloaded} 个 Provider")
@@ -716,9 +720,9 @@ async def reload_providers(
 @router.patch("/{provider_id}/toggle")
 async def toggle_provider(
     provider_id: str,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """切换 Provider 启用状态"""
     async with db.session() as session:
         result = await session.execute(

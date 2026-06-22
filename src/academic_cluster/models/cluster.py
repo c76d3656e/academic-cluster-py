@@ -3,6 +3,7 @@
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +15,7 @@ class Cluster(BaseModel):
     name: str | None = None
     description: str | None = None
     algorithm: str = "leiden"
-    parameters: dict = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     quality_score: float = 0.0
     size: int = 0
     paper_ids: list[str] = Field(default_factory=list)
@@ -45,14 +46,14 @@ class HybridGraphEdge(BaseModel):
     target_paper_id: str
     edge_type: str  # 'knn', 'kg_relation', 'shared_entity', 'evidence', 'quality'
     weight: float = 0.0
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class HybridGraph(BaseModel):
     """混合图"""
 
     edges: list[HybridGraphEdge] = Field(default_factory=list)
-    weights: dict = Field(
+    weights: dict[str, float] = Field(
         default_factory=lambda: {
             "knn": 0.45,
             "kg_relation": 0.25,
@@ -63,7 +64,7 @@ class HybridGraph(BaseModel):
     )
     adjacency: dict[str, dict[str, float]] = Field(default_factory=dict)
 
-    def add_edge(self, edge: HybridGraphEdge):
+    def add_edge(self, edge: HybridGraphEdge) -> None:
         """添加边到图"""
         self.edges.append(edge)
 
@@ -80,8 +81,8 @@ class HybridGraph(BaseModel):
 class CommunityVisualization(BaseModel):
     """社区可视化数据"""
 
-    nodes: list[dict] = Field(default_factory=list)
-    edges: list[dict] = Field(default_factory=list)
-    clusters: list[dict] = Field(default_factory=list)
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    clusters: list[dict[str, Any]] = Field(default_factory=list)
     layout: str = "force"  # 'force', 'circular', 'hierarchical'
-    metadata: dict = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)

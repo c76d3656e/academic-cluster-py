@@ -9,6 +9,7 @@
 
 import asyncio
 import traceback
+from typing import Any
 
 import structlog
 
@@ -22,12 +23,12 @@ DEFAULT_GAP_ANALYSIS_TIMEOUT_S = 180
 
 
 def _analyze_community_gaps(
-    clusters: list[dict],
-    evidence_cards: list[dict],
-    kg_entities: list[dict],
-    papers: list[dict],
-) -> list[dict]:
-    paper_evidence_map: dict[str, list[dict]] = {}
+    clusters: list[dict[str, Any]],
+    evidence_cards: list[dict[str, Any]],
+    kg_entities: list[dict[str, Any]],
+    papers: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    paper_evidence_map: dict[str, list[dict[str, Any]]] = {}
     for card in evidence_cards:
         pid = str(card.get("paper_id", ""))
         if pid:
@@ -81,7 +82,7 @@ def _analyze_community_gaps(
     return gap_reports
 
 
-def _int_config(config: dict, key: str, default: int) -> int:
+def _int_config(config: dict[str, Any], key: str, default: int) -> int:
     try:
         return int(config.get(key, default))
     except (TypeError, ValueError):
@@ -90,9 +91,9 @@ def _int_config(config: dict, key: str, default: int) -> int:
 
 async def _refine_gaps_with_llm(
     topic: str,
-    gap_reports: list[dict],
+    gap_reports: list[dict[str, Any]],
     timeout_s: int = DEFAULT_GAP_ANALYSIS_TIMEOUT_S,
-) -> tuple[list[dict], bool]:
+) -> tuple[list[dict[str, Any]], bool]:
     from langchain_core.messages import HumanMessage, SystemMessage
 
     from ...services.llm_client import ainvoke_with_callbacks, create_llm
@@ -157,7 +158,7 @@ async def _refine_gaps_with_llm(
     return gap_reports, judge_available
 
 
-async def gap_analysis_node(state: PipelineState) -> dict:
+async def gap_analysis_node(state: PipelineState) -> dict[str, Any]:
     """
     社区差距分析（对齐 Rust 版 community_gap_analysis）
 

@@ -6,6 +6,7 @@
 
 import asyncio
 import traceback
+from typing import Any
 
 import structlog
 
@@ -36,7 +37,7 @@ def _select_evidence_paper_ids(
     return selected
 
 
-async def evidence_cards_node(state: PipelineState) -> dict:
+async def evidence_cards_node(state: PipelineState) -> dict[str, Any]:
     """
     生成证据卡片
 
@@ -88,7 +89,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
         async with db.session() as session:
             from sqlalchemy import text
 
-            result = await session.execute(
+            db_result = await session.execute(
                 text("""
                     SELECT id, paper_id
                     FROM evidence_cards
@@ -96,7 +97,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
                 """),
                 {"project_id": state.project_id, "pids": paper_ids_to_check},
             )
-            rows = result.fetchall()
+            rows = db_result.fetchall()
             for row in rows:
                 existing_card_ids.append(str(row[0]))
                 already_done_paper_ids.add(str(row[1]))
@@ -118,7 +119,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
     remaining_papers = [p for p in papers if p["id"] not in already_done_paper_ids]
     if not remaining_papers:
         logger.info("All papers already have evidence cards, skipping")
-        result = {
+        skip_result: dict[str, Any] = {
             "evidence_card_ids": existing_card_ids,
             "status": "evidence_generated",
         }
@@ -131,7 +132,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
                     "skipped": True,
                 },
             )
-        return result
+        return skip_result
 
     try:
         await send_progress(
@@ -169,7 +170,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
         except (TypeError, ValueError):
             timeout_s = 120
 
-        def _progress(completed: int, total: int):
+        def _progress(completed: int, total: int) -> None:
             _task = asyncio.ensure_future(  # noqa: RUF006
                 send_progress(
                     state.project_id,
@@ -226,7 +227,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
             f"证据卡片生成完成，共 {len(all_card_ids)} 张",
         )
 
-        result = {
+        final_result: dict[str, Any] = {
             "evidence_card_ids": all_card_ids,
             "status": "evidence_generated",
         }
@@ -239,7 +240,7 @@ async def evidence_cards_node(state: PipelineState) -> dict:
                     "total_cards": len(all_card_ids),
                 },
             )
-        return result
+        return final_result
 
     except Exception as e:
         if tracker:

@@ -6,6 +6,7 @@
 
 import asyncio
 import traceback
+from typing import Any
 
 import structlog
 
@@ -18,7 +19,7 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 
-async def kg_extraction_node(state: PipelineState) -> dict:
+async def kg_extraction_node(state: PipelineState) -> dict[str, Any]:
     """
     知识图谱提取
 
@@ -92,30 +93,30 @@ async def kg_extraction_node(state: PipelineState) -> dict:
         async with db.session() as session:
             from sqlalchemy import text
 
-            result = await session.execute(
+            db_result = await session.execute(
                 text("""SELECT DISTINCT unnest(paper_ids) as pid
                         FROM kg_entities
                         WHERE paper_ids && :pids"""),
                 {"pids": paper_ids_to_check},
             )
-            already_extracted_paper_ids = {str(row[0]) for row in result.fetchall()}
+            already_extracted_paper_ids = {str(row[0]) for row in db_result.fetchall()}
 
         if already_extracted_paper_ids:
             # 鏀堕泦宸叉湁鐨勫疄浣撳拰鍏崇郴 ID
             async with db.session() as session:
-                result = await session.execute(
+                db_result = await session.execute(
                     text("""SELECT id FROM kg_entities
                             WHERE paper_ids && :pids"""),
                     {"pids": paper_ids_to_check},
                 )
-                existing_entity_ids = [str(row[0]) for row in result.fetchall()]
+                existing_entity_ids = [str(row[0]) for row in db_result.fetchall()]
 
-                result = await session.execute(
+                db_result = await session.execute(
                     text("""SELECT id FROM kg_relations
                             WHERE paper_ids && :pids"""),
                     {"pids": paper_ids_to_check},
                 )
-                existing_relation_ids = [str(row[0]) for row in result.fetchall()]
+                existing_relation_ids = [str(row[0]) for row in db_result.fetchall()]
 
             logger.info(
                 "Resuming KG extraction, skipping already processed papers",
@@ -135,7 +136,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
     ]
     if not remaining_papers:
         logger.info("All papers already have KG, skipping extraction")
-        result = {
+        skip_result: dict[str, Any] = {
             "kg_entity_ids": existing_entity_ids,
             "kg_relation_ids": existing_relation_ids,
             "status": "kg_extracted",
@@ -150,7 +151,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
                     "skipped": True,
                 },
             )
-        return result
+        return skip_result
 
     try:
         from ...agents.kg_extraction import normalized_name as norm_name
@@ -163,7 +164,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
 
         semaphore = asyncio.Semaphore(concurrency)
 
-        async def extract_and_save(idx: int, paper: dict) -> None:
+        async def extract_and_save(idx: int, paper: dict[str, Any]) -> None:
             """鎻愬彇鍗曠瘒璁烘枃鐨?KG 骞剁珛鍗冲啓鍏?DB锛屼腑鏂笉涓㈠け"""
             nonlocal completed_count
             async with semaphore:
@@ -266,7 +267,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
             progress=1.0,
         )
 
-        result = {
+        final_result: dict[str, Any] = {
             "kg_entity_ids": all_entity_ids,
             "kg_relation_ids": all_relation_ids,
             "status": "kg_extracted",
@@ -280,7 +281,7 @@ async def kg_extraction_node(state: PipelineState) -> dict:
                     "relations": len(all_relation_ids),
                 },
             )
-        return result
+        return final_result
 
     except Exception as e:
         if tracker:

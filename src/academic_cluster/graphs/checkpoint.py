@@ -11,6 +11,7 @@ import time
 import traceback
 from collections.abc import Callable
 from functools import wraps
+from typing import Any
 
 import structlog
 
@@ -25,7 +26,7 @@ from ..services.observability import (
 logger = structlog.get_logger()
 
 
-def with_audit(node_name: str):
+def with_audit(node_name: str) -> Callable[..., Any]:
     """
     装饰器：为节点添加审计日志
 
@@ -40,9 +41,9 @@ def with_audit(node_name: str):
     不需要手动保存。
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        async def wrapper(state, *args, **kwargs):
+        async def wrapper(state: Any, *args: Any, **kwargs: Any) -> Any:
             db = get_database()
             project_id = state.project_id if hasattr(state, "project_id") else None
             start_time = time.time()

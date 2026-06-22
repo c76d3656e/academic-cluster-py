@@ -5,6 +5,7 @@ API 路由定义
 import asyncio
 import contextlib
 import uuid
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -19,11 +20,11 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 # 正在运行的 pipeline task 映射（project_id → asyncio.Task），用于暂停
-_running_pipelines: dict[str, asyncio.Task] = {}
+_running_pipelines: dict[str, asyncio.Task[None]] = {}
 
 
 @router.get("/features")
-async def get_features(db: DatabaseService = Depends(get_database)):
+async def get_features(db: DatabaseService = Depends(get_database)) -> dict[str, Any]:
     """获取 UI 功能开关（无需登录）"""
     try:
         async with db.session() as session:
@@ -47,7 +48,7 @@ class CreateProjectRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     query: str = Field(..., min_length=1, max_length=2000)
     description: str | None = Field(None, max_length=5000)
-    config: dict | None = None
+    config: dict[str, Any] | None = None
 
 
 class ProjectResponse(BaseModel):
@@ -66,7 +67,7 @@ class PipelineStatusResponse(BaseModel):
     project_id: str
     status: str
     current_node: str | None = None
-    progress: dict | None = None
+    progress: dict[str, Any] | None = None
 
 
 class OutlineConfirmRequest(BaseModel):
@@ -74,7 +75,7 @@ class OutlineConfirmRequest(BaseModel):
 
     project_id: str
     approved: bool
-    edited_outline: dict | None = None
+    edited_outline: dict[str, Any] | None = None
 
 
 class ProjectListItem(BaseModel):
@@ -102,9 +103,9 @@ class ProjectListResponse(BaseModel):
 @router.post("/projects", response_model=ProjectResponse)
 async def create_project(
     request: CreateProjectRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> ProjectResponse:
     """创建新项目"""
     project_id = str(uuid.uuid4())
 
@@ -141,9 +142,9 @@ async def create_project(
 async def list_projects(
     skip: int = 0,
     limit: int = 20,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> ProjectListResponse:
     """列出项目"""
     # 安全修复: 限制分页参数范围，防止请求过大数据集
     skip = max(0, skip)
@@ -174,9 +175,9 @@ async def list_projects(
 @router.get("/projects/{project_id}")
 async def get_project_detail(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取项目详情"""
     project = await db.get_project(project_id)
     if not project:
@@ -195,9 +196,9 @@ async def get_project_detail(
 @router.delete("/projects/{project_id}")
 async def delete_project(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """删除项目及关联的调用记录"""
     project = await db.get_project(project_id)
     if not project:
@@ -222,9 +223,9 @@ async def delete_project(
 @router.get("/projects/{project_id}/status", response_model=PipelineStatusResponse)
 async def get_project_status(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> PipelineStatusResponse:
     """获取项目状态"""
     project = await db.get_project(project_id)
     if not project:
@@ -246,9 +247,9 @@ async def get_project_status(
 @router.get("/projects/{project_id}/progress")
 async def get_project_progress(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取项目历史执行日志"""
     from sqlalchemy import text
 
@@ -292,9 +293,9 @@ async def get_project_progress(
 @router.post("/pipeline/{project_id}/start")
 async def start_pipeline(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """启动 Pipeline"""
     project = await db.get_project(project_id)
     if not project:
@@ -313,7 +314,7 @@ async def start_pipeline(
 
     sse_manager = get_sse_manager()
 
-    async def run_in_background():
+    async def run_in_background() -> None:
         try:
             from .admin.pipeline_config import (
                 build_node_config,
@@ -348,9 +349,9 @@ async def start_pipeline(
 @router.post("/pipeline/{project_id}/pause")
 async def pause_pipeline(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """暂停 Pipeline（取消正在运行的 asyncio task，标记为 interrupted）"""
     task = _running_pipelines.get(project_id)
     if not task:
@@ -366,9 +367,9 @@ async def pause_pipeline(
 @router.post("/pipeline/{project_id}/resume")
 async def resume_pipeline(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """从上次失败的检查点恢复 Pipeline"""
     project = await db.get_project(project_id)
     if not project:
@@ -387,7 +388,7 @@ async def resume_pipeline(
 
     sse_manager = get_sse_manager()
 
-    async def run_in_background():
+    async def run_in_background() -> None:
         try:
             # 加载 pipeline 配置（DB 中的可调参数 + 项目自定义配置）
             from .admin.pipeline_config import (
@@ -423,9 +424,9 @@ async def resume_pipeline(
 @router.get("/projects/{project_id}/outline")
 async def get_outline(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取大纲"""
     project = await db.get_project(project_id)
     if not project:
@@ -450,8 +451,8 @@ async def get_outline(
 async def confirm_outline(
     project_id: str,
     request: OutlineConfirmRequest,
-    current_user: dict = Depends(get_current_user),
-):
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, str]:
     """确认大纲"""
     logger.info(
         "Confirming outline",
@@ -473,9 +474,9 @@ async def confirm_outline(
 @router.get("/projects/{project_id}/review")
 async def get_review(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取综述"""
     project = await db.get_project(project_id)
     if not project:
@@ -519,7 +520,7 @@ async def get_review(
     )
     final_review = None
     abstract = None
-    references = []
+    references: list[object] = []
     if final_artifact:
         snapshot = final_artifact.get("state_snapshot") or {}
         if isinstance(snapshot, str):
@@ -549,9 +550,9 @@ async def get_review(
 @router.get("/projects/{project_id}/visualization")
 async def get_visualization(
     project_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取社区可视化数据"""
     project = await db.get_project(project_id)
     if not project:
@@ -579,9 +580,9 @@ async def get_visualization(
 @router.get("/runs/{run_id}/stats")
 async def get_run_stats(
     run_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取 Pipeline 运行统计"""
     stats = await db.get_pipeline_run_stats(run_id)
     if not stats:
@@ -592,9 +593,9 @@ async def get_run_stats(
 @router.get("/runs/{run_id}/nodes")
 async def get_run_nodes(
     run_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取 Pipeline 运行的节点执行列表"""
     stats = await db.get_pipeline_run_stats(run_id)
     if not stats:
@@ -607,9 +608,9 @@ async def get_run_nodes(
 async def get_run_llm_calls(
     run_id: str,
     node_name: str | None = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取 Pipeline 运行的 LLM 调用记录"""
     stats = await db.get_pipeline_run_stats(run_id)
     if not stats:
@@ -623,9 +624,9 @@ async def get_usage_summary(
     run_id: str | None = None,
     project_id: str | None = None,
     days: int = 30,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, Any]:
     """获取用量汇总（按 provider/model 分组）"""
     summary = await db.get_provider_usage_summary(
         run_id=run_id,
@@ -643,20 +644,20 @@ async def get_usage_summary(
 class ConnectionManager:
     """WebSocket 连接管理"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.active_connections: dict[str, list[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket, project_id: str):
+    async def connect(self, websocket: WebSocket, project_id: str) -> None:
         await websocket.accept()
         if project_id not in self.active_connections:
             self.active_connections[project_id] = []
         self.active_connections[project_id].append(websocket)
 
-    def disconnect(self, websocket: WebSocket, project_id: str):
+    def disconnect(self, websocket: WebSocket, project_id: str) -> None:
         if project_id in self.active_connections:
             self.active_connections[project_id].remove(websocket)
 
-    async def send_update(self, project_id: str, data: dict):
+    async def send_update(self, project_id: str, data: dict[str, Any]) -> None:
         if project_id in self.active_connections:
             for connection in self.active_connections[project_id]:
                 with contextlib.suppress(Exception):
@@ -669,7 +670,7 @@ manager = ConnectionManager()
 @router.websocket("/ws/{project_id}")
 async def websocket_endpoint(
     websocket: WebSocket, project_id: str, token: str | None = None
-):
+) -> None:
     """WebSocket 端点，用于实时更新"""
     # 安全修复: WebSocket 连接必须携带有效 token（通过 query 参数传递）
     from ..services.auth import get_token_service

@@ -4,6 +4,8 @@
 提供系统概览统计数据。
 """
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -75,9 +77,9 @@ class AdminOverviewResponse(BaseModel):
 
 @router.get("/overview", response_model=AdminOverviewResponse)
 async def admin_overview(
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> AdminOverviewResponse:
     """获取管理后台概览数据"""
     stats = await db.get_system_stats()
 

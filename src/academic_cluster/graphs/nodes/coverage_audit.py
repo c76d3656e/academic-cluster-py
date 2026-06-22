@@ -11,6 +11,7 @@
 import contextlib
 import re
 import traceback
+from typing import Any
 
 import structlog
 
@@ -37,11 +38,11 @@ def _extract_cited_indices(text: str) -> set[int]:
 
 
 def _compute_cluster_coverage(
-    written_sections: list[dict],
-    clusters: list[dict],
+    written_sections: list[dict[str, Any]],
+    clusters: list[dict[str, Any]],
     core_paper_ids: list[str],
     auxiliary_paper_ids: list[str],
-) -> dict:
+) -> dict[str, Any]:
     """
     计算聚类级覆盖率（对齐 Rust 版 citation_coverage.rs）。
 
@@ -50,9 +51,9 @@ def _compute_cluster_coverage(
     # 构建 paper_id -> cluster_id 映射
     paper_to_cluster: dict[str, int] = {}
     for cluster in clusters:
-        cid = cluster.get("id")
+        cid_int = int(cluster.get("id", 0))
         for pid in cluster.get("paper_ids", []):
-            paper_to_cluster[pid] = cid
+            paper_to_cluster[pid] = cid_int
 
     # 构建 citation_number -> paper_id 映射
     all_paper_ids = core_paper_ids + auxiliary_paper_ids
@@ -80,7 +81,7 @@ def _compute_cluster_coverage(
     cluster_details = []
 
     for cluster in clusters:
-        cid = cluster.get("id")
+        cid: str = str(cluster.get("id", ""))
         cluster_paper_ids = set(cluster.get("paper_ids", []))
         if not cluster_paper_ids:
             continue
@@ -113,7 +114,7 @@ def _compute_cluster_coverage(
 
 
 def _detect_weak_citation_support(
-    written_sections: list[dict],
+    written_sections: list[dict[str, Any]],
     valid_paper_count: int,
 ) -> int:
     """
@@ -145,7 +146,7 @@ def _detect_weak_citation_support(
     return weak_count
 
 
-async def coverage_audit_node(state: PipelineState) -> dict:
+async def coverage_audit_node(state: PipelineState) -> dict[str, Any]:
     """
     覆盖审计（对齐 Rust 版 citation_coverage.rs）
 

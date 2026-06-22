@@ -3,8 +3,8 @@
 """
 
 from .auth import PasswordService, TokenService, get_password_service, get_token_service
-from .cache import CacheService, get_cache
-from .database import DatabaseService, get_database
+from .cache import CacheService, close_cache, get_cache
+from .database import DatabaseService, close_database, get_database
 from .observability import (
     LLMCallbackHandler,
     PipelineTracker,
@@ -21,7 +21,7 @@ from .observability import (
     push_run_id,
     setup_structlog,
 )
-from .vector_store import VectorStoreService, get_vector_store
+from .vector_store import VectorStoreService, close_vector_store, get_vector_store
 
 __all__ = [
     "CacheService",
@@ -32,6 +32,9 @@ __all__ = [
     "TokenService",
     "TokenUsageTracker",
     "VectorStoreService",
+    "close_cache",
+    "close_database",
+    "close_vector_store",
     "create_llm_callback_handler",
     "create_pipeline_tracker",
     "get_cache",

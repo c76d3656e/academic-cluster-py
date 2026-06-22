@@ -33,7 +33,7 @@ def _truncate(text: str, max_len: int = 500) -> str:
     return f"{text[:half]}...({len(text)} chars)...{text[-half:]}"
 
 
-def _summarize_output(output: Any, max_len: int = 500) -> dict:
+def _summarize_output(output: Any, max_len: int = 500) -> dict[str, Any]:
     """生成输出摘要，截断大文本字段"""
     if output is None:
         return {}
@@ -73,7 +73,7 @@ _current_llm_callback: ContextVar[Optional["LLMCallbackHandler"]] = ContextVar(
 )
 
 
-def setup_structlog(log_level: str = "INFO"):
+def setup_structlog(log_level: str = "INFO") -> None:
     """配置 structlog 全局处理器链（应用启动时调用一次）"""
     structlog.configure(
         processors=[
@@ -101,7 +101,7 @@ def setup_structlog(log_level: str = "INFO"):
 class TokenUsageTracker:
     """单次 Pipeline Run 的 token 用量聚合器（线程安全）"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
         self.total_tokens: int = 0
@@ -109,9 +109,9 @@ class TokenUsageTracker:
         self.call_count: int = 0
         self._lock = asyncio.Lock()
         # 按 provider/model 分组统计
-        self.by_provider: dict[str, dict] = {}
+        self.by_provider: dict[str, dict[str, Any]] = {}
         # 按 node 分组统计
-        self.by_node: dict[str, dict] = {}
+        self.by_node: dict[str, dict[str, Any]] = {}
 
     async def record(
         self,
@@ -123,7 +123,7 @@ class TokenUsageTracker:
         completion_tokens: int,
         cost: float,
         latency_ms: int,
-    ):
+    ) -> None:
         async with self._lock:
             self.prompt_tokens += prompt_tokens
             self.completion_tokens += completion_tokens
@@ -168,7 +168,7 @@ class TokenUsageTracker:
             n["total_tokens"] += prompt_tokens + completion_tokens
             n["cost"] += cost
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, Any]:
         """返回完整的 token 用量汇总"""
         return {
             "total_prompt_tokens": self.prompt_tokens,
@@ -202,23 +202,26 @@ class LLMCallbackHandler(BaseCallbackHandler):
     def __init__(
         self,
         tracker: TokenUsageTracker,
-        db_caller: Callable | None = None,
+        db_caller: Callable[..., Any] | None = None,
     ):
         super().__init__()
         self.tracker = tracker
         self.db_caller = db_caller  # async callable(node_name, provider, model, call_type, prompt_tokens, completion_tokens, latency_ms)
         self._start_times: dict[str, float] = {}
         # 捕获主事件循环，用于从线程池调度异步调用
+        self._loop: asyncio.AbstractEventLoop | None = None
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
-            self._loop = None
+            pass
 
-    def on_llm_start(self, serialized, prompts, *, run_id, **kwargs):
+    def on_llm_start(
+        self, serialized: Any, prompts: Any, *, run_id: Any, **kwargs: Any
+    ) -> None:
         self._start_times[str(run_id)] = time.monotonic()
         structlog.get_logger().info("LLM callback on_llm_start", run_id=str(run_id))
 
-    def on_llm_end(self, response: LLMResult, *, run_id, **kwargs):
+    def on_llm_end(self, response: LLMResult, *, run_id: Any, **kwargs: Any) -> None:
         try:
             start_time = self._start_times.pop(str(run_id), None)
             elapsed_ms = (
@@ -228,7 +231,7 @@ class LLMCallbackHandler(BaseCallbackHandler):
             )
 
             # 提取 token 用量
-            usage: dict = {}
+            usage: dict[str, Any] = {}
             if response.llm_output:
                 usage = response.llm_output.get("token_usage", {})
 
@@ -280,7 +283,7 @@ class LLMCallbackHandler(BaseCallbackHandler):
                 "LLM callback on_llm_end error", error=str(e)
             )
 
-    def on_llm_error(self, error, *, run_id, **kwargs):
+    def on_llm_error(self, error: Any, *, run_id: Any, **kwargs: Any) -> None:
         start_time = self._start_times.pop(str(run_id), None)
         elapsed_ms = (
             int((time.monotonic() - start_time) * 1000) if start_time is not None else 0
@@ -308,18 +311,21 @@ class PipelineStatusCallback(BaseCallbackHandler):
     通过 on_chain_start 在节点实际开始前更新状态。
     """
 
-    def __init__(self, project_id: str, db_caller: Callable):
+    def __init__(self, project_id: str, db_caller: Callable[..., Any]) -> None:
         super().__init__()
         self.project_id = project_id
         self.db_caller = db_caller  # async callable(project_id, status)
-        self._last_node = None
+        self._last_node: str | None = None
         # 捕获主事件循环，用于从线程池调度异步调用
+        self._loop: asyncio.AbstractEventLoop | None = None
         try:
             self._loop = asyncio.get_running_loop()
         except RuntimeError:
-            self._loop = None
+            pass
 
-    def on_chain_start(self, serialized, inputs, *, run_id, **kwargs):
+    def on_chain_start(
+        self, serialized: Any, inputs: Any, *, run_id: Any, **kwargs: Any
+    ) -> None:
         """LangGraph 节点开始时调用"""
         try:
             # LangGraph 的 node name 从 serialized.name 或 inputs 的 __name__ 获取
@@ -330,7 +336,7 @@ class PipelineStatusCallback(BaseCallbackHandler):
                 # 尝试从 kwargs 获取
                 node_name = kwargs.get("name", "")
             if node_name and node_name != self._last_node:
-                self._last_node = node_name
+                self._last_node = str(node_name)
                 status = f"running:{node_name}"
                 structlog.get_logger().info(
                     "PipelineStatusCallback: node started", node=node_name
@@ -378,8 +384,8 @@ class PipelineTracker:
         self,
         project_id: str,
         topic: str = "",
-        config: dict | None = None,
-    ):
+        config: dict[str, Any] | None = None,
+    ) -> None:
         self.project_id = project_id
         self.topic = topic
         self.config = config or {}
@@ -387,10 +393,10 @@ class PipelineTracker:
         self.token_tracker = TokenUsageTracker()
         self._node_ids: dict[str, str] = {}  # node_name -> execution_id
         self._node_starts: dict[str, float] = {}
-        self._start_time: float = 0
+        self._start_time: float = 0.0
         self.logger = structlog.get_logger()
 
-    async def start(self, db_create_run: Callable | None = None) -> str:
+    async def start(self, db_create_run: Callable[..., Any] | None = None) -> str:
         """启动 pipeline run 记录"""
         self._start_time = time.monotonic()
         if db_create_run:
@@ -411,8 +417,8 @@ class PipelineTracker:
         node_name: str,
         node_type: str = "llm",
         index: int = 0,
-        db_create_node: Callable | None = None,
-    ):
+        db_create_node: Callable[..., Any] | None = None,
+    ) -> None:
         """开始节点执行"""
         _current_node.set(node_name)
         self._node_starts[node_name] = time.monotonic()
@@ -434,10 +440,10 @@ class PipelineTracker:
         status: str = "succeeded",
         error_message: str | None = None,
         error_traceback: str | None = None,
-        input_summary: dict | None = None,
-        output_summary: dict | None = None,
-        db_finish_node: Callable | None = None,
-    ):
+        input_summary: dict[str, Any] | None = None,
+        output_summary: dict[str, Any] | None = None,
+        db_finish_node: Callable[..., Any] | None = None,
+    ) -> None:
         """结束节点执行"""
         node_start = self._node_starts.pop(node_name, None)
         if node_start is not None:
@@ -482,8 +488,8 @@ class PipelineTracker:
         api_base_url: str = "",
         api_key_hint: str = "",
         input_preview: str = "",
-        request_metadata: dict | None = None,
-        db_create_call: Callable | None = None,
+        request_metadata: dict[str, Any] | None = None,
+        db_create_call: Callable[..., Any] | None = None,
     ) -> str | None:
         """记录 LLM 调用开始，返回 call_id"""
         call_id = None
@@ -513,8 +519,8 @@ class PipelineTracker:
         error_message: str | None = None,
         http_status_code: int | None = None,
         output_preview: str = "",
-        db_finish_call: Callable | None = None,
-    ):
+        db_finish_call: Callable[..., Any] | None = None,
+    ) -> None:
         """记录 LLM 调用完成"""
         node_name = _current_node.get() or "unknown"
 
@@ -557,8 +563,8 @@ class PipelineTracker:
         self,
         status: str = "succeeded",
         error_message: str | None = None,
-        db_finish_run: Callable | None = None,
-    ) -> dict:
+        db_finish_run: Callable[..., Any] | None = None,
+    ) -> dict[str, Any]:
         """完成 pipeline run，返回 token 用量汇总"""
         elapsed = time.monotonic() - self._start_time
         summary = self.token_tracker.summary()
@@ -595,7 +601,7 @@ class PipelineTracker:
 
 def create_llm_callback_handler(
     tracker: TokenUsageTracker,
-    db_caller: Callable | None = None,
+    db_caller: Callable[..., Any] | None = None,
 ) -> LLMCallbackHandler:
     """创建 LLM 回调处理器实例"""
     return LLMCallbackHandler(tracker=tracker, db_caller=db_caller)
@@ -604,7 +610,7 @@ def create_llm_callback_handler(
 def create_pipeline_tracker(
     project_id: str,
     topic: str = "",
-    config: dict | None = None,
+    config: dict[str, Any] | None = None,
 ) -> PipelineTracker:
     """创建 Pipeline 追踪器实例"""
     return PipelineTracker(project_id=project_id, topic=topic, config=config)
@@ -673,7 +679,7 @@ def pop_current_project() -> None:
 def get_resolved_run_id() -> str | None:
     """三级回退获取 run_id：ContextVar → tracker → 栈"""
     tracker = get_current_tracker()
-    trk_run_id = getattr(tracker, "run_id", None)
+    trk_run_id: str | None = getattr(tracker, "run_id", None)
     if trk_run_id:
         return trk_run_id
     ctx_run_id = _current_run_id.get()

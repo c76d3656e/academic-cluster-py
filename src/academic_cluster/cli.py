@@ -11,7 +11,7 @@ logger = structlog.get_logger()
 console = Console()
 
 
-def main():
+def main() -> None:
     """CLI 主入口"""
     console.print("[bold blue]Academic Cluster[/bold blue]")
     console.print("学术论文聚类与综述生成系统")

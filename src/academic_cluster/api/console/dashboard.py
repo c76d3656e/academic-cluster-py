@@ -5,6 +5,7 @@ Console 仪表盘路由
 """
 
 from datetime import datetime
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends
@@ -60,9 +61,9 @@ class DashboardOverview(BaseModel):
 
 @router.get("/overview", response_model=DashboardOverview)
 async def get_dashboard_overview(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-):
+) -> DashboardOverview:
     """获取用户仪表盘概览数据"""
     user_id = current_user["id"]
 

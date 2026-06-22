@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 
 class CandidateSelectionSource(StrEnum):
@@ -61,7 +62,7 @@ class SectionCitationPlan:
     section_title: str
     key_clusters: list[int]
     candidate_paper_ids: list[str]  # 按优先级排序的论文 ID
-    candidate_details: list[dict]  # 论文详情，用于渲染
+    candidate_details: list[dict[str, Any]]  # 论文详情，用于渲染
 
     @property
     def primary_paper_ids(self) -> list[str]:
@@ -111,8 +112,8 @@ def _fallback_section_clusters(
 
 
 def _build_paper_cluster_map(
-    papers: list[dict],
-    clusters: list[dict],
+    papers: list[dict[str, Any]],
+    clusters: list[dict[str, Any]],
 ) -> tuple[dict[str, int], dict[int, list[str]]]:
     """
     构建论文-聚类映射。
@@ -135,7 +136,7 @@ def _build_paper_cluster_map(
 
 
 def _get_ordered_clusters(
-    papers: list[dict], paper_to_cluster: dict[str, int]
+    papers: list[dict[str, Any]], paper_to_cluster: dict[str, int]
 ) -> list[int]:
     """按论文出现顺序返回去重的聚类 ID 列表（对齐 Rust 版 ordered_input_clusters）"""
     seen: set[int] = set()
@@ -149,7 +150,7 @@ def _get_ordered_clusters(
 
 
 def _get_cluster_counts(
-    papers: list[dict],
+    papers: list[dict[str, Any]],
     paper_to_cluster: dict[str, int],
     ordered_clusters: list[int],
 ) -> dict[int, int]:
@@ -165,8 +166,8 @@ def _get_cluster_counts(
 
 def _nearby_hybrid_candidates(
     anchor_indices: list[int],
-    papers: list[dict],
-    hybrid_edges: list[dict],
+    papers: list[dict[str, Any]],
+    hybrid_edges: list[dict[str, Any]],
 ) -> list[NearbyHybridCandidate]:
     """
     对齐 Rust 版 nearby_hybrid_candidates：从混合图边中找跨聚类邻居。
@@ -221,11 +222,11 @@ def _nearby_hybrid_candidates(
 
 
 def plan_review_citations(
-    sections: list[dict],
-    papers: list[dict],
-    clusters: list[dict],
+    sections: list[dict[str, Any]],
+    papers: list[dict[str, Any]],
+    clusters: list[dict[str, Any]],
     section_reference_target: int = 30,
-    hybrid_edges: list[dict] | None = None,
+    hybrid_edges: list[dict[str, Any]] | None = None,
     core_reference_count: int = 160,
 ) -> list[SectionCitationPlan]:
     """
@@ -283,14 +284,14 @@ def plan_review_citations(
 def _plan_section_citations(
     section_index: int,
     section_count: int,
-    section: dict,
-    papers: list[dict],
+    section: dict[str, Any],
+    papers: list[dict[str, Any]],
     paper_to_cluster: dict[str, int],
     cluster_to_papers: dict[int, list[str]],
     ordered_clusters: list[int],
     cluster_count: int,
     target: int,
-    hybrid_edges: list[dict],
+    hybrid_edges: list[dict[str, Any]],
     core_reference_count: int,
     cluster_counts: dict[int, int],
 ) -> SectionCitationPlan:
@@ -353,7 +354,7 @@ def _plan_section_citations(
     # 按优先级选取（对齐 Rust 版 CandidateSelectionWriter）
     selected_ids: list[str] = []
     seen: set[str] = set()
-    details: list[dict] = []
+    details: list[dict[str, Any]] = []
 
     def _push_idx(idx: int, source: CandidateSelectionSource) -> None:
         if len(selected_ids) >= target:
@@ -451,7 +452,7 @@ def _plan_section_citations(
 
 def render_section_references(
     plan: SectionCitationPlan,
-    global_paper_map: dict[str, dict],
+    global_paper_map: dict[str, dict[str, Any]],
 ) -> str:
     """
     将章节的候选参考文献渲染为编号列表。
@@ -480,7 +481,7 @@ def render_section_references(
     return "\n".join(lines)
 
 
-def citation_plan_summary(plans: list[SectionCitationPlan]) -> dict:
+def citation_plan_summary(plans: list[SectionCitationPlan]) -> dict[str, Any]:
     """
     生成引用计划的统计摘要。
 
@@ -488,7 +489,7 @@ def citation_plan_summary(plans: list[SectionCitationPlan]) -> dict:
         包含各章节和全局的候选来源计数统计字典
     """
 
-    def _source_counts(details: list[dict]) -> dict[str, int]:
+    def _source_counts(details: list[dict[str, Any]]) -> dict[str, int]:
         counts: dict[str, int] = {}
         for d in details:
             src = d.get("source", "unknown")
@@ -496,7 +497,7 @@ def citation_plan_summary(plans: list[SectionCitationPlan]) -> dict:
         return counts
 
     global_counts: dict[str, int] = {}
-    sections_summary: list[dict] = []
+    sections_summary: list[dict[str, Any]] = []
 
     for plan in plans:
         section_counts = _source_counts(plan.candidate_details)
@@ -514,8 +515,9 @@ def citation_plan_summary(plans: list[SectionCitationPlan]) -> dict:
             }
         )
 
-    return {
+    result: dict[str, Any] = {
         "section_count": len(plans),
         "sections": sections_summary,
         "candidate_source_counts": global_counts,
     }
+    return result

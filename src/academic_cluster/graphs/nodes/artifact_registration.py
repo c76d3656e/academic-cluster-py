@@ -2,6 +2,8 @@
 产出物注册节点 - 生成最终产出物
 """
 
+from typing import Any
+
 import structlog
 
 from ...services.database import get_database
@@ -10,7 +12,7 @@ from ..state import PipelineState
 logger = structlog.get_logger()
 
 
-async def artifact_registration_node(state: PipelineState) -> dict:
+async def artifact_registration_node(state: PipelineState) -> dict[str, Any]:
     """
     产出物注册
 

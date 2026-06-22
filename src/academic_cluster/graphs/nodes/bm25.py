@@ -2,6 +2,8 @@
 BM25 节点 - 使用 BM25 文本检索筛选论文
 """
 
+from typing import Any
+
 import structlog
 
 from ...services.database import get_database
@@ -12,7 +14,7 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 
-async def bm25_node(state: PipelineState) -> dict:
+async def bm25_node(state: PipelineState) -> dict[str, Any]:
     """
     BM25 文本检索评分与筛选
 

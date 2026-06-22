@@ -20,9 +20,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 
-def _convert_uuid_fields(row: dict) -> dict:
+def _convert_uuid_fields(row: dict[str, Any]) -> dict[str, Any]:
     """将 UUID 字段转换为字符串"""
-    result = {}
+    result: dict[str, Any] = {}
     for key, value in row.items():
         if isinstance(value, uuid.UUID) or (
             hasattr(value, "__class__") and "UUID" in value.__class__.__name__
@@ -101,7 +101,7 @@ class DatabaseService:
 
         logger.info("Database service initialized")
 
-    async def close(self):
+    async def close(self) -> None:
         """关闭数据库连接"""
         await self.engine.dispose()
         logger.info("Database connection closed")
@@ -117,7 +117,7 @@ class DatabaseService:
                 await session.rollback()
                 raise
 
-    async def save_paper(self, paper_data: dict) -> str:
+    async def save_paper(self, paper_data: dict[str, Any]) -> str:
         """保存论文到数据库，返回数据库中实际的 paper_id"""
         paper_id = paper_data.get("id", str(uuid.uuid4()))
 
@@ -183,7 +183,7 @@ class DatabaseService:
         logger.debug("Saved paper", paper_id=actual_id)
         return actual_id
 
-    async def get_paper(self, paper_id: str) -> dict | None:
+    async def get_paper(self, paper_id: str) -> dict[str, Any] | None:
         """获取论文详情"""
         async with self.session() as session:
             result = await session.execute(
@@ -196,7 +196,7 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def save_papers_batch(self, papers: list[dict]) -> list[str]:
+    async def save_papers_batch(self, papers: list[dict[str, Any]]) -> list[str]:
         """批量保存论文"""
         paper_ids = []
         for paper in papers:
@@ -206,7 +206,7 @@ class DatabaseService:
         logger.info("Saved papers batch", count=len(paper_ids))
         return paper_ids
 
-    async def get_papers_by_ids(self, paper_ids: list[str]) -> list[dict]:
+    async def get_papers_by_ids(self, paper_ids: list[str]) -> list[dict[str, Any]]:
         """批量获取论文"""
         if not paper_ids:
             return []
@@ -250,9 +250,9 @@ class DatabaseService:
 
         return embedding_id
 
-    async def save_cluster(self, cluster_data: dict) -> str:
+    async def save_cluster(self, cluster_data: dict[str, Any]) -> str:
         """保存聚类结果"""
-        cluster_id = cluster_data.get("id", str(uuid.uuid4()))
+        cluster_id: str = str(cluster_data.get("id") or uuid.uuid4())
 
         async with self.session() as session:
             await session.execute(
@@ -277,7 +277,7 @@ class DatabaseService:
         logger.info("Saved cluster", cluster_id=cluster_id)
         return cluster_id
 
-    async def save_kg_entities(self, entities: list[dict]) -> list[str]:
+    async def save_kg_entities(self, entities: list[dict[str, Any]]) -> list[str]:
         """保存知识图谱实体（ON CONFLICT 合并 paper_ids，支持并发写入）"""
         entity_ids = []
 
@@ -312,7 +312,7 @@ class DatabaseService:
         logger.info("Saved KG entities", count=len(entity_ids))
         return entity_ids
 
-    async def save_kg_relations(self, relations: list[dict]) -> list[str]:
+    async def save_kg_relations(self, relations: list[dict[str, Any]]) -> list[str]:
         """保存知识图谱关系"""
         relation_ids = []
 
@@ -345,7 +345,7 @@ class DatabaseService:
         logger.info("Saved KG relations", count=len(relation_ids))
         return relation_ids
 
-    async def save_evidence_card(self, card_data: dict) -> str:
+    async def save_evidence_card(self, card_data: dict[str, Any]) -> str:
         """保存证据卡片"""
         card_id = card_data.get("id", str(uuid.uuid4()))
 
@@ -390,7 +390,7 @@ class DatabaseService:
         logger.info("Saved evidence card", card_id=actual_id)
         return actual_id
 
-    async def save_community_memory(self, memory_data: dict) -> str:
+    async def save_community_memory(self, memory_data: dict[str, Any]) -> str:
         """Persist a synthesized community memory, upserting by project and cluster."""
         memory_id = memory_data.get("id", str(uuid.uuid4()))
 
@@ -466,7 +466,9 @@ class DatabaseService:
         logger.info("Saved community memory", memory_id=actual_id)
         return actual_id
 
-    async def get_community_memories_by_ids(self, memory_ids: list[str]) -> list[dict]:
+    async def get_community_memories_by_ids(
+        self, memory_ids: list[str]
+    ) -> list[dict[str, Any]]:
         """Fetch community memories by ids."""
         if not memory_ids:
             return []
@@ -483,7 +485,9 @@ class DatabaseService:
         memories.sort(key=lambda memory: order.get(str(memory.get("id")), len(order)))
         return memories
 
-    async def get_community_memories_by_project(self, project_id: str) -> list[dict]:
+    async def get_community_memories_by_project(
+        self, project_id: str
+    ) -> list[dict[str, Any]]:
         """Fetch all community memories for a project."""
         async with self.session() as session:
             result = await session.execute(
@@ -495,9 +499,9 @@ class DatabaseService:
             rows = result.fetchall()
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def save_outline(self, outline_data: dict) -> str:
+    async def save_outline(self, outline_data: dict[str, Any]) -> str:
         """保存大纲"""
-        outline_id = outline_data.get("id", str(uuid.uuid4()))
+        outline_id: str = str(outline_data.get("id") or uuid.uuid4())
 
         # 转换 sections 为 JSON 字符串
         sections = outline_data.get("sections")
@@ -523,7 +527,7 @@ class DatabaseService:
         logger.info("Saved outline", outline_id=outline_id)
         return outline_id
 
-    async def save_written_section(self, section_data: dict) -> str:
+    async def save_written_section(self, section_data: dict[str, Any]) -> str:
         """保存或更新已写章节"""
         # Use deterministic ID based on outline_id + section name to prevent duplicates
         if not section_data.get("id"):
@@ -560,15 +564,15 @@ class DatabaseService:
         logger.debug("Saved written section", section_id=section_id)
         return section_id
 
-    async def save_artifact(self, artifact_data: dict) -> str:
+    async def save_artifact(self, artifact_data: dict[str, Any]) -> str:
         """保存产出物"""
-        artifact_id = artifact_data.get("id", str(uuid.uuid4()))
+        artifact_id: str = str(artifact_data.get("id") or uuid.uuid4())
 
         # 产出物通常保存为文件，这里只记录元数据
         logger.info("Saved artifact", artifact_id=artifact_id)
         return artifact_id
 
-    async def get_clusters_by_ids(self, cluster_ids: list[str]) -> list[dict]:
+    async def get_clusters_by_ids(self, cluster_ids: list[str]) -> list[dict[str, Any]]:
         """批量获取聚类详情（包含 paper_ids）"""
         if not cluster_ids:
             return []
@@ -598,7 +602,7 @@ class DatabaseService:
 
     async def save_cluster_assignments(
         self, cluster_id: str, paper_ids: list[str], confidence: float = 1.0
-    ):
+    ) -> None:
         """保存聚类分配"""
         async with self.session() as session:
             for paper_id in paper_ids:
@@ -622,7 +626,9 @@ class DatabaseService:
             paper_count=len(paper_ids),
         )
 
-    async def get_kg_entities_by_ids(self, entity_ids: list[str]) -> list[dict]:
+    async def get_kg_entities_by_ids(
+        self, entity_ids: list[str]
+    ) -> list[dict[str, Any]]:
         """批量获取知识图谱实体"""
         if not entity_ids:
             return []
@@ -636,7 +642,9 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def get_kg_relations_by_ids(self, relation_ids: list[str]) -> list[dict]:
+    async def get_kg_relations_by_ids(
+        self, relation_ids: list[str]
+    ) -> list[dict[str, Any]]:
         """批量获取知识图谱关系"""
         if not relation_ids:
             return []
@@ -650,7 +658,9 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def get_evidence_cards_by_ids(self, card_ids: list[str]) -> list[dict]:
+    async def get_evidence_cards_by_ids(
+        self, card_ids: list[str]
+    ) -> list[dict[str, Any]]:
         """批量获取证据卡片"""
         if not card_ids:
             return []
@@ -664,7 +674,9 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def get_written_sections_by_ids(self, section_ids: list[str]) -> list[dict]:
+    async def get_written_sections_by_ids(
+        self, section_ids: list[str]
+    ) -> list[dict[str, Any]]:
         """批量获取已写章节"""
         if not section_ids:
             return []
@@ -678,7 +690,7 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def get_outline_by_id(self, outline_id: str) -> dict | None:
+    async def get_outline_by_id(self, outline_id: str) -> dict[str, Any] | None:
         """获取大纲详情"""
         if not outline_id:
             return None
@@ -694,7 +706,7 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def get_project(self, project_id: str) -> dict | None:
+    async def get_project(self, project_id: str) -> dict[str, Any] | None:
         """获取项目详情"""
         async with self.session() as session:
             result = await session.execute(
@@ -707,9 +719,9 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def save_pipeline_checkpoint(self, checkpoint_data: dict) -> str:
+    async def save_pipeline_checkpoint(self, checkpoint_data: dict[str, Any]) -> str:
         """保存 Pipeline 检查点"""
-        checkpoint_id = checkpoint_data.get("id", str(uuid.uuid4()))
+        checkpoint_id: str = str(checkpoint_data.get("id") or uuid.uuid4())
 
         async with self.session() as session:
             await session.execute(
@@ -741,7 +753,7 @@ class DatabaseService:
 
     async def get_pipeline_checkpoint(
         self, project_id: str, node_name: str
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         """获取 Pipeline 检查点"""
         async with self.session() as session:
             result = await session.execute(
@@ -758,7 +770,7 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def get_latest_checkpoint(self, project_id: str) -> dict | None:
+    async def get_latest_checkpoint(self, project_id: str) -> dict[str, Any] | None:
         """获取项目最新的检查点"""
         async with self.session() as session:
             result = await session.execute(
@@ -777,7 +789,7 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def get_all_checkpoints(self, project_id: str) -> list[dict]:
+    async def get_all_checkpoints(self, project_id: str) -> list[dict[str, Any]]:
         """获取项目所有检查点（按创建时间排序）"""
         async with self.session() as session:
             result = await session.execute(
@@ -792,7 +804,9 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def get_latest_successful_checkpoint(self, project_id: str) -> dict | None:
+    async def get_latest_successful_checkpoint(
+        self, project_id: str
+    ) -> dict[str, Any] | None:
         """获取项目最新的成功检查点（含完整 PipelineState）"""
         async with self.session() as session:
             result = await session.execute(
@@ -817,7 +831,7 @@ class DatabaseService:
                 cp["state_snapshot"] = json.loads(snapshot)
         return cp
 
-    async def save_audit_log(self, audit_data: dict) -> str:
+    async def save_audit_log(self, audit_data: dict[str, Any]) -> str:
         """保存审计日志"""
         audit_id = str(uuid.uuid4())
 
@@ -841,7 +855,7 @@ class DatabaseService:
 
     async def get_audit_logs(
         self, project_id: str, node_name: str | None = None
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """获取审计日志"""
         async with self.session() as session:
             if node_name:
@@ -866,11 +880,11 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    async def save_project(self, project_data: dict) -> str:
+    async def save_project(self, project_data: dict[str, Any]) -> str:
         """保存项目"""
         import json
 
-        project_id = project_data.get("id", str(uuid.uuid4()))
+        project_id: str = str(project_data.get("id") or uuid.uuid4())
         user_id = project_data.get("user_id")
         config = project_data.get("config")
         if isinstance(config, dict):
@@ -916,7 +930,7 @@ class DatabaseService:
     # 用户相关方法
     # =========================================================================
 
-    async def save_user(self, user_data: dict) -> str:
+    async def save_user(self, user_data: dict[str, Any]) -> str:
         """保存用户，返回用户 ID"""
         user_id = user_data.get("id", str(uuid.uuid4()))
 
@@ -942,7 +956,7 @@ class DatabaseService:
         logger.info("Saved user", user_id=actual_id)
         return actual_id
 
-    async def get_user_by_id(self, user_id: str) -> dict | None:
+    async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
         """根据 ID 获取用户"""
         async with self.session() as session:
             result = await session.execute(
@@ -954,7 +968,7 @@ class DatabaseService:
             return None
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def get_user_by_email(self, email: str) -> dict | None:
+    async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         """根据邮箱获取用户"""
         async with self.session() as session:
             result = await session.execute(
@@ -966,7 +980,7 @@ class DatabaseService:
             return None
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def update_user(self, user_id: str, update_data: dict) -> None:
+    async def update_user(self, user_id: str, update_data: dict[str, Any]) -> None:
         """更新用户信息"""
         if not update_data:
             return
@@ -999,11 +1013,12 @@ class DatabaseService:
 
     async def list_users(
         self, skip: int = 0, limit: int = 20
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """列出所有用户"""
         async with self.session() as session:
             count_result = await session.execute(text("SELECT COUNT(*) FROM users"))
-            total = count_result.scalar()
+            total_raw = count_result.scalar()
+            total = int(total_raw) if total_raw is not None else 0
 
             result = await session.execute(
                 text(
@@ -1058,7 +1073,7 @@ class DatabaseService:
 
         return token_id
 
-    async def get_refresh_token(self, token_hash: str) -> dict | None:
+    async def get_refresh_token(self, token_hash: str) -> dict[str, Any] | None:
         """获取有效的 Refresh Token"""
         async with self.session() as session:
             result = await session.execute(
@@ -1106,7 +1121,7 @@ class DatabaseService:
         action: str,
         resource_type: str | None = None,
         resource_id: str | None = None,
-        details: dict | None = None,
+        details: dict[str, Any] | None = None,
         ip_address: str | None = None,
     ) -> str:
         """记录用户活动"""
@@ -1133,7 +1148,7 @@ class DatabaseService:
 
     async def get_user_activities(
         self, user_id: str, skip: int = 0, limit: int = 20
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """获取用户活动记录"""
         async with self.session() as session:
             result = await session.execute(
@@ -1155,14 +1170,15 @@ class DatabaseService:
 
     async def list_projects_by_user(
         self, user_id: str, skip: int = 0, limit: int = 20
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """列出用户的项目"""
         async with self.session() as session:
             count_result = await session.execute(
                 text("SELECT COUNT(*) FROM projects WHERE user_id = :user_id"),
                 {"user_id": user_id},
             )
-            total = count_result.scalar()
+            total_raw = count_result.scalar()
+            total = int(total_raw) if total_raw is not None else 0
 
             result = await session.execute(
                 text("""
@@ -1180,11 +1196,12 @@ class DatabaseService:
 
     async def list_all_projects(
         self, skip: int = 0, limit: int = 20
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """列出所有项目（管理员用）"""
         async with self.session() as session:
             count_result = await session.execute(text("SELECT COUNT(*) FROM projects"))
-            total = count_result.scalar()
+            total_raw = count_result.scalar()
+            total = int(total_raw) if total_raw is not None else 0
 
             result = await session.execute(
                 text("""
@@ -1199,7 +1216,7 @@ class DatabaseService:
         projects = [_convert_uuid_fields(dict(row._mapping)) for row in rows]
         return projects, total
 
-    async def get_system_stats(self) -> dict:
+    async def get_system_stats(self) -> dict[str, Any]:
         """获取系统统计信息"""
         async with self.session() as session:
             users_result = await session.execute(text("SELECT COUNT(*) FROM users"))
@@ -1255,7 +1272,7 @@ class DatabaseService:
             "total_tokens": total_tokens,
         }
 
-    async def update_project_status(self, project_id: str, status: str):
+    async def update_project_status(self, project_id: str, status: str) -> None:
         """更新项目状态"""
         async with self.session() as session:
             await session.execute(
@@ -1267,7 +1284,7 @@ class DatabaseService:
 
         logger.info("Updated project status", project_id=project_id, status=status)
 
-    async def get_outline_by_project_id(self, project_id: str) -> dict | None:
+    async def get_outline_by_project_id(self, project_id: str) -> dict[str, Any] | None:
         """根据项目 ID 获取大纲"""
         async with self.session() as session:
             result = await session.execute(
@@ -1284,7 +1301,7 @@ class DatabaseService:
         return _convert_uuid_fields(dict(row._mapping))
 
     async def save_visualization(
-        self, project_id: str, visualization_data: dict
+        self, project_id: str, visualization_data: dict[str, Any]
     ) -> str:
         """保存可视化数据到 pipeline_checkpoints"""
         viz_id = str(uuid.uuid4())
@@ -1309,7 +1326,9 @@ class DatabaseService:
         logger.info("Saved visualization data", project_id=project_id)
         return viz_id
 
-    async def get_visualization_by_project_id(self, project_id: str) -> dict | None:
+    async def get_visualization_by_project_id(
+        self, project_id: str
+    ) -> dict[str, Any] | None:
         """根据项目 ID 获取可视化数据"""
         async with self.session() as session:
             result = await session.execute(
@@ -1329,10 +1348,13 @@ class DatabaseService:
         if isinstance(snapshot, str):
             import json as _json
 
-            return _json.loads(snapshot)
-        return snapshot
+            parsed: dict[str, Any] | None = _json.loads(snapshot)
+            return parsed
+        return snapshot if isinstance(snapshot, dict) else None
 
-    async def get_written_sections_by_project_id(self, project_id: str) -> list[dict]:
+    async def get_written_sections_by_project_id(
+        self, project_id: str
+    ) -> list[dict[str, Any]]:
         """根据项目 ID 获取已写章节"""
         async with self.session() as session:
             result = await session.execute(
@@ -1356,7 +1378,7 @@ class DatabaseService:
         self,
         project_id: str,
         topic: str | None = None,
-        config: dict | None = None,
+        config: dict[str, Any] | None = None,
         created_by: str | None = None,
     ) -> str:
         """创建 Pipeline 运行记录，返回 run_id"""
@@ -1532,15 +1554,15 @@ class DatabaseService:
         status: str,
         error_message: str | None = None,
         error_traceback: str | None = None,
-        input_summary: dict | None = None,
-        output_summary: dict | None = None,
+        input_summary: dict[str, Any] | None = None,
+        output_summary: dict[str, Any] | None = None,
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         total_tokens: int = 0,
         cost: float = 0,
         llm_calls_count: int = 0,
         retry_count: int = 0,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """结束节点执行"""
         async with self.session() as session:
@@ -1606,7 +1628,7 @@ class DatabaseService:
         first_token_ms: int | None = None,
         input_preview: str | None = None,
         output_preview: str | None = None,
-        request_metadata: dict | None = None,
+        request_metadata: dict[str, Any] | None = None,
         retry_of: str | None = None,
         input_price_per_m: float | None = None,
         output_price_per_m: float | None = None,
@@ -1734,7 +1756,7 @@ class DatabaseService:
                     error=str(e),
                 )
 
-    async def get_pipeline_run_stats(self, run_id: str) -> dict | None:
+    async def get_pipeline_run_stats(self, run_id: str) -> dict[str, Any] | None:
         """获取 Pipeline 运行的汇总统计"""
         async with self.session() as session:
             result = await session.execute(
@@ -1748,7 +1770,7 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def get_node_executions(self, run_id: str) -> list[dict]:
+    async def get_node_executions(self, run_id: str) -> list[dict[str, Any]]:
         """获取 Pipeline 运行的所有节点执行记录"""
         async with self.session() as session:
             result = await session.execute(
@@ -1767,7 +1789,7 @@ class DatabaseService:
         self,
         run_id: str,
         node_name: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """获取 LLM 调用记录，可按 node_name 过滤"""
         async with self.session() as session:
             if node_name:
@@ -1799,7 +1821,7 @@ class DatabaseService:
         run_id: str | None = None,
         project_id: str | None = None,
         days: int = 30,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """按 provider/model 汇总用量（用于成本分析）"""
         # 安全修复: 分离 SQL 模板和参数化条件，避免 f-string SQL 构建
         conditions = ["lc.created_at >= NOW() - INTERVAL '1 day' * :days"]
@@ -1863,7 +1885,7 @@ def get_database() -> DatabaseService:
     return _db_service
 
 
-async def close_database():
+async def close_database() -> None:
     """关闭数据库连接"""
     global _db_service
     if _db_service is not None:

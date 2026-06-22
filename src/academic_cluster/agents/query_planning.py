@@ -9,10 +9,11 @@
 - 评估搜索结果质量
 """
 
+from typing import Any
+
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
 
 logger = structlog.get_logger()
 
@@ -86,7 +87,7 @@ def select_search_sources(topic: str) -> list[str]:
 
 
 @tool
-def evaluate_search_results(papers: list[dict]) -> dict:
+def evaluate_search_results(papers: list[dict[str, Any]]) -> dict[str, Any]:
     """
     评估搜索结果质量
 
@@ -127,7 +128,7 @@ def evaluate_search_results(papers: list[dict]) -> dict:
 def create_query_planning_agent(
     model: str | None = None,
     temperature: float = 0.3,
-) -> ChatOpenAI:
+) -> Any:
     """
     创建查询规划 Agent
 
@@ -182,7 +183,7 @@ QUERY_PLANNING_SYSTEM_PROMPT = """你是一个学术搜索查询规划专家。�
 """
 
 
-async def plan_queries(topic: str) -> dict:
+async def plan_queries(topic: str) -> dict[str, Any]:
     """
     执行查询规划
 

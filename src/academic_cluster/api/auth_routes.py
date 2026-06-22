@@ -5,6 +5,7 @@
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -48,7 +49,7 @@ async def register(
     request: Request,
     db: DatabaseService = Depends(get_database),
     password_service: PasswordService = Depends(get_password_service),
-):
+) -> UserResponse:
     """用户注册"""
     existing = await db.get_user_by_email(body.email)
     if existing:
@@ -72,6 +73,8 @@ async def register(
     )
 
     user = await db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=500, detail="Failed to retrieve created user")
     logger.info("User registered", user_id=user_id, email=body.email)
 
     return UserResponse(
@@ -91,7 +94,7 @@ async def login(
     db: DatabaseService = Depends(get_database),
     password_service: PasswordService = Depends(get_password_service),
     token_service: TokenService = Depends(get_token_service),
-):
+) -> TokenResponse:
     """用户登录"""
     user = await db.get_user_by_email(body.email)
     if not user:
@@ -137,7 +140,7 @@ async def refresh_token(
     body: RefreshTokenRequest,
     db: DatabaseService = Depends(get_database),
     token_service: TokenService = Depends(get_token_service),
-):
+) -> TokenResponse:
     """刷新 Access Token"""
     token_hash = token_service.hash_refresh_token(body.refresh_token)
 
@@ -174,8 +177,8 @@ async def refresh_token(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(
-    current_user: dict = Depends(get_current_user),
-):
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> UserResponse:
     """获取当前用户信息"""
     return UserResponse(
         id=current_user["id"],
@@ -190,10 +193,10 @@ async def get_me(
 @router.put("/me", response_model=UserResponse)
 async def update_me(
     body: UserUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
     password_service: PasswordService = Depends(get_password_service),
-):
+) -> UserResponse:
     """更新当前用户信息"""
     update_data = {}
 
@@ -207,6 +210,8 @@ async def update_me(
         await db.update_user(current_user["id"], update_data)
 
     user = await db.get_user_by_id(current_user["id"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     return UserResponse(
         id=user["id"],
         email=user["email"],
@@ -220,10 +225,10 @@ async def update_me(
 @router.post("/logout")
 async def logout(
     body: RefreshTokenRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
     token_service: TokenService = Depends(get_token_service),
-):
+) -> dict[str, str]:
     """用户登出"""
     token_hash = token_service.hash_refresh_token(body.refresh_token)
     await db.revoke_refresh_token(token_hash)
@@ -241,9 +246,9 @@ async def logout(
 async def list_users(
     skip: int = 0,
     limit: int = 20,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> UserListResponse:
     """列出所有用户（管理员）"""
     # 安全修复: 限制分页参数范围
     skip = max(0, skip)
@@ -271,9 +276,9 @@ async def list_users(
 async def change_user_role(
     user_id: str,
     role: str,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """修改用户角色（管理员）"""
     if role not in ("user", "admin"):
         raise HTTPException(status_code=400, detail="无效的角色，必须为 user 或 admin")
@@ -294,9 +299,9 @@ async def change_user_role(
 async def toggle_user_active(
     user_id: str,
     is_active: bool,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """激活/停用用户（管理员）"""
     user = await db.get_user_by_id(user_id)
     if not user:
@@ -317,9 +322,9 @@ async def toggle_user_active(
 
 @router.get("/stats", response_model=SystemStatsResponse)
 async def system_stats(
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> SystemStatsResponse:
     """获取系统统计信息（管理员）"""
     stats = await db.get_system_stats()
 

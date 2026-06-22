@@ -4,6 +4,8 @@ FastAPI 依赖注入
 提供认证和权限检查的依赖函数。
 """
 
+from typing import Any
+
 import structlog
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -21,7 +23,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     token_service: TokenService = Depends(get_token_service),
     db: DatabaseService = Depends(get_database),
-) -> dict:
+) -> dict[str, Any]:
     """获取当前认证用户"""
     if credentials is None:
         raise HTTPException(status_code=401, detail="Missing authorization header")
@@ -45,8 +47,8 @@ async def get_current_user(
 
 
 async def require_admin(
-    current_user: dict = Depends(get_current_user),
-) -> dict:
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """要求管理员权限"""
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")

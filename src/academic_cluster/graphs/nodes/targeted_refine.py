@@ -8,6 +8,7 @@ import asyncio
 import json
 import traceback
 import uuid
+from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -24,7 +25,7 @@ logger = structlog.get_logger()
 async def _generate_targeted_queries(
     topic: str,
     gaps: list[str],
-    weak_clusters: list[dict],
+    weak_clusters: list[dict[str, Any]],
     previous_queries: list[str],
 ) -> list[str]:
     """使用 LLM 生成针对性补充 query（对齐 Rust 版 cluster_targeted_refine）"""
@@ -72,13 +73,13 @@ async def _generate_targeted_queries(
             content = content[start : end + 1]
 
         data = json.loads(content)
-        queries = data.get("new_queries", [])
+        result_queries: list[str] = data.get("new_queries", [])
 
-        if not queries:
-            queries = [f"{topic} methods", f"{topic} applications"]
+        if not result_queries:
+            result_queries = [f"{topic} methods", f"{topic} applications"]
 
-        logger.info("Targeted queries generated", queries=queries)
-        return queries
+        logger.info("Targeted queries generated", queries=result_queries)
+        return result_queries
 
     except Exception as e:
         logger.warning(
@@ -87,7 +88,7 @@ async def _generate_targeted_queries(
         return [f"{topic} methods", f"{topic} applications"]
 
 
-async def targeted_refine_node(state: PipelineState) -> dict:
+async def targeted_refine_node(state: PipelineState) -> dict[str, Any]:
     """
     针对性精炼
 
@@ -111,9 +112,9 @@ async def targeted_refine_node(state: PipelineState) -> dict:
 
     try:
         # 从 gap_analysis 结果中提取信息
-        gaps = []
-        weak_clusters = []
-        previous_queries = []
+        gaps: list[str] = []
+        weak_clusters: list[dict[str, Any]] = []
+        previous_queries: list[str] = []
 
         if hasattr(state, "gap_analysis_result") and state.gap_analysis_result:
             gaps = state.gap_analysis_result.get("gaps", [])
@@ -142,9 +143,9 @@ async def targeted_refine_node(state: PipelineState) -> dict:
         ]
 
         results = await asyncio.gather(*search_tasks, return_exceptions=True)
-        new_papers = []
+        new_papers: list[dict[str, Any]] = []
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.warning("Targeted search failed", error=str(result))
                 continue
             new_papers.extend(result)
@@ -177,7 +178,7 @@ async def targeted_refine_node(state: PipelineState) -> dict:
             attempt=state.refinement_attempt + 1,
         )
 
-        result = {
+        final_result: dict[str, Any] = {
             "paper_ids": new_paper_ids,
             "refinement_attempt": state.refinement_attempt + 1,
             "needs_targeted_refinement": False,
@@ -192,7 +193,7 @@ async def targeted_refine_node(state: PipelineState) -> dict:
                     "queries": len(targeted_queries),
                 },
             )
-        return result
+        return final_result
 
     except Exception as e:
         if tracker:

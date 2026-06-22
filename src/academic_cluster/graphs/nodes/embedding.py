@@ -6,6 +6,7 @@
 
 import asyncio
 import traceback
+from typing import Any
 
 import structlog
 
@@ -123,10 +124,11 @@ async def generate_embedding(text: str, timeout: float = 30.0) -> list[float]:
         except Exception:  # nosec B110
             pass
 
-    return response.data[0]["embedding"]
+    embedding: list[float] = response.data[0]["embedding"]
+    return embedding
 
 
-async def embedding_node(state: PipelineState) -> dict:
+async def embedding_node(state: PipelineState) -> dict[str, Any]:
     """
     生成论文嵌入向量
 
@@ -159,12 +161,12 @@ async def embedding_node(state: PipelineState) -> dict:
         # 获取论文详情
         papers = await db.get_papers_by_ids(paper_ids)
 
-        embedding_ids = []
-        embeddings_data = []
+        embedding_ids: list[str] = []
+        embeddings_data: list[dict[str, Any]] = []
         embed_sem = asyncio.Semaphore(20)  # 并发上限，充分利用多 provider
 
-        async def _process_one(paper: dict) -> dict | None:
-            paper_id = paper.get("id")
+        async def _process_one(paper: dict[str, Any]) -> dict[str, Any] | None:
+            paper_id = str(paper.get("id", ""))
             title = paper.get("title", "")
             abstract = paper.get("abstract", "")
             text = f"{title} {abstract}".strip()

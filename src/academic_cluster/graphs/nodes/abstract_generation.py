@@ -26,7 +26,7 @@ _AUTHOR_YEAR_RE = re.compile(
 _MARKDOWN_HEADING_RE = re.compile(r"^\s*#{1,6}\s+.*$", re.MULTILINE)
 
 
-def _coerce_text(content) -> str:
+def _coerce_text(content: object) -> str:
     if isinstance(content, list):
         return "".join(
             block.get("text", "") if isinstance(block, dict) else str(block)
@@ -78,7 +78,7 @@ def _fallback_abstract(review_body: str, max_chars: int = 360) -> str:
     return fallback[:max_chars].rstrip("，,；;：:")
 
 
-async def generate_abstract_node(state: PipelineState) -> dict:
+async def generate_abstract_node(state: PipelineState) -> dict[str, object]:
     """Generate a citation-free abstract after final review writing."""
     tracker = get_current_tracker()
     if tracker:

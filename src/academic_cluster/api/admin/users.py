@@ -4,6 +4,8 @@
 提供用户列表、创建、删除、角色变更、激活状态切换、用量查询等端点。
 """
 
+from typing import Any
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -66,9 +68,9 @@ class UserUsageResponse(BaseModel):
 async def list_users(
     skip: int = 0,
     limit: int = 20,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> UserListResponse:
     """列出所有用户"""
     skip = max(0, skip)
     limit = max(1, min(limit, 100))
@@ -95,10 +97,10 @@ async def list_users(
 async def create_user(
     body: AdminCreateUserRequest,
     request: Request,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
     password_service: PasswordService = Depends(get_password_service),
-):
+) -> UserResponse:
     """管理员创建用户"""
     existing = await db.get_user_by_email(body.email)
     if existing:
@@ -126,6 +128,8 @@ async def create_user(
     )
 
     user = await db.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=500, detail="Failed to retrieve created user")
     logger.info("Admin created user", admin_id=admin["id"], user_id=user_id)
 
     return UserResponse(
@@ -142,9 +146,9 @@ async def create_user(
 async def delete_user(
     user_id: str,
     request: Request,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """删除用户"""
     user = await db.get_user_by_id(user_id)
     if not user:
@@ -184,9 +188,9 @@ async def change_user_role(
     user_id: str,
     body: ChangeRoleRequest,
     request: Request,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """修改用户角色"""
     user = await db.get_user_by_id(user_id)
     if not user:
@@ -217,9 +221,9 @@ async def toggle_user_active(
     user_id: str,
     body: ToggleActiveRequest,
     request: Request,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> dict[str, str]:
     """切换用户激活状态"""
     user = await db.get_user_by_id(user_id)
     if not user:
@@ -257,9 +261,9 @@ async def toggle_user_active(
 @router.get("/{user_id}/usage", response_model=UserUsageResponse)
 async def get_user_usage(
     user_id: str,
-    admin: dict = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-):
+) -> UserUsageResponse:
     """获取用户用量详情"""
     user = await db.get_user_by_id(user_id)
     if not user:
@@ -283,6 +287,6 @@ async def get_user_usage(
 
     return UserUsageResponse(
         user_id=user_id,
-        total_projects=total_projects,
-        total_activities=total_activities,
+        total_projects=total_projects or 0,
+        total_activities=total_activities or 0,
     )
