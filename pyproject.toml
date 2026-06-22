@@ -181,3 +181,6 @@ skips = ["B101"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: marks tests that require real API services and init_pools() (deselect with '-m not integration')",
+]

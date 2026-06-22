@@ -47,7 +47,9 @@ def test_section_citation_payload_includes_candidate_paper_details():
     payload = _section_citation_payload(plan, paper_map)
 
     assert payload["candidate_paper_ids"] == ["paper-a", "paper-b"]
-    assert [paper["id"] for paper in payload["papers"]] == ["paper-a", "paper-b"]
+    # id/paper_id 使用局部编号（整数索引），方便文内引用 [1], [2]
+    assert [paper["id"] for paper in payload["papers"]] == [1, 2]
+    assert [paper["paper_id"] for paper in payload["papers"]] == [1, 2]
     assert payload["papers"][0]["local_number"] == 1
     assert payload["papers"][0]["title"] == "Core Paper"
     assert payload["papers"][0]["year"] == "2024"
