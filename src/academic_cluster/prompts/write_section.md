@@ -1,98 +1,142 @@
-你正在撰写一篇学术综述文章的一个章节。
+You are writing one section of an academic literature review. Output in Chinese.
 
-## 研究主题
+## Research Topic
 {topic}
 
-## 综述标题
+## Review Title
 {review_title}
 
-## 当前章节
-章节名称: {section_title}
-章节描述: {section_description}
-目标字数: {target_words} 字
+## Current Section
+Section name: {section_title}
+Section description: {section_description}
+Target word count: {target_words} words
 
-## 相关聚类数据
+## Related Cluster Data
 {cluster_data}
 
-## 相关论文样本
+## Related Paper Samples
 {sample_papers}
 
-## 真实可用的参考文献（只能从这里引用）
-以下是从学术数据库中提取的真实论文，编号为本章节专用编号。请只引用以下列表中的论文，不得编造。
+## Usable References (cite ONLY from this list)
+These are real papers extracted from academic databases, numbered with section-local indices. Only cite papers from this list. Do not fabricate.
 
 {references}
 
-{evidence_section}
+## Evidence Cards (specific findings you may cite)
+The following research evidence is relevant to this section and may be used to support your arguments:
 
-## 写作要求
+{evidence_cards}
 
-### 学术风格
-- 使用正式、严谨的学术中文
-- 主动使用领域专业术语，体现对该领域的深入理解
-- 句式应有变化：长短句结合，避免句式单一
-- 段落之间要有逻辑推进关系，而非简单的并列
+## Section Paragraph Plan
+{section_outline}
 
-### 引用规范
-- 每个关键论断必须有引用支撑
-- 引用密度合理：段落中通常 2-4 处引用，但不要为凑引用而引用
-- 当多篇文献支撑同一观点时合并引用 [1,2]；若不同文献有不同结论，用对比分析呈现
-- 绝对禁止编造引用、作者、年份或期刊
-- **引用格式**：必须使用 [N] 数字编号格式（如 [1]、[1,2,3]、[1-5]）
-- **禁止**使用作者-年份格式（如 (Friedman, 2024)、(Smith et al., 2023)、(Zhang & Li, 2022)）
-- **禁止**使用 paper_id（如 p1、p2）作为引用编号，只使用 [N] 数字
-- **禁止**相邻引用块，例如 [24][28]；必须合并为 [24,28]
-- **禁止**在正文末尾添加参考文献列表或元说明（如"字数统计"、"以上为..."等）
+## Previous Content Summary (do not repeat)
+{prev_summary}
 
-#### 引用位置示例（必须遵守）：
+## Next Section Preview
+{next_outline}
 
-**正确用法：**
-- ✅ `多尺度耦合计算中仍存在35%的算力浪费，主要源于异构计算单元间的通信开销[42]。` — [N] 打在论断末尾
-- ✅ `结合概率密度演化方程，实现岩体参数的时序演化模拟[43]。` — [N] 打在方法末尾
-- ✅ `该方法在Exascale架构上展现出显著优势，计算精度较传统方法提升22.7%[52]。` — [N] 打在结论末尾
-- ✅ `Zhang等[18]提出了基于自注意力的加速器` — 作者名引出 + [N]
-- ✅ `HAR-AttenNet利用多头注意力机制解决了这一问题[18]` — [N] 放在句末
-- ✅ `Transformer在长序列建模中表现优异，但计算复杂度较高[18,19]` — [N] 放在观点后
+## Writing Requirements
 
-**绝对禁止的写法（这些是最高优先级规则，必须遵守）：**
-- ❌ **严禁**以"文献[xx]"开头写句子。`文献[42]指出...`、`文献[43]通过...`、`文献[52]的实验...` 全部禁止。
-- ❌ **严禁**把 [N] 当作句子的主语或宾语。`[18]提出了...` 禁止。
-- ❌ **严禁**把引用说明放入括号。`（文献[24][28]已证实...）` 禁止。
+### Academic Style
+- Use formal, rigorous academic Chinese
+- Demonstrate deep domain understanding through precise technical terminology
+- Vary sentence structure: mix long and short sentences, avoid monotony
+- Ensure logical progression between paragraphs, not mere juxtaposition
 
-**必须使用的写法：**
-- ✅ 先陈述事实/方法/结论，再把 [N] 打在句末标点之前。
+### Paragraph Variety (Critical)
+- **Never start consecutive paragraphs with the same word, phrase, or sentence pattern.** If the previous paragraph began with "随着...", the next one MUST use a different opening (e.g., start with a finding, a contrast, a method name, or a direct statement).
+- Banned consecutive-paragraph opening patterns:
+  - Two paragraphs starting with "随着..."
+  - Two paragraphs starting with "在..."
+  - Two paragraphs starting with "基于..."
+  - Two paragraphs starting with "然而..." or "此外..."
+  - Two paragraphs starting with a paper citation (e.g., "Huang等[3]...")
+- When writing, check the FIRST SENTENCE of the "Already written" paragraphs and choose a completely different opening structure for your current paragraph.
+- Good opening strategies (rotate between these): direct factual claim, contrast with previous point, method/concept name as subject, question-driven transition, temporal/evolutionary marker, quantitative finding.
+
+### Analytical Depth
+- A literature review is NOT a summary list. You must ANALYZE: compare methods, evaluate strengths/weaknesses, reveal trends
+- Surface **consensus** vs. **controversy**: which conclusions are widely accepted? which are still debated?
+- Identify **driving forces** behind method evolution: why did method A give way to method B? insufficient accuracy? new data types?
+- When studies conflict, explicitly state the contradiction and analyze possible causes
+
+### Synthesis-First (Critical)
+Each paragraph must be organized around a central analytical thesis, with multiple papers as supporting evidence.
+
+**BANNED — paper-by-paper listing:**
+- "Author A [1] proposed X. Author B [2] proposed Y. Author C [3] proposed Z."
+- Sequential sentences each introducing a different paper without analytical connection
+- Simply juxtaposing findings without pointing out similarities and differences
+
+**REQUIRED — thematic synthesis:**
+- Organize paragraphs by mechanism, method category, or conclusion theme — not by individual papers
+- When comparing, explicitly state similarities, differences, and underlying reasons
+- Use comparative, inductive, evolutionary, or taxonomic synthesis strategies
+
+### Output Rules
+- Output only the section body (plain paragraph text)
+- Do NOT output a section title, reference list, bibliography, or meta-commentary
+- Treat paper samples, evidence summaries, claim, evidence_span, method, metric, limitation, confidence, reference candidates, citation candidates, cluster data, community context, and evidence_limitations as internal working material — do not copy them into the output
+- Do NOT output candidate lists, evidence-card JSON, audit notes, or implementation details
+- Stay within {target_words} words (±20%)
+
+### Citation Rules
+- Every factual claim must be supported by a citation
+- Aim for 2-4 citations per paragraph; do not cite for the sake of citing
+- When multiple papers support the same point, merge citations: [1,2]; when they disagree, use contrastive analysis
+- Use 10-20 evidence-backed papers per section; if evidence is insufficient, you may use fewer, but must rewrite or remove claims that lack supporting references
+- Every sentence containing a factual claim, method comparison, metric, trend, limitation, or conclusion must be supported by a [N] citation in the same or adjacent sentence
+- A paper may be cited multiple times for different claims, but never cite numbers outside the provided list
+- Citation [N] must correspond 1:1 with the paper_id, title, and evidence_card_id in the reference list and paper samples
+- Never attribute a claim from paper A using paper B's [N], even if both discuss similar topics
+- Never fabricate references, authors, years, journals, DOI, or paper conclusions
+- **Format**: Use [N] numeric citations only (e.g., [1], [1,2,3], [1-5])
+- **Banned**: Author-year format (e.g., (Friedman, 2024), (Smith et al., 2023))
+- **Banned**: Using paper_id (e.g., p1, p2) as citation numbers
+- **Banned**: Adjacent citation blocks like [24][28] — merge as [24,28]
+- **Banned**: Wrapping citations in parentheses (e.g., "（文献[24][28]已证实...）") — integrate into sentence syntax
+- **Banned**: Starting a sentence with "文献[N]" or using "文献[N]" as subject
+
+#### Citation Position Examples (MUST follow):
+
+**Correct:**
+- ✅ `多尺度耦合计算中仍存在35%的算力浪费，主要源于异构计算单元间的通信开销[42]。` — [N] at end of claim
+- ✅ `结合概率密度演化方程，实现岩体参数的时序演化模拟[43]。` — [N] at end of method statement
+- ✅ `该方法在Exascale架构上展现出显著优势，计算精度较传统方法提升22.7%[52]。` — [N] at end of conclusion
+- ✅ `Zhang等[18]提出了基于自注意力的加速器` — author name leads + [N]
+- ✅ `HAR-AttenNet利用多头注意力机制解决了这一问题[18]` — [N] at sentence end
+- ✅ `Transformer在长序列建模中表现优异，但计算复杂度较高[18,19]` — [N] after claim
+
+**Absolutely forbidden (highest priority rules):**
+- ❌ NEVER start a sentence with "文献[N]": `文献[42]指出...`, `文献[43]通过...` are all banned
+- ❌ NEVER use [N] as subject or object of a sentence: `[18]提出了...` is banned
+- ❌ NEVER wrap citations in parentheses: `（文献[24][28]已证实...）` is banned
+- ❌ `Rocco Palmitessa等人在《Accelerating hydrodynamic simulations...》中提出了...` — missing [N], uses 《》 marks
+- ❌ NEVER mention an author name or paper title without an accompanying [N]: `Rocco Palmitessa等人在《...》中提出了...` is banned — write `Rocco Palmitessa等人[18]提出了...` instead
+- ❌ NEVER use 《》(Chinese book title marks) to wrap paper titles — use [N] citation only
+
+**Required pattern:**
+- ✅ State the fact/method/conclusion first, then place [N] before the end punctuation
 - ✅ `多尺度耦合计算中仍存在35%的算力浪费[42]。`
 - ✅ `结合概率密度演化方程实现时序演化模拟[43]。`
-- ✅ `Zhang等[18]提出了基于自注意力的加速器。`（作者名引出可以）
-- ✅ `HAR-AttenNet利用多头注意力机制解决了这一问题[18]。`
+- ✅ `Zhang等[18]提出了基于自注意力的加速器。` (author-led is OK)
+- ✅ `HAR-AttenNet利用多头注意力机制解决了这个问题[18]。`
 
-### 论述要求
-- 不仅要"综述"(列举已有工作)，更要"评论"(分析优劣、比较方法、揭示趋势)
-- 展现领域内的**共识**与**争议**：哪些结论已被广泛接受？哪些仍在争论？
-- 指出方法演进的**驱动力**：为什么从方法A演进到方法B？是因为精度不够？还是因为新数据类型出现？
-- 如果不同研究之间存在结论冲突，明确写出并尝试分析原因
+### 禁止使用的表达
 
-### 综合优先于列举（Synthesis-First）
-这是最核心的写作原则。综述不是文献摘要的堆叠，而是对多篇研究的综合分析。
+禁止使用的空洞短语：
+- 从方法论角度, 从技术演进角度, 从理论角度, 从应用角度
+- 从宏观层面, 从微观层面, 在理论层面, 在实践层面
+- 在技术层面, 在方法层面, 在应用层面, 在模型层面
+- 在数据层面, 在性能层面, 在效率层面, 在架构层面
+- 在算法层面, 在系统层面
 
-**禁止的写法（文献堆叠）：**
-- "张三 [1] 提出了 X 方法，李四 [2] 提出了 Y 方法，王五 [3] 提出了 Z 方法。"
-- "Author A reported that X. Author B found Y. Author C showed Z."
-- 逐篇介绍论文，每篇一段或半段，段落之间没有分析逻辑
-- 简单并列不同研究的发现，不指出异同
+禁止使用的总结性连接词：
+- 综上所述, 总之, 总而言之, 综上, 概括而言, 总的来说, 整体而言, 由此可见
 
-**推荐的写法（主题式综合）：**
-- 围绕一个核心论点组织段落，多篇论文作为支撑证据
-- "在长序列建模方面，主流方案可分为三类：基于注意力的方法 [1,2] 通过……解决了……；基于状态空间的方法 [3,4] 则从……角度……；混合架构 [5,6] 试图兼顾两者优势，但……"
-- 对比不同研究时，必须指出异同和原因："虽然 [1] 和 [3] 均采用 X 策略，但前者侧重于……而后者关注……，这一差异源于……"
-- 按机制/方法/结论进行分类综合，而非按论文逐篇展开
+禁止出现聚类内部标记：
+- 聚类0, 聚类 0, 聚类17, Cluster 0, cluster_17, 子簇0-1, C0-P01 等任何编号形式
+- 改为用自然语言描述研究方向或方法类别
 
-**综合方式参考：**
-- **对比式**：对比 A 类和 B 类方法的核心差异、优劣权衡
-- **归纳式**：归纳某领域从 X 到 Y 的演进趋势，提炼共性规律
-- **演进式**：梳理技术路线的发展脉络，分析每次演进的驱动力
-- **分类式**：将现有方法按核心机制分为若干类别，逐类分析
-
-### 输出规范
-- 直接输出章节正文（纯段落文本）
-- 不要输出章节标题、不要输出参考文献列表、不要输出元说明
-- 字数控制在 {target_words} 字左右，正负 20%
+每个段落必须以实质性分析收尾，禁止使用空洞总结句。

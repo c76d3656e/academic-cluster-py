@@ -96,7 +96,7 @@ def sanitize_llm_response(response):
     return response
 
 
-def _preview_value(value, limit: int = 2000) -> str:
+def _preview_value(value, limit: int = 50000) -> str:
     text = str(value)
     if len(text) > limit:
         return text[:limit] + "...[truncated]"

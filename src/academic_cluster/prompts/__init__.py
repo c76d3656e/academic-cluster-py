@@ -71,6 +71,11 @@ def get_write_section_prompt() -> str:
     return _load_prompt("write_section.md")
 
 
+def get_write_system_prompt() -> str:
+    """获取章节写作 system prompt 模板"""
+    return _load_prompt("write_system.md")
+
+
 def get_assemble_review_prompt() -> str:
     """获取综述拼装提示（过渡语句、统一风格）"""
     return _load_prompt("assemble_review.md")

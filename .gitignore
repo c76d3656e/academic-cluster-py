@@ -81,3 +81,29 @@ output/
 
 # Frontend
 frontend/node_modules/
+
+# Temporary/debug scripts (root level)
+check_*.py
+test_repair.py
+e2e_*.txt
+write_review_llm_calls.json
+
+# Screenshots and images (root level)
+*.png
+*.jpg
+*.jpeg
+tests/screenshots/
+
+# Tool caches
+.playwright-mcp/
+.external_refs/
+.claude/
+.claude-code/
+
+# Large data files
+jcrdata/
+data/token.txt
+data/*.json
+
+# Claude memory
+.claude/

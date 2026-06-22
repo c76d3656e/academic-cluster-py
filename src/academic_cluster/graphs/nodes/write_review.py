@@ -25,7 +25,6 @@ from ...services.citation_planner import plan_review_citations, render_section_r
 from ...services.citation_utils import (
     clean_filler_phrases,
     is_primarily_chinese,
-    replace_uuid_citations,
     normalize_citation_surface,
     strip_author_year_citations,
     strip_body_structure_leakage,
@@ -115,8 +114,8 @@ def _section_citation_payload(plan, paper_map: dict[str, dict]) -> dict:
         detail = details_by_id.get(paper_id, {})
         papers.append({
             "local_number": local_number,
-            "id": paper_id,
-            "paper_id": paper_id,
+            "id": local_number,
+            "paper_id": local_number,
             "title": paper.get("title", ""),
             "abstract": paper.get("abstract", ""),
             "authors": paper.get("authors", []),
@@ -141,11 +140,15 @@ def _build_cluster_context(plan, section: dict, evidence_plan: dict, clusters: l
     csum = _render_citation_plan_summary(plan, {})
     if csum:
         parts.append(csum)
+    # paper_id → 局部编号映射
+    pid_to_local = {pid: i + 1 for i, pid in enumerate(plan.candidate_paper_ids)}
     sm = evidence_plan.get("support_matrix") or []
     if sm:
         lines = ["section_evidence_support_matrix:"]
         for item in sm[:10]:
-            lines.append(f"- paper_id={item.get('paper_id')}; score={item.get('relevance_score')}; source={item.get('candidate_source')}; claim={item.get('claim', '')[:180]}")
+            raw_pid = item.get("paper_id", "")
+            local_num = pid_to_local.get(raw_pid, raw_pid)
+            lines.append(f"- paper_id=[{local_num}]; score={item.get('relevance_score')}; source={item.get('candidate_source')}; claim={item.get('claim', '')[:180]}")
         parts.append("\n".join(lines))
     entity_map: dict[str, list[str]] = {}
     for ent in kg_entities:
@@ -176,8 +179,8 @@ def _build_sample_context(plan, paper_map: dict, ec_by_paper: dict) -> str:
             metric = card.get("metric")
             metric_str = _json.dumps(metric) if isinstance(metric, dict) else (metric or "none")
             samples.append(
-                f"[{idx}] paper_id: {pid}\ntitle: {p.get('title', '')}\n"
-                f"evidence_card_id: evidence_card:{pid}\n"
+                f"[{idx}] paper_id: [{idx}]\ntitle: {p.get('title', '')}\n"
+                f"evidence_card_id: evidence_card:[{idx}]\n"
                 f"claim: {card.get('claim', '')}\n"
                 f"evidence_span: {card.get('evidence_span', '')[:200]}\n"
                 f"method: {card.get('method', 'unknown') or 'unknown'}\n"
@@ -187,14 +190,14 @@ def _build_sample_context(plan, paper_map: dict, ec_by_paper: dict) -> str:
             )
         else:
             samples.append(
-                f"[{idx}] paper_id: {pid}\ntitle: {p.get('title', '')}\n"
+                f"[{idx}] paper_id: [{idx}]\ntitle: {p.get('title', '')}\n"
                 f"evidence_card_id: unavailable\nabstract: {(p.get('abstract') or '')[:300]}"
             )
     return "\n".join(samples) or "暂无论文样本"
 
-async def _revise_section(content: str, evaluation: dict) -> str:
+async def _revise_section(content: str, evaluation: dict, section_outline: dict, references: str) -> str:
     from ...agents.section_evaluator import revise_section as _do_revise
-    return await _do_revise(content, evaluation)
+    return await _do_revise(content, evaluation, section_outline, references)
 
 
 async def write_review_node(state: PipelineState) -> dict:
@@ -490,9 +493,6 @@ async def write_review_node(state: PipelineState) -> dict:
             content = strip_unsupported_precise_metrics(content, ctx["section_evidence"])
             content = normalize_citation_surface(content)
 
-            pid_to_num = {d["paper_id"]: i + 1 for i, d in enumerate(ctx["plan"].candidate_details) if d.get("paper_id")}
-            content = replace_uuid_citations(content, pid_to_num)
-
             target_chars = ctx["section"].get("target_words", 2000) * 2
             if len(content) > target_chars * 2:
                 max_chars = int(target_chars * 1.8)
@@ -521,7 +521,7 @@ async def write_review_node(state: PipelineState) -> dict:
                     references=ctx["section_refs"],
                 )
                 if ref_attempt < max_refinement and evaluation.get("score", 0) < 70:
-                    content = await _revise_section(content, evaluation)
+                    content = await _revise_section(content, evaluation, outline, ctx["section_refs"])
                 else:
                     break
 
@@ -806,18 +806,12 @@ def _render_citation_plan_summary(plan, paper_map: dict) -> str:
     # 候选列表（最多 30 篇，对齐 Rust 版输出格式）
     candidate_lines = []
     for i, d in enumerate(details[:30]):
-        pid = d.get("paper_id", "")
         cluster = d.get("cluster_id", "unknown")
         src = d.get("source", "unknown")
         if hasattr(src, "value"):
             src = src.value
-        # 混合图邻居信息（对齐 Rust 版 hybrid_anchor / hybrid_weight）
-        anchor = d.get("hybrid_anchor_paper_id")
-        weight_bp = d.get("hybrid_weight_basis_points")
-        anchor_str = f"; hybrid_anchor={anchor}" if anchor else ""
-        weight_str = f"; hybrid_weight={weight_bp}bp" if weight_bp else ""
         candidate_lines.append(
-            f"[{i + 1}] paper_id={pid}; cluster={cluster}; source={src}{anchor_str}{weight_str}"
+            f"[{i + 1}] cluster={cluster}; source={src}"
         )
 
     return (

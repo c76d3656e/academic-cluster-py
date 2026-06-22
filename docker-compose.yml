@@ -4,10 +4,18 @@ services:
     image: pgvector/pgvector:pg16
     container_name: academic-cluster-postgres
     restart: unless-stopped
+    shm_size: '128mb'
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-academic_cluster}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    command: >
+      postgres
+        -c shared_buffers=128MB
+        -c max_connections=30
+        -c work_mem=4MB
+        -c maintenance_work_mem=64MB
+        -c effective_cache_size=256MB
     ports:
       - "${POSTGRES_EXTERNAL_PORT:-5433}:5432"
     volumes:

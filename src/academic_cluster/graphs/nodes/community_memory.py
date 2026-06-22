@@ -157,6 +157,73 @@ def _normalize_memory_enrichment(raw: dict, fallback: dict) -> dict:
     return enriched
 
 
+def _compute_cross_community_links(
+    clusters: list[dict],
+    kg_entities: list[dict],
+    top_k: int = 5,
+) -> dict[str, list[dict]]:
+    """Deterministic cross-community link discovery via shared KG entities.
+
+    For each cluster, finds other clusters that share the most KG entities.
+    Returns {cluster_id: [{cluster_id, shared_entities, weight}, ...]}.
+    """
+    entity_names: dict[str, str] = {}
+
+    # Build cluster_id → set of paper_ids
+    cluster_paper_map: dict[str, set[str]] = {}
+    for cluster in clusters:
+        cid = str(cluster.get("id"))
+        pids = {str(pid) for pid in _as_list(cluster.get("paper_ids"))}
+        cluster_paper_map[cid] = pids
+
+    # Build entity → cluster_ids by checking which clusters contain the entity's papers
+    entity_to_clusters = {}
+    for entity in kg_entities:
+        eid = str(entity.get("id") or entity.get("name", ""))
+        if not eid:
+            continue
+        name = str(entity.get("name", ""))
+        entity_names[eid] = name
+        ent_paper_ids = {str(pid) for pid in _as_list(entity.get("paper_ids"))}
+        if not ent_paper_ids:
+            continue
+        for cid, c_papers in cluster_paper_map.items():
+            if ent_paper_ids & c_papers:
+                entity_to_clusters.setdefault(eid, set()).add(cid)
+
+    # For each cluster, count shared entities with every other cluster
+    links: dict[str, list[dict]] = {}
+    for cluster in clusters:
+        cid = str(cluster.get("id"))
+        neighbor_counts: dict[str, list[str]] = {}  # neighbor_cid → [shared entity names]
+        for eid, cluster_set in entity_to_clusters.items():
+            if cid not in cluster_set:
+                continue
+            ename = entity_names.get(eid, eid)
+            for neighbor_cid in cluster_set:
+                if neighbor_cid == cid:
+                    continue
+                neighbor_counts.setdefault(neighbor_cid, []).append(ename)
+
+        sorted_neighbors = sorted(
+            neighbor_counts.items(),
+            key=lambda x: len(x[1]),
+            reverse=True,
+        )[:top_k]
+
+        links[cid] = [
+            {
+                "cluster_id": neighbor_cid,
+                "shared_entities": shared[:8],
+                "weight": len(shared),
+            }
+            for neighbor_cid, shared in sorted_neighbors
+            if shared
+        ]
+
+    return links
+
+
 def synthesize_community_memory(
     *,
     project_id: str,
@@ -537,12 +604,35 @@ async def community_memory_node(state: PipelineState) -> dict:
 
     memories = await asyncio.gather(*[_bounded(i, cluster) for i, cluster in enumerate(remaining_clusters)])
 
+    # === 跨聚类关联计算（确定性，基于共享 KG 实体） ===
+    cross_links = _compute_cross_community_links(clusters, kg_entities)
+    for memory in memories:
+        cid = str(memory.get("cluster_id", ""))
+        memory["cross_community_links"] = cross_links.get(cid, [])
+    logger.info(
+        "Cross-community links computed",
+        clusters_with_links=sum(1 for v in cross_links.values() if v),
+        total_links=sum(len(v) for v in cross_links.values()),
+    )
+
     new_memory_ids: list[str] = []
     for memory in memories:
         new_memory_ids.append(await db.save_community_memory(memory))
 
     # 合并已有 + 新生成的
     all_memory_ids = existing_memory_ids + new_memory_ids
+
+    # 回填已有记忆中空的 cross_community_links
+    if already_done_cluster_ids:
+        all_memories = await db.get_community_memories_by_project(state.project_id)
+        backfilled = 0
+        for mem in all_memories:
+            if str(mem.get("cluster_id")) in cross_links and not mem.get("cross_community_links"):
+                mem["cross_community_links"] = cross_links[str(mem["cluster_id"])]
+                await db.save_community_memory(mem)
+                backfilled += 1
+        if backfilled:
+            logger.info("Backfilled cross_community_links for existing memories", count=backfilled)
 
     await send_progress(
         state.project_id,

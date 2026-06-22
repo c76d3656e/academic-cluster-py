@@ -21,12 +21,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..prompts import (
     get_generate_outline_prompt,
-    get_review_structure_prompt,
-    get_review_style_prompt,
     get_write_section_prompt,
-)
-from ..prompts.writing_rules import (
-    format_banned_phrases_for_prompt,
+    get_write_system_prompt,
 )
 
 logger = structlog.get_logger()
@@ -643,118 +639,54 @@ async def write_section(
             ec_lines.append(line)
         evidence_context = "\n".join(ec_lines)
 
-    # 构建段落规划上下文
-    section_outline_context = ""
-    if section_outline:
-        core_question = section_outline.get("core_question", "")
-        narrative_arc = section_outline.get("narrative_arc", "")
-        paragraphs = section_outline.get("paragraphs", [])
-        transition_from_prev = section_outline.get("transition_from_prev", "自然切入")
-        transition_to_next = section_outline.get("transition_to_next", "总结本节")
+    # Prepare raw data for template placeholders (no headers — those live in the .md)
+    evidence_cards_data = evidence_context  # raw evidence lines
 
-        outline_lines = ["## 本章节段落规划"]
-        if core_question:
-            outline_lines.append(f"核心问题：{core_question}")
-        if narrative_arc:
-            outline_lines.append(f"论述逻辑：{narrative_arc}")
-        outline_lines.append("")
+    section_outline_data = ""
+    if section_outline:
+        parts = []
+        core_q = section_outline.get("core_question", "")
+        arc = section_outline.get("narrative_arc", "")
+        if core_q:
+            parts.append(f"Core question: {core_q}")
+        if arc:
+            parts.append(f"Narrative arc: {arc}")
+        paragraphs = section_outline.get("paragraphs", [])
         if paragraphs:
-            outline_lines.append("段落安排：")
+            parts.append("\nParagraph layout:")
             for p in paragraphs:
                 idx = p.get("index", "")
                 target = p.get("target_words", "")
                 direction = p.get("direction", "")
-                synthesis = p.get("synthesis_instruction", "")
-                outline_lines.append(f"### 第 {idx} 段（约 {target} 字）")
-                if direction:
-                    outline_lines.append(f"方向：{direction}")
-                if synthesis:
-                    outline_lines.append(f"综合要求：{synthesis}")
-                outline_lines.append("")
-        outline_lines.append("衔接要求：")
-        outline_lines.append(f"- 开头过渡：{transition_from_prev}")
-        outline_lines.append(f"- 结尾铺垫：{transition_to_next}")
-        section_outline_context = "\n".join(outline_lines)
+                synth = p.get("synthesis_instruction", "")
+                line = f"### Paragraph {idx} (~{target} words)\nDirection: {direction}"
+                if synth:
+                    line += f"\nSynthesis: {synth}"
+                parts.append(line)
+        trans_prev = section_outline.get("transition_from_prev", "")
+        trans_next = section_outline.get("transition_to_next", "")
+        if trans_prev:
+            parts.append(f"\nOpening transition: {trans_prev}")
+        if trans_next:
+            parts.append(f"Closing lead-in: {trans_next}")
+        already = section_outline.get("already_covered", [])
+        if already:
+            parts.append(f"\nAlready covered (do not repeat): {'; '.join(already)}")
+        section_outline_data = "\n".join(parts)
 
-    # 构建前文摘要上下文
-    prev_summary_context = ""
-    if prev_summary:
-        prev_summary_context = f"## 前文摘要（已写内容，不要重复）\n{prev_summary}"
-
-    # 构建后文预告上下文
-    next_outline_context = ""
+    prev_summary_data = _clip_text_block(prev_summary, 6000) if prev_summary else ""
+    next_outline_data = ""
     if next_outline:
-        next_title = next_outline.get("title", "")
-        next_desc = next_outline.get("description", "")
-        next_outline_context = f"## 后文预告\n下一节：{next_title} — {next_desc}"
+        n_title = next_outline.get("title", "")
+        n_desc = next_outline.get("description", "")
+        if n_title:
+            next_outline_data = f"Next: {n_title} — {n_desc}\nPlease set up a transition to this in your closing."
 
-    # 加载章节写作提示模板
+    # Load prompt template and system prompt
     section_prompt_template = get_write_section_prompt()
-    if not section_prompt_template:
-        banned_block = format_banned_phrases_for_prompt()
-        section_prompt_template = f"""你正在撰写一篇学术综述文章的一个章节。
+    system_prompt = get_write_system_prompt() or "You write grounded Chinese academic literature reviews using only supplied evidence."
 
-## 研究主题
-{{topic}}
-
-## 综述标题
-{{review_title}}
-
-## 当前章节
-章节名称: {{section_title}}
-章节描述: {{section_description}}
-目标字数: {{target_words}} 字
-
-## 相关聚类数据
-{{cluster_data}}
-
-## 相关论文样本
-{{sample_papers}}
-
-## 真实可用的参考文献（只能从这里引用）
-以下是从学术数据库中提取的真实论文，编号为本章节专用编号。请只引用以下列表中的论文，不得编造。
-
-{{references}}
-
-{{evidence_section}}
-
-## 写作要求
-
-### 学术风格
-- 使用正式、严谨的学术中文
-- 主动使用领域专业术语，体现对该领域的深入理解
-- 句式应有变化：长短句结合，避免句式单一
-- 段落之间要有逻辑推进关系，而非简单的并列
-
-### 引用规范
-- 每个关键论断必须有引用支撑
-- 引用密度合理：段落中通常 2-4 处引用，但不要为凑引用而引用
-- 当多篇文献支撑同一观点时合并引用 [1,2]；若不同文献有不同结论，用对比分析呈现
-- 绝对禁止编造引用、作者、年份或期刊
-
-### 论述要求
-- 不仅要"综述"(列举已有工作)，更要"评论"(分析优劣、比较方法、揭示趋势)
-- 展现领域内的**共识**与**争议**：哪些结论已被广泛接受？哪些仍在争论？
-- 指出方法演进的**驱动力**：为什么从方法A演进到方法B？是因为精度不够？还是因为新数据类型出现？
-- 如果不同研究之间存在结论冲突，明确写出并尝试分析原因
-
-### 输出规范
-- 直接输出章节正文（纯段落文本）
-- 不要输出章节标题、不要输出参考文献列表、不要输出元说明
-- 字数严格控制在 {{target_words}} 字左右，正负 20%。超出过多会被截断。
-
-### 禁用表达
-{banned_block}
-每个段落应以实质性的分析判断或研究发现收尾，而非空洞的总结句。
-用具体的分析逻辑（如"由于X限制，Y方法转向Z策略"）替代这些泛化短语。"""
-
-    evidence_section = ""
-    if evidence_context:
-        evidence_section = f"""## 证据卡片（可引用的具体发现）
-以下是与本章节相关的研究证据，可用于支撑论述：
-
-{evidence_context}"""
-
+    # Single format() call — structure and headers live in the .md template
     prompt = section_prompt_template.format(
         topic=topic,
         review_title=review_title,
@@ -764,142 +696,11 @@ async def write_section(
         cluster_data=enriched_cluster_data,
         sample_papers=sample_papers,
         references=references,
-        evidence_section=evidence_section,
+        evidence_cards=evidence_cards_data,
+        section_outline=section_outline_data,
+        prev_summary=prev_summary_data,
+        next_outline=next_outline_data,
     )
-
-    # 注入段落规划、前文摘要、后文预告到写作要求之前
-    extra_context_blocks = []
-    if section_outline_context:
-        extra_context_blocks.append(section_outline_context)
-    if prev_summary_context:
-        extra_context_blocks.append(prev_summary_context)
-    if next_outline_context:
-        extra_context_blocks.append(next_outline_context)
-    if extra_context_blocks:
-        injection = "\n\n".join(extra_context_blocks) + "\n\n"
-        prompt = prompt.replace("## 写作要求", f"{injection}## 写作要求")
-
-    # 加载写作风格规范和结构指南（对齐 Rust 版 review_system）
-    style_guide = get_review_style_prompt()
-    structure_guide = get_review_structure_prompt()
-
-    system_prompt = f"""You write grounded Chinese academic literature reviews using only supplied evidence.
-
-Review structure guide:
-{structure_guide}
-
-Review style guide:
-{style_guide}
-
-Hard rules:
-- Use only supplied papers and evidence.
-- Do not invent references, authors, venues, years, DOI, or claims.
-- Use IEEE-style [N] citations matching supplied evidence numbers.
-- NEVER use author-year citations like (Friedman, 2024) or (Smith et al., 2023). Only [1], [1,2], [1-3] format.
-- NEVER use paper_id (like p1, p2) as citation numbers. Only use the [N] numbers from the reference list.
-- NEVER put citation-bearing prose inside parentheses, for example "（文献[24][28]已证实...）" or "([27][29])".
-- **ABSOLUTELY FORBIDDEN**: Never start a sentence with "文献[N]" or use "文献[N]" as the subject of a sentence. Write the factual statement first and put [N] at the end.
-- **FORBIDDEN**: "文献[42]指出...", "文献[43]通过...", "文献[52]的实验...", "文献[49]的数据..."
-- **CORRECT**: "多尺度耦合计算中仍存在35%的算力浪费[42]。", "结合概率密度演化方程实现时序演化模拟[43]。"
-- Citations must be part of the normal sentence syntax, for example "已有研究[24,28]证实..." or "该局限已在医疗与交通场景研究中得到讨论[27,29]".
-- Merge adjacent citation tokens: write [24,28], never [24][28].
-- Keep output as UTF-8 markdown.
-- Avoid internal labels such as Cluster 0 or pipeline implementation details.
-- Do NOT output a reference list or bibliography at the end of the section.
-- Do NOT output meta-commentary like "(字数统计：1520字)" or "(以上为...)".
-- Strictly adhere to the target word count (±20%).
-
-SYNTHESIS-FIRST RULE (critical):
-A literature review is NOT a collection of individual paper summaries. Each paragraph must be organized around a central thesis or analytical theme, with multiple papers serving as supporting evidence.
-- BANNED PATTERN — paper-by-paper listing: "Author A [1] proposed X. Author B [2] proposed Y. Author C [3] proposed Z." This is a summary list, not a review.
-- BANNED PATTERN — sequential paper introduction: Each sentence introduces a different paper's finding without analytical connection.
-- REQUIRED PATTERN — thematic synthesis: "Two dominant paradigms have emerged for X: attention-based approaches [1,2] achieve Y through Z, while state-space models [3,4] trade precision for efficiency. The hybrid approach [5] attempts to bridge this gap, though at the cost of..."
-- REQUIRED PATTERN — comparative analysis: "Although [1] and [3] both adopt strategy X, the former focuses on Y while the latter targets Z; this divergence stems from their different assumptions about..."
-- When comparing research, explicitly state similarities, differences, and underlying reasons — never simply juxtapose findings.
-- Organize paragraphs by mechanism, method category, or conclusion theme — not by individual papers."""
-
-    # 输出卫生规则 + 引用约束补充（对齐 Rust 版 write_section_user 的额外约束）
-    output_hygiene_rules = """## Output hygiene rules
-- Treat related paper samples, evidence summary, claim, evidence_span, method, metric, limitation, confidence, reference candidates, citation candidates, cluster data, community context, and evidence_limitations as private working material only.
-- Do not copy those labels or raw working-material blocks into the section.
-- Output only polished section body paragraphs. Do not output a section title, reference list, bibliography, candidate list, evidence-card JSON, audit notes, or implementation details.
-- Use only [N] citation numbers from the provided usable reference list, and cite a source only when it directly supports the sentence.
-- The same [N] number must always refer to the same paper_id, title, and evidence_card_id shown in the related paper samples and usable reference list.
-- Never cite a sentence with [N] if the claim was taken from another paper_id, even when both papers discuss a similar topic.
-- Do not write parenthesized citation prose such as "（文献[24][28]已证实网络稳定性...）"; integrate the citation into the sentence instead.
-- Merge adjacent citation tokens: write [24,28], never [24][28]."""
-
-    citation_constraint_supplement = """## 引用约束补充
-- 本章节必须使用本章节"真实可用的参考文献"列表中的 [N] 编号。
-- 本章节会提供约 20-30 篇候选文献；请只选择真正支撑论点的文献，不要为了凑引用而引用。
-- 每个 section 尽量使用 10-20 篇有证据支撑的文献；如果证据不足，可以少于 10 篇，但必须改写或删除无法被候选文献支撑的判断。
-- 每一句包含事实判断、方法比较、指标、趋势、局限或结论的句子，都必须能被同句或邻近句中的 [N] 文献支撑。
-- 如果同一论文支撑多个判断，可以重复引用，但不得引用列表外编号。
-- 不能编造引用、作者、年份、期刊、DOI 或论文结论。
-- **引用格式强制**：只使用 [N] 数字编号。禁止 (Author, Year) 格式。禁止使用 paper_id 作为引用号。
-- **禁止括号化引用说明**：不要写"（文献[24][28]已证实...）"、"（[27][29]）"、"([x])"、"([1][2])"。引用必须进入正文句法，例如"已有研究[24,28]证实..."、"这种局限在医疗与交通场景中已有讨论[27,29]"。
-- **禁止相邻引用块**：不要写 [24][28]，合并为 [24,28]。"""
-
-    # 在写作要求之后插入 output hygiene rules 和引用约束
-    prompt = prompt.replace(
-        "## 写作要求",
-        f"{output_hygiene_rules}\n\n{citation_constraint_supplement}\n\n## 写作要求",
-    )
-
-    # 注入段落规划 + 上下文链（来自 section_outline_planner）
-    if section_outline:
-        outline_parts = []
-        core_q = section_outline.get("core_question", "")
-        arc = section_outline.get("narrative_arc", "")
-        if core_q:
-            outline_parts.append(f"核心问题：{core_q}")
-        if arc:
-            outline_parts.append(f"论述逻辑：{arc}")
-
-        paragraphs = section_outline.get("paragraphs", [])
-        if paragraphs:
-            outline_parts.append("\n段落安排：")
-            for p in paragraphs:
-                idx = p.get("index", 0)
-                direction = p.get("direction", "")
-                pw = p.get("target_words", "")
-                synth = p.get("synthesis_instruction", "")
-                line = f"### 第 {idx} 段（约 {pw} 字）\n方向：{direction}"
-                if synth:
-                    line += f"\n综合要求：{synth}"
-                outline_parts.append(line)
-
-        trans_prev = section_outline.get("transition_from_prev", "")
-        trans_next = section_outline.get("transition_to_next", "")
-        if trans_prev:
-            outline_parts.append(f"\n开头过渡方向：{trans_prev}")
-        if trans_next:
-            outline_parts.append(f"结尾铺垫方向：{trans_next}")
-
-        already = section_outline.get("already_covered", [])
-        if already:
-            outline_parts.append(f"\n前序已覆盖（不要重复）：{'; '.join(already)}")
-
-        section_outline_block = "\n".join(outline_parts)
-        prompt = prompt.replace(
-            "## 写作要求",
-            f"## 本章节段落规划\n{section_outline_block}\n\n## 写作要求",
-        )
-
-    if prev_summary:
-        prompt = prompt.replace(
-            "## 写作要求",
-            f"## 前文摘要（已写内容，不要重复）\n{prev_summary}\n\n## 写作要求",
-        )
-
-    if next_outline:
-        next_title = next_outline.get("title", "")
-        next_desc = next_outline.get("description", "")
-        if next_title:
-            prompt = prompt.replace(
-                "## 写作要求",
-                f"## 后文预告\n下一节：{next_title} — {next_desc}\n请在结尾为此做铺垫。\n\n## 写作要求",
-            )
 
     if len(prompt) > _WRITING_CONTEXT_CHAR_BUDGET:
         prompt = _clip_text_block(prompt, _WRITING_CONTEXT_CHAR_BUDGET)
