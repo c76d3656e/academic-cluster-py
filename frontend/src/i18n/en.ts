@@ -428,4 +428,122 @@ export const en = {
     groupCommunityMemory: 'Community Memory Stage',
     groupSystem: 'System Settings',
   },
+
+  // New component translations
+  spinner: {
+    loading: 'Loading...',
+  },
+
+  globalSearch: {
+    placeholder: 'Search...',
+    noResults: 'No results found',
+    searchIn: 'Search in {source}',
+    searching: 'Searching...',
+  },
+
+  notifications: {
+    title: 'Notifications',
+    markAllRead: 'Mark all as read',
+    noNotifications: 'No notifications',
+    today: 'Today',
+    yesterday: 'Yesterday',
+    lastWeek: 'Last week',
+    older: 'Older',
+  },
+
+  confirmDialog: {
+    confirm: 'Confirm',
+    cancel: 'Cancel',
+  },
+
+  dataTable: {
+    noData: 'No data',
+    selected: '{count} selected',
+    rowsPerPage: 'Rows per page',
+    page: 'Page {current} of {total}',
+  },
+
+  form: {
+    required: 'This field is required',
+    invalidEmail: 'Please enter a valid email address',
+    minLength: 'At least {min} characters required',
+    maxLength: 'Maximum {max} characters allowed',
+    minValue: 'Minimum value is {min}',
+    maxValue: 'Maximum value is {max}',
+    invalidPattern: 'Invalid format',
+  },
+
+  wizard: {
+    step: 'Step {current} of {total}',
+    previous: 'Previous',
+    next: 'Next',
+    complete: 'Complete',
+  },
+
+  fileUpload: {
+    dragDrop: 'Drag and drop files here',
+    or: 'or',
+    browse: 'Browse files',
+    maxSize: 'Max file size: {size}MB',
+    invalidType: 'Unsupported file type',
+    fileTooLarge: 'File is too large',
+  },
+
+  pagination: {
+    previous: 'Previous',
+    next: 'Next',
+    first: 'First',
+    last: 'Last',
+  },
+
+  emptyState: {
+    noData: 'No data',
+    noResults: 'No results found',
+    tryAdjusting: 'Try adjusting your search criteria',
+  },
+
+  errorState: {
+    error: 'Error',
+    somethingWrong: 'Something went wrong',
+    retry: 'Retry',
+    details: 'View details',
+  },
+
+  codeBlock: {
+    copy: 'Copy',
+    copied: 'Copied',
+  },
+
+  colorPicker: {
+    presets: 'Preset colors',
+    custom: 'Custom color',
+  },
+
+  dateRangePicker: {
+    today: 'Today',
+    last7Days: 'Last 7 days',
+    last30Days: 'Last 30 days',
+    thisMonth: 'This month',
+    lastMonth: 'Last month',
+    custom: 'Custom range',
+  },
+
+  tagInput: {
+    addTag: 'Add tag',
+    pressEnter: 'Press Enter to add',
+  },
+
+  statusChip: {
+    online: 'Online',
+    offline: 'Offline',
+    busy: 'Busy',
+    away: 'Away',
+  },
+
+  stepper: {
+    completed: 'Completed',
+    inProgress: 'In Progress',
+    pending: 'Pending',
+    error: 'Error',
+  },
 }

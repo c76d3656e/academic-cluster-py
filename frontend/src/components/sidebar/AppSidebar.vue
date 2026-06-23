@@ -1,19 +1,125 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import { useFeatures } from '@/composables/useFeatures'
 import { useI18n } from '@/i18n'
 import { getInitials } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
+import { GlobalSearch } from '@/components/global-search'
+import { CommandMenu } from '@/components/command-menu'
+import type { SearchSource } from '@/components/global-search'
 
 const emit = defineEmits<{ navigate: [] }>()
 
 const route = useRoute()
 const router = useRouter()
-const { user, isAdmin, logout } = useAuth()
+const { user, logout } = useAuth()
+const isAdmin = computed(() => useAuth().isAdmin)
 const { features, loadFeatures } = useFeatures()
 const { t } = useI18n()
+
+// Command menu state
+const commandMenuOpen = ref(false)
+
+// Search sources for GlobalSearch
+const searchSources = computed<SearchSource[]>(() => [
+  {
+    label: t('console.myProjects'),
+    items: [],
+    toResult: (item: unknown) => ({
+      id: '1',
+      title: 'Example Project',
+      href: '/console/projects/1',
+      icon: 'projects',
+    }),
+    search: (query) => {
+      // This would typically call an API
+      return [
+        { id: '1', title: 'Example Project', href: '/console/projects/1', icon: 'projects' },
+      ]
+    },
+  },
+])
+
+// Command menu groups
+const commandGroups = computed(() => {
+  const groups = []
+
+  // Console commands
+  groups.push({
+    id: 'console',
+    label: t('console.myConsole'),
+    items: [
+      {
+        id: 'dashboard',
+        label: t('console.dashboard'),
+        icon: 'dashboard',
+        action: () => { router.push('/console/overview') },
+      },
+      {
+        id: 'projects',
+        label: t('console.myProjects'),
+        icon: 'projects',
+        action: () => { router.push('/console/projects') },
+      },
+      {
+        id: 'new-project',
+        label: t('project.newProject'),
+        icon: 'create',
+        action: () => { router.push('/console/projects/new') },
+      },
+      {
+        id: 'profile',
+        label: t('console.profile'),
+        icon: 'profile',
+        action: () => { router.push('/console/profile') },
+      },
+      {
+        id: 'recharge',
+        label: t('console.recharge'),
+        icon: 'recharge',
+        action: () => { router.push('/console/recharge') },
+      },
+    ],
+  })
+
+  // Admin commands
+  if (isAdmin.value) {
+    groups.push({
+      id: 'admin',
+      label: t('admin.systemManagement'),
+      items: [
+        {
+          id: 'admin-overview',
+          label: t('admin.systemOverview'),
+          icon: 'admin-overview',
+          action: () => { router.push('/admin/overview') },
+        },
+        {
+          id: 'admin-users',
+          label: t('admin.userManagement'),
+          icon: 'admin-users',
+          action: () => { router.push('/admin/users') },
+        },
+        {
+          id: 'admin-projects',
+          label: t('admin.projectManagement'),
+          icon: 'admin-projects',
+          action: () => { router.push('/admin/projects') },
+        },
+        {
+          id: 'admin-providers',
+          label: t('admin.providerManagement'),
+          icon: 'admin-providers',
+          action: () => { router.push('/admin/providers') },
+        },
+      ],
+    })
+  }
+
+  return groups
+})
 
 const showUsage = computed(() => features.value.show_usage ?? false)
 
@@ -105,6 +211,15 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Global Search -->
+    <div class="px-3 pb-3">
+      <GlobalSearch
+        :sources="searchSources"
+        :placeholder="t('common.search')"
+        @select="(item: any) => console.log('Selected:', item)"
+      />
+    </div>
+
     <Separator />
 
     <!-- Console Navigation -->
@@ -156,6 +271,12 @@ onMounted(async () => {
         {{ t('auth.logout') }}
       </button>
     </div>
+
+    <!-- Command Menu (Cmd+K) -->
+    <CommandMenu
+      v-model:open="commandMenuOpen"
+      :groups="commandGroups"
+    />
   </aside>
 </template>
 

@@ -428,4 +428,122 @@ export const zh = {
     groupCommunityMemory: '社区记忆阶段',
     groupSystem: '系统设置',
   },
+
+  // 新组件翻译
+  spinner: {
+    loading: '加载中...',
+  },
+
+  globalSearch: {
+    placeholder: '搜索...',
+    noResults: '无搜索结果',
+    searchIn: '在 {source} 中搜索',
+    searching: '搜索中...',
+  },
+
+  notifications: {
+    title: '通知',
+    markAllRead: '全部标记为已读',
+    noNotifications: '暂无通知',
+    today: '今天',
+    yesterday: '昨天',
+    lastWeek: '上周',
+    older: '更早',
+  },
+
+  confirmDialog: {
+    confirm: '确定',
+    cancel: '取消',
+  },
+
+  dataTable: {
+    noData: '暂无数据',
+    selected: '已选择 {count} 项',
+    rowsPerPage: '每页行数',
+    page: '第 {current} / {total} 页',
+  },
+
+  form: {
+    required: '此项为必填项',
+    invalidEmail: '请输入有效的邮箱地址',
+    minLength: '至少需要 {min} 个字符',
+    maxLength: '最多 {max} 个字符',
+    minValue: '最小值为 {min}',
+    maxValue: '最大值为 {max}',
+    invalidPattern: '格式不正确',
+  },
+
+  wizard: {
+    step: '步骤 {current} / {total}',
+    previous: '上一步',
+    next: '下一步',
+    complete: '完成',
+  },
+
+  fileUpload: {
+    dragDrop: '拖拽文件到此处',
+    or: '或',
+    browse: '浏览文件',
+    maxSize: '最大文件大小：{size}MB',
+    invalidType: '不支持的文件类型',
+    fileTooLarge: '文件过大',
+  },
+
+  pagination: {
+    previous: '上一页',
+    next: '下一页',
+    first: '第一页',
+    last: '最后一页',
+  },
+
+  emptyState: {
+    noData: '暂无数据',
+    noResults: '无搜索结果',
+    tryAdjusting: '尝试调整搜索条件',
+  },
+
+  errorState: {
+    error: '出错了',
+    somethingWrong: '发生了错误',
+    retry: '重试',
+    details: '查看详情',
+  },
+
+  codeBlock: {
+    copy: '复制',
+    copied: '已复制',
+  },
+
+  colorPicker: {
+    presets: '预设颜色',
+    custom: '自定义颜色',
+  },
+
+  dateRangePicker: {
+    today: '今天',
+    last7Days: '最近 7 天',
+    last30Days: '最近 30 天',
+    thisMonth: '本月',
+    lastMonth: '上月',
+    custom: '自定义范围',
+  },
+
+  tagInput: {
+    addTag: '添加标签',
+    pressEnter: '按 Enter 添加',
+  },
+
+  statusChip: {
+    online: '在线',
+    offline: '离线',
+    busy: '忙碌',
+    away: '离开',
+  },
+
+  stepper: {
+    completed: '已完成',
+    inProgress: '进行中',
+    pending: '待处理',
+    error: '错误',
+  },
 }

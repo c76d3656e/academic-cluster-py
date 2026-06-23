@@ -1,20 +1,30 @@
+# Build stage
 FROM node:20-alpine AS build
+
 WORKDIR /app
-COPY package*.json ./
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install dependencies
 RUN npm ci
+
+# Copy source code
 COPY . .
+
+# Build the app
 RUN npm run build
 
-FROM nginx:1.27-alpine
-COPY --from=build /app/dist /usr/share/nginx/html
+# Production stage
+FROM nginx:alpine
+
+# Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-RUN chown -R nginx:nginx /usr/share/nginx/html && \
-    chown -R nginx:nginx /var/cache/nginx && \
-    chown -R nginx:nginx /var/log/nginx && \
-    touch /var/run/nginx.pid && \
-    chown nginx:nginx /var/run/nginx.pid
+# Copy built files from build stage
+COPY --from=build /app/dist /usr/share/nginx/html
 
-USER nginx
+# Expose port
 EXPOSE 80
+
 CMD ["nginx", "-g", "daemon off;"]
