@@ -49,11 +49,11 @@ def _compute_cluster_coverage(
     检查每个聚类是否在综述中被引用覆盖。
     """
     # 构建 paper_id -> cluster_id 映射
-    paper_to_cluster: dict[str, int] = {}
+    paper_to_cluster: dict[str, str] = {}
     for cluster in clusters:
-        cid_int = int(cluster.get("id", 0))
+        cid = str(cluster.get("id", ""))
         for pid in cluster.get("paper_ids", []):
-            paper_to_cluster[pid] = cid_int
+            paper_to_cluster[pid] = cid
 
     # 构建 citation_number -> paper_id 映射
     all_paper_ids = core_paper_ids + auxiliary_paper_ids
