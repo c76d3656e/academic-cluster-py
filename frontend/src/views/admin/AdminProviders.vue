@@ -259,7 +259,7 @@ function getHealthVariant(status: string): 'default' | 'destructive' | 'outline'
 
 function formatPrice(v: number): string {
   if (v === 0) return '-'
-  return '$' + v.toFixed(2)
+  return '$' + parseFloat(v.toFixed(6))
 }
 
 function sourceBadgeVariant(source: SourceConfigItem): 'default' | 'destructive' | 'outline' {
@@ -490,11 +490,11 @@ onMounted(loadData)
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label class="text-xs text-muted-foreground">{{ t('admin.inputPrice') }}</Label>
-                <Input v-model.number="form.input_price_per_m" type="number" step="0.01" min="0" placeholder="0.00" class="mt-1" />
+                <Input v-model.number="form.input_price_per_m" type="number" step="0.000001" min="0" placeholder="0.00" class="mt-1" />
               </div>
               <div>
                 <Label class="text-xs text-muted-foreground">{{ t('admin.outputPrice') }}</Label>
-                <Input v-model.number="form.output_price_per_m" type="number" step="0.01" min="0" placeholder="0.00" class="mt-1" />
+                <Input v-model.number="form.output_price_per_m" type="number" step="0.000001" min="0" placeholder="0.00" class="mt-1" />
               </div>
             </div>
           </div>
