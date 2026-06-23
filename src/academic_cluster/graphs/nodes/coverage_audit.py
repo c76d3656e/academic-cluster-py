@@ -51,9 +51,9 @@ def _compute_cluster_coverage(
     # 构建 paper_id -> cluster_id 映射
     paper_to_cluster: dict[str, str] = {}
     for cluster in clusters:
-        cid = str(cluster.get("id", ""))
+        cluster_id = str(cluster.get("id", ""))
         for pid in cluster.get("paper_ids", []):
-            paper_to_cluster[pid] = cid
+            paper_to_cluster[pid] = cluster_id
 
     # 构建 citation_number -> paper_id 映射
     all_paper_ids = core_paper_ids + auxiliary_paper_ids
