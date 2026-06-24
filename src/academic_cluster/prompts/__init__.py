@@ -103,6 +103,24 @@ def get_section_evaluator_prompt() -> str:
     return _load_prompt("section_evaluator.md")
 
 
+# === 分析相关 ===
+
+
+def get_community_memory_prompt() -> str:
+    """获取社区记忆综合提示"""
+    return _load_prompt("community_memory.md")
+
+
+def get_gap_analysis_judge_prompt() -> str:
+    """获取差距分析 LLM judge 提示"""
+    return _load_prompt("gap_analysis_judge.md")
+
+
+def get_inter_community_conflict_prompt() -> str:
+    """获取跨社区冲突分析提示"""
+    return _load_prompt("inter_community_conflict.md")
+
+
 # === 写作规则（统一管理） ===
 
 from .writing_rules import (  # noqa: E402, F401

@@ -68,6 +68,7 @@ class PipelineState(BaseModel):
     # === 证据阶段 ===
     evidence_card_ids: list[str] = Field(default_factory=list)
     community_memory_ids: list[str] = Field(default_factory=list)
+    inter_community_conflict: dict[str, Any] | None = None
     gap_analysis_ids: list[str] = Field(default_factory=list)
     needs_targeted_refinement: bool = False
     refinement_attempt: int = 0

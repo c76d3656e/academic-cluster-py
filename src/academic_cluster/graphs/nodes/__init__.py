@@ -25,6 +25,7 @@ from .evidence_cards import evidence_cards_node
 from .filter import filter_node
 from .finalize import finalize_node
 from .gap_analysis import gap_analysis_node
+from .inter_community_conflict import inter_community_conflict_node
 
 # 知识图谱阶段节点
 from .kg_extraction import kg_extraction_node
@@ -57,6 +58,7 @@ __all__ = [
     "finalize_node",
     "gap_analysis_node",
     "generate_abstract_node",
+    "inter_community_conflict_node",
     # 知识图谱阶段
     "kg_extraction_node",
     # 写作阶段

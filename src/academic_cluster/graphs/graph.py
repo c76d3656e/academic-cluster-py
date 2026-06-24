@@ -38,6 +38,7 @@ from .nodes import (
     finalize_node,
     gap_analysis_node,
     generate_abstract_node,
+    inter_community_conflict_node,
     kg_extraction_node,
     outline_generation_node,
     pgvector_knn_node,
@@ -239,6 +240,10 @@ def create_pipeline_graph() -> StateGraph[PipelineState]:
     workflow.add_node(
         "community_memory", with_audit("community_memory")(community_memory_node)
     )
+    workflow.add_node(
+        "inter_community_conflict",
+        with_audit("inter_community_conflict")(inter_community_conflict_node),
+    )
     workflow.add_node("gap_analysis", with_audit("gap_analysis")(gap_analysis_node))
     workflow.add_node(
         "targeted_refine", with_audit("targeted_refine")(targeted_refine_node)
@@ -276,7 +281,8 @@ def create_pipeline_graph() -> StateGraph[PipelineState]:
     workflow.add_edge("visualize_community", "evidence_cards")
     workflow.add_edge("evidence_cards", "kg_extraction")
     workflow.add_edge("kg_extraction", "community_memory")
-    workflow.add_edge("community_memory", "gap_analysis")
+    workflow.add_edge("community_memory", "inter_community_conflict")
+    workflow.add_edge("inter_community_conflict", "gap_analysis")
 
     workflow.add_conditional_edges(
         "gap_analysis",
@@ -582,6 +588,8 @@ def _build_progress_message(node_name: str, state: dict[str, Any]) -> str:
         return f"知识图谱抽取中，提取 {len(state.get('kg_entity_ids', []))} 个实体、{len(state.get('kg_relation_ids', []))} 条关系"
     if node_name == "community_memory":
         return f"社区记忆中，已生成 {len(state.get('community_memory_ids', []))} 条"
+    if node_name == "inter_community_conflict":
+        return "跨社区冲突分析中"
     if node_name == "gap_analysis":
         return "差距分析中"
     if node_name == "targeted_refine":

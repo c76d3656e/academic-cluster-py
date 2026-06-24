@@ -103,12 +103,18 @@ async def _refine_gaps_with_llm(
     if not gap_communities:
         return gap_reports, True
 
+    from ...prompts import get_gap_analysis_judge_prompt
+
     judge_available = True
-    user_prompt = "\n".join(
+    communities_text = "\n".join(
         f"{r['cluster_id']}: gap={r['gap_type']}, papers={r['paper_count']}, "
         f"evidence={r['evidence_card_count']}, entities={r['entity_count']}"
         for r in gap_communities
     )
+
+    prompt_template = get_gap_analysis_judge_prompt()
+    prompt = prompt_template.format(topic=topic, communities=communities_text)
+
     try:
         llm = create_llm(temperature=0.0, max_tokens=1024)
         response = await asyncio.wait_for(
@@ -118,12 +124,7 @@ async def _refine_gaps_with_llm(
                     SystemMessage(
                         content="Return JSON only. Confirm or soften literature-review gap decisions."
                     ),
-                    HumanMessage(
-                        content=(
-                            f"Topic: {topic}\n\nCommunities:\n{user_prompt}\n\n"
-                            'Return {"decisions":[{"community_id":"...","status":"enough_evidence|needs_refinement","reason":"..."}]}'
-                        )
-                    ),
+                    HumanMessage(content=prompt),
                 ],
             ),
             timeout=max(1, timeout_s),

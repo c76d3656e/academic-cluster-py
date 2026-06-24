@@ -442,44 +442,18 @@ async def enrich_community_memory_with_llm(
         for r in relations
     ]
 
-    prompt = f"""Research topic:
-{topic}
+    from ...prompts import get_community_memory_prompt
 
-Cluster id: {cluster.get("id")}
-Cluster name: {cluster.get("name", "")}
-
-Papers:
-{json.dumps(paper_lines, ensure_ascii=False)}
-
-Evidence cards:
-{json.dumps(card_lines, ensure_ascii=False)}
-
-KG entities:
-{json.dumps(entity_lines, ensure_ascii=False)}
-
-KG relations:
-{json.dumps(relation_lines, ensure_ascii=False)}
-
-Task:
-Synthesize this research community for an academic survey. Follow SurveyG/AutoSurvey principles:
-1. summarize the community as a coherent research direction, not a paper list;
-2. identify method families, limitations, and future directions from the evidence;
-3. flag weak coherence, outlier papers, and topic drift instead of forcing unrelated papers together;
-4. do not invent paper_ids, evidence_card_ids, metrics, or claims.
-
-Return strict JSON:
-{{
-  "community_summary": "Chinese synthesis, 3-5 sentences",
-  "method_families": ["..."],
-  "representative_claims": [
-    {{"paper_id": "...", "evidence_card_id": "...", "claim": "...", "support": "...", "synthesis_role": "foundation|development|frontier|contrast|limitation"}}
-  ],
-  "limitations": ["..."],
-  "future_directions": ["..."],
-  "evidence_gaps": ["..."],
-  "coherence_assessment": {{"score": 0.0, "rationale": "...", "outlier_paper_ids": ["..."]}},
-  "topic_relevance": {{"score": 0.0, "rationale": "..."}}
-}}"""
+    prompt_template = get_community_memory_prompt()
+    prompt = prompt_template.format(
+        topic=topic,
+        cluster_id=cluster.get("id"),
+        cluster_name=cluster.get("name", ""),
+        papers=json.dumps(paper_lines, ensure_ascii=False),
+        evidence_cards=json.dumps(card_lines, ensure_ascii=False),
+        kg_entities=json.dumps(entity_lines, ensure_ascii=False),
+        kg_relations=json.dumps(relation_lines, ensure_ascii=False),
+    )
 
     llm = create_llm(temperature=0.2, max_tokens=2200)
     response = await ainvoke_with_callbacks(
