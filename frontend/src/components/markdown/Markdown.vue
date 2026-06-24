@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { marked } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import DOMPurify from 'dompurify'
@@ -24,6 +24,7 @@ onMounted(() => {
   marked.use(markedKatex({
     throwOnError: false,
     output: 'html',
+    nonStandard: true,
   }))
 })
 
