@@ -49,7 +49,10 @@ async def inter_community_conflict_node(
                 await tracker.end_node(
                     "inter_community_conflict",
                     "succeeded",
-                    output_summary={"relationships": 0, "reason": "less_than_2_clusters"},
+                    output_summary={
+                        "relationships": 0,
+                        "reason": "less_than_2_clusters",
+                    },
                 )
             return {
                 "inter_community_conflict": None,
