@@ -494,6 +494,17 @@ async def get_review(
     # 获取已写章节
     sections = await db.get_written_sections_by_project_id(project_id)
 
+    # 按大纲顺序排序（并发写入导致 created_at 顺序可能与大纲不一致）
+    if outline and sections:
+        outline_sections = outline.get("sections") or []
+        section_order = {
+            str(s.get("name", s.get("number", i))): i
+            for i, s in enumerate(outline_sections)
+        }
+        sections.sort(
+            key=lambda s: section_order.get(str(s.get("section_id", "")), 999)
+        )
+
     # 获取证据卡片
     evidence_cards = []
     if outline:

@@ -80,6 +80,9 @@ def _split_finalized_body_by_section(
             continue
         if stripped.startswith("## "):
             title = stripped[3:].strip()
+            # Stop at References section — do not include it in any section body
+            if title.lower() in ("references", "参考文献"):
+                break
             if title in expected_titles:
                 if current is not None:
                     chunks.append(current)
@@ -772,9 +775,32 @@ async def write_review_node(state: PipelineState) -> dict[str, Any]:
                             "word_count": len(displayed_section_bodies[idx]),
                         }
                     )
+                logger.info(
+                    "Split sections saved back to DB",
+                    split_count=len(displayed_section_bodies),
+                    expected=len(written_section_ids),
+                )
+            else:
+                logger.warning(
+                    "Split section count mismatch — renumbered sections NOT saved to DB",
+                    split_count=len(displayed_section_bodies),
+                    expected=len(written_section_ids),
+                    outline_titles=[s.get("title") for s in sections],
+                )
             assembled_review = finalization.body_markdown
             final_review = finalization.markdown
             ref_mappings = finalization.reference_mappings
+
+            # Log first citations for debugging
+            import re as _re
+
+            first_cites = _re.findall(r"\[\d+(?:,\d+)*\]", assembled_review[:500])
+            logger.info(
+                "Renumbered citations preview",
+                first_citations=first_cites[:5],
+                total_mappings=len(ref_mappings),
+            )
+
             await db.save_pipeline_checkpoint(
                 {
                     "project_id": state.project_id,

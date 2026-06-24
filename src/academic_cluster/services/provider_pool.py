@@ -50,7 +50,7 @@ class LiteLLMPool:
             model_list=self._model_list,
             routing_strategy="simple-shuffle",
             num_retries=1,
-            timeout=180,
+            timeout=300,
             enable_pre_call_checks=False,
             disable_cooldowns=True,
             **self._router_kwargs,

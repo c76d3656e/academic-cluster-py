@@ -464,7 +464,7 @@ async def enrich_community_memory_with_llm(
             ),
             HumanMessage(content=prompt),
         ],
-        timeout=240,
+        timeout=300,
     )
     raw = _parse_json_object(response.content)
     return _normalize_memory_enrichment(raw, fallback_memory)

@@ -181,8 +181,9 @@ async def coverage_audit_node(state: PipelineState) -> dict[str, Any]:
                 "No written sections to audit - write_review must complete first"
             )
 
-        valid_paper_count = len(state.core_paper_ids)
-        total_papers = valid_paper_count + len(state.auxiliary_paper_ids)
+        # 引用编号基于全部论文（core + auxiliary），校验时必须用总数
+        total_papers = len(state.core_paper_ids) + len(state.auxiliary_paper_ids)
+        valid_paper_count = total_papers
 
         # === 1. 引用有效性校验 ===
         total_citations = 0

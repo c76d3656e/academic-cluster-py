@@ -44,8 +44,14 @@ const {
   connectSSE, startStatusPolling, startCallsPolling,
   loadHistoricalProgress,
 } = useProjectProgress(projectId, {
-  onCompleted() {
-    if (project.value) project.value.status = 'completed'
+  async onCompleted() {
+    // Fetch actual status instead of hardcoding 'completed'
+    try {
+      const s = await projectsApi.getProjectStatus(projectId)
+      if (project.value && s.status) project.value.status = s.status
+    } catch {
+      if (project.value) project.value.status = 'completed'
+    }
     loadReview()
   },
 })

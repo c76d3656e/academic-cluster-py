@@ -208,7 +208,7 @@ def create_llm(
         api_key=params["api_key"],
         base_url=params.get("api_base"),
         max_tokens=max_tokens,  # type: ignore[call-arg]
-        timeout=240,  # 单次 HTTP 请求超时 4 分钟
+        timeout=300,  # 单次 HTTP 请求超时 5 分钟
     )
     # 在 llm 对象上附加 provider 别名和路由分组名，供 ainvoke_with_callbacks 读取
     model_info = deployment.get("model_info", {}) or {}

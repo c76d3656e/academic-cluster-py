@@ -77,6 +77,7 @@ Each paragraph must be organized around a central analytical thesis, with multip
 ### Output Rules
 - Output only the section body (plain paragraph text)
 - Do NOT output a section title, reference list, bibliography, or meta-commentary
+- **禁止在正文中使用任何级别的标题**（#、##、###、#### 等）。正文只允许纯段落文本，段落之间用空行分隔。不要添加"研究背景"、"方法概述"、"实验结果"等小标题
 - Treat paper samples, evidence summaries, claim, evidence_span, method, metric, limitation, confidence, reference candidates, citation candidates, cluster data, community context, and evidence_limitations as internal working material — do not copy them into the output
 - Do NOT output candidate lists, evidence-card JSON, audit notes, or implementation details
 - Stay within {target_words} words (±20%)
@@ -135,8 +136,10 @@ Each paragraph must be organized around a central analytical thesis, with multip
 禁止使用的总结性连接词：
 - 综上所述, 总之, 总而言之, 综上, 概括而言, 总的来说, 整体而言, 由此可见
 
-禁止出现聚类内部标记：
-- 聚类0, 聚类 0, 聚类17, Cluster 0, cluster_17, 子簇0-1, C0-P01 等任何编号形式
-- 改为用自然语言描述研究方向或方法类别
+**严禁出现聚类/社区内部标记（最高优先级规则）：**
+- 禁止任何形式的聚类编号：聚类0, 聚类 0, 聚类14, 聚类17, Cluster 0, cluster_17, 子簇0-1, C0-P01, 社区0, 社区 3 等
+- 禁止引用聚类编号作为研究方向描述（如"聚类14的水深反演模型"）
+- **必须**用自然语言描述研究方向或方法类别（如"水深反演研究"、"基于深度学习的目标检测方法"）
+- 这些编号仅用于内部数据组织，出现在正文中会被视为严重错误
 
 每个段落必须以实质性分析收尾，禁止使用空洞总结句。

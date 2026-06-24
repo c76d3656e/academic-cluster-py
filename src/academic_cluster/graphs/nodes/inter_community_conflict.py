@@ -110,7 +110,7 @@ async def inter_community_conflict_node(
                 ),
                 HumanMessage(content=prompt),
             ],
-            timeout=120,
+            timeout=300,
         )
 
         # Parse response

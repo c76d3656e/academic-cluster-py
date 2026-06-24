@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { marked } from 'marked'
+import markedKatex from 'marked-katex-extension'
 import DOMPurify from 'dompurify'
+import 'katex/dist/katex.min.css'
 import type { MarkdownProps } from './types'
 
 const props = withDefaults(defineProps<MarkdownProps>(), {
@@ -13,12 +15,16 @@ const props = withDefaults(defineProps<MarkdownProps>(), {
   className: '',
 })
 
-// 配置 marked
+// 配置 marked + KaTeX
 onMounted(() => {
   marked.setOptions({
     breaks: props.breaks,
     gfm: true,
   })
+  marked.use(markedKatex({
+    throwOnError: false,
+    output: 'html',
+  }))
 })
 
 // 计算渲染后的 HTML
@@ -41,12 +47,20 @@ const renderedHtml = computed(() => {
           'table', 'thead', 'tbody', 'tr', 'th', 'td',
           'div', 'span',
           'input', 'label',
+          // KaTeX elements
+          'math', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac',
+          'msqrt', 'mtext', 'mspace', 'mstyle', 'semantics', 'annotation',
+          'munder', 'mover', 'munderover', 'mtable', 'mtr', 'mtd',
+          'menclose', 'mpadded', 'mphantom', 'mglyph',
         ],
         ALLOWED_ATTR: [
           'href', 'src', 'alt', 'title', 'class', 'id',
           'target', 'rel', 'width', 'height',
           'type', 'checked', 'disabled',
           'colspan', 'rowspan',
+          // KaTeX attributes
+          'style', 'aria-hidden', 'focusable', 'data-*',
+          'xmlns',
         ],
       })
     }
@@ -160,6 +174,14 @@ const containerClass = computed(() => {
 
 .prose img {
   @apply max-w-full h-auto rounded-lg;
+}
+
+.prose :deep(.katex-display) {
+  @apply my-4 overflow-x-auto;
+}
+
+.prose :deep(.katex) {
+  font-size: 1.1em;
 }
 
 .prose input[type="checkbox"] {

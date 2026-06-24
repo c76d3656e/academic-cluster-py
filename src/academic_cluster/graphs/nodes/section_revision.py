@@ -184,7 +184,13 @@ async def section_revision_node(state: PipelineState) -> dict[str, Any]:
     db = get_database()
 
     try:
-        valid_paper_count = len(state.core_paper_ids)
+        # 引用编号基于全部论文（core + auxiliary），校验时必须用总数
+        all_paper_ids = list(
+            dict.fromkeys(
+                list(state.core_paper_ids or []) + list(state.auxiliary_paper_ids or [])
+            )
+        )
+        valid_paper_count = len(all_paper_ids)
 
         # 获取已写章节
         written_sections = await db.get_written_sections_by_ids(
@@ -198,7 +204,7 @@ async def section_revision_node(state: PipelineState) -> dict[str, Any]:
         sections_meta = outline.get("sections", [])
 
         # 构建有效参考文献上下文（供 LLM 使用）
-        papers = await db.get_papers_by_ids(state.core_paper_ids)
+        papers = await db.get_papers_by_ids(all_paper_ids)
         ref_lines = []
         for i, p in enumerate(papers[:30], 1):
             title = p.get("title", "")

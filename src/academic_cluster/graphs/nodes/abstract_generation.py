@@ -115,7 +115,7 @@ async def generate_abstract_node(state: PipelineState) -> dict[str, object]:
                 ),
                 HumanMessage(content=prompt),
             ],
-            timeout=240.0,
+            timeout=300.0,
         )
         abstract = clean_generated_abstract(response.content)
         if len(abstract) < 80:
