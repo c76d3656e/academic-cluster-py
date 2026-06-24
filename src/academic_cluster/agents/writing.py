@@ -902,110 +902,22 @@ async def write_section_units(
     next_outline: dict[str, Any] | None = None,
 ) -> str:
     """
-    Write a section as paragraph/subsection units instead of one monolithic call.
+    Write a section in a single LLM call with full paragraph-level outline guidance.
     """
-    paragraphs = list((section_outline or {}).get("paragraphs") or [])
-    if not paragraphs:
-        return await write_section(
-            topic=topic,
-            review_title=review_title,
-            section_plan=section_plan,
-            cluster_data=cluster_data,
-            sample_papers=sample_papers,
-            references=references,
-            evidence_cards=evidence_cards,
-            community_context=community_context,
-            evidence_limitations=evidence_limitations,
-            section_outline=section_outline,
-            prev_summary=prev_summary,
-            next_outline=next_outline,
-        )
-
-    (
-        compact_cluster_data,
-        compact_sample_papers,
-        compact_references,
-        compact_community_context,
-        compact_evidence_limitations,
-        compact_evidence_cards,
-    ) = _compact_section_inputs(
+    return await write_section(
+        topic=topic,
+        review_title=review_title,
+        section_plan=section_plan,
         cluster_data=cluster_data,
         sample_papers=sample_papers,
         references=references,
+        evidence_cards=evidence_cards,
         community_context=community_context,
         evidence_limitations=evidence_limitations,
-        evidence_cards=evidence_cards,
+        section_outline=section_outline,
+        prev_summary=prev_summary,
+        next_outline=next_outline,
     )
-
-    units: list[str] = []
-    for idx, paragraph in enumerate(paragraphs):
-        unit_plan = dict(section_plan)
-        unit_plan["target_words"] = paragraph.get(
-            "target_words",
-            max(
-                250,
-                int(section_plan.get("target_words", 1500) / max(len(paragraphs), 1)),
-            ),
-        )
-        unit_plan["description"] = " ".join(
-            part
-            for part in [
-                str(section_plan.get("description", "")),
-                f"Current writing unit task_type={paragraph.get('task_type', '')}.",
-                str(paragraph.get("direction", "")),
-                str(paragraph.get("synthesis_instruction", "")),
-            ]
-            if part
-        )
-
-        unit_prev = prev_summary
-        if units:
-            unit_prev = (
-                f"{prev_summary}\n\nAlready written paragraphs in this section (DO NOT repeat these):\n"
-                + "\n\n".join(units)
-            )
-
-        try:
-            raw_unit = await write_section(
-                topic=topic,
-                review_title=review_title,
-                section_plan=unit_plan,
-                cluster_data=compact_cluster_data,
-                sample_papers=compact_sample_papers,
-                references=compact_references,
-                evidence_cards=compact_evidence_cards,
-                community_context=compact_community_context,
-                evidence_limitations=compact_evidence_limitations,
-                section_outline=_unit_outline(section_outline or {}, paragraph),
-                prev_summary=unit_prev,
-                next_outline=_next_unit_hint(paragraphs, idx, next_outline),
-            )
-        except Exception as e:
-            logger.error(
-                "Paragraph unit writing failed, using fallback text",
-                section_title=section_plan.get("title", ""),
-                paragraph_index=idx + 1,
-                error=str(e),
-            )
-            raw_unit = _fallback_section_text(
-                unit_plan, compact_references, compact_evidence_cards
-            )
-        unit_text = _as_single_unit(_coerce_llm_text(raw_unit))
-        if not unit_text:
-            raise ValueError(f"Paragraph unit {idx + 1} produced empty content")
-        units.append(unit_text)
-
-    if _should_refine_section_units():
-        units = await refine_section_units_local_coherence(
-            units, section_outline or {}, references
-        )
-    else:
-        logger.info(
-            "Skipped optional section unit coherence refinement",
-            unit_count=len(units),
-            env=_REFINE_SECTION_UNITS_ENV,
-        )
-    return "\n\n".join(unit for unit in units if unit.strip())
 
 
 async def revise_section(
