@@ -58,21 +58,25 @@ def test_section_citation_payload_includes_candidate_paper_details():
 
 
 @pytest.mark.asyncio
-async def test_write_section_units_calls_one_unit_per_paragraph(monkeypatch):
+async def test_write_section_units_single_call(monkeypatch):
     calls = []
-    refine_calls = []
 
     async def fake_write_section(**kwargs):
-        calls.append(kwargs["section_outline"]["paragraphs"][0]["index"])
-        return f"Paragraph {kwargs['section_outline']['paragraphs'][0]['index']} [1]"
-
-    async def fake_refine(units, section_outline, references):
-        refine_calls.append((units, section_outline, references))
-        return units
+        calls.append(kwargs["section_outline"])
+        return "Section body with citations [1,2,3]"
 
     monkeypatch.setattr(writing, "write_section", fake_write_section)
-    monkeypatch.setattr(writing, "refine_section_units_local_coherence", fake_refine)
     monkeypatch.delenv("WRITING_REFINE_SECTION_UNITS", raising=False)
+
+    outline = {
+        "core_question": "q",
+        "narrative_arc": "arc",
+        "paragraphs": [
+            {"index": 1, "task_type": "context", "direction": "a", "target_words": 300, "synthesis_instruction": "x"},
+            {"index": 2, "task_type": "comparison", "direction": "b", "target_words": 300, "synthesis_instruction": "y"},
+            {"index": 3, "task_type": "limitation", "direction": "c", "target_words": 300, "synthesis_instruction": "z"},
+        ],
+    }
 
     result = await writing.write_section_units(
         topic="topic",
@@ -82,83 +86,12 @@ async def test_write_section_units_calls_one_unit_per_paragraph(monkeypatch):
         sample_papers="samples",
         references="[1] x",
         evidence_cards=[],
-        section_outline={
-            "core_question": "q",
-            "narrative_arc": "arc",
-            "paragraphs": [
-                {
-                    "index": 1,
-                    "task_type": "context",
-                    "direction": "a",
-                    "target_words": 300,
-                    "synthesis_instruction": "x",
-                },
-                {
-                    "index": 2,
-                    "task_type": "comparison",
-                    "direction": "b",
-                    "target_words": 300,
-                    "synthesis_instruction": "y",
-                },
-                {
-                    "index": 3,
-                    "task_type": "limitation",
-                    "direction": "c",
-                    "target_words": 300,
-                    "synthesis_instruction": "z",
-                },
-            ],
-        },
+        section_outline=outline,
     )
 
-    assert calls == [1, 2, 3]
-    assert result.count("Paragraph") == 3
-    assert refine_calls == []
-
-
-@pytest.mark.asyncio
-async def test_write_section_units_refinement_is_opt_in(monkeypatch):
-    async def fake_write_section(**kwargs):
-        return f"Paragraph {kwargs['section_outline']['paragraphs'][0]['index']} [1]"
-
-    async def fake_refine(units, section_outline, references):
-        return [unit + " refined" for unit in units]
-
-    monkeypatch.setattr(writing, "write_section", fake_write_section)
-    monkeypatch.setattr(writing, "refine_section_units_local_coherence", fake_refine)
-    monkeypatch.setenv("WRITING_REFINE_SECTION_UNITS", "true")
-
-    result = await writing.write_section_units(
-        topic="topic",
-        review_title="title",
-        section_plan={"title": "sec", "description": "desc", "target_words": 600},
-        cluster_data="cluster",
-        sample_papers="samples",
-        references="[1] x",
-        evidence_cards=[],
-        section_outline={
-            "core_question": "q",
-            "narrative_arc": "arc",
-            "paragraphs": [
-                {
-                    "index": 1,
-                    "task_type": "context",
-                    "direction": "a",
-                    "target_words": 300,
-                    "synthesis_instruction": "x",
-                },
-                {
-                    "index": 2,
-                    "task_type": "comparison",
-                    "direction": "b",
-                    "target_words": 300,
-                    "synthesis_instruction": "y",
-                },
-            ],
-        },
-    )
-
-    assert result.count("refined") == 2
+    assert len(calls) == 1
+    assert calls[0] is outline
+    assert result == "Section body with citations [1,2,3]"
 
 
 def test_normalize_paragraph_word_budget_keeps_section_total():
