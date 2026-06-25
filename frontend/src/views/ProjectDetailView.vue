@@ -25,6 +25,7 @@ const project = ref<Project | null>(null)
 const isLoading = ref(true)
 const isStarting = ref(false)
 const isResuming = ref(false)
+const errorMessage = ref<string | null>(null)
 
 // Features
 const { features, loadFeatures } = useFeatures()
@@ -49,6 +50,7 @@ const {
     try {
       const s = await projectsApi.getProjectStatus(projectId)
       if (project.value && s.status) project.value.status = s.status
+      errorMessage.value = s.error_message || null
     } catch {
       if (project.value) project.value.status = 'completed'
     }
@@ -186,6 +188,11 @@ onMounted(async () => {
       connectSSE()
       startStatusPolling()
       startCallsPolling(loadLlmCalls)
+    } else if (project.value?.status === 'failed' || project.value?.status === 'interrupted') {
+      try {
+        const s = await projectsApi.getProjectStatus(projectId)
+        errorMessage.value = s.error_message || null
+      } catch { /* ignore */ }
     }
     await loadFeatures()
     await loadReview()
@@ -311,6 +318,9 @@ onMounted(async () => {
         </div>
         <p class="text-foreground font-medium">{{ project.status === 'failed' ? t('pipeline.taskFailed') : t('pipeline.taskInterrupted') }}</p>
         <p class="text-sm text-muted-foreground mt-1">{{ project.status === 'failed' ? t('pipeline.taskFailedDesc') : t('pipeline.taskInterruptedDesc') }}</p>
+        <p v-if="errorMessage" class="text-sm text-destructive mt-2 max-w-lg mx-auto bg-destructive/5 border border-destructive/20 rounded-lg px-4 py-2.5 text-left">
+          {{ errorMessage }}
+        </p>
         <Button size="sm" class="mt-4" :disabled="isResuming" @click="resumePipeline">
           {{ isResuming ? t('pipeline.resuming') : t('pipeline.resumePipeline') }}
         </Button>

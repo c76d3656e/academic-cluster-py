@@ -112,7 +112,7 @@ export const projectsApi = {
     return response.data
   },
 
-  async getProjectStatus(projectId: string): Promise<{ project_id: string; status: string }> {
+  async getProjectStatus(projectId: string): Promise<{ project_id: string; status: string; error_message?: string }> {
     const response = await apiClient.get(`/projects/${projectId}/status`)
     return response.data
   },

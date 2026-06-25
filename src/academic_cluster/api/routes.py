@@ -68,6 +68,7 @@ class PipelineStatusResponse(BaseModel):
     status: str
     current_node: str | None = None
     progress: dict[str, Any] | None = None
+    error_message: str | None = None
 
 
 class OutlineConfirmRequest(BaseModel):
@@ -234,10 +235,29 @@ async def get_project_status(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    # 获取最近一次 pipeline run 的错误信息
+    error_message = None
+    if project.get("status") in ("failed", "interrupted"):
+        from sqlalchemy import text
+
+        async with db.session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT error_message FROM pipeline_runs
+                    WHERE project_id = :pid AND error_message IS NOT NULL
+                    ORDER BY created_at DESC LIMIT 1
+                """),
+                {"pid": project_id},
+            )
+            row = result.fetchone()
+            if row and row[0]:
+                error_message = row[0]
+
     return PipelineStatusResponse(
         project_id=project_id,
         status=project.get("status", "created"),
         current_node=None,
+        error_message=error_message,
     )
 
 
