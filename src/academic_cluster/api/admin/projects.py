@@ -31,6 +31,8 @@ class AdminProjectItem(BaseModel):
     query: str
     status: str
     user_id: str | None = None
+    user_name: str | None = None
+    user_email: str | None = None
     created_at: str | None = None
 
 
@@ -67,6 +69,8 @@ async def list_all_projects(
                 query=p.get("query", ""),
                 status=p.get("status", "created"),
                 user_id=p.get("user_id"),
+                user_name=p.get("user_name"),
+                user_email=p.get("user_email"),
                 created_at=str(p.get("created_at", "")),
             )
             for p in projects

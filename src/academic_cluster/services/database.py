@@ -1197,7 +1197,7 @@ class DatabaseService:
     async def list_all_projects(
         self, skip: int = 0, limit: int = 20
     ) -> tuple[list[dict[str, Any]], int]:
-        """列出所有项目（管理员用）"""
+        """列出所有项目（管理员用），关联用户表返回用户信息"""
         async with self.session() as session:
             count_result = await session.execute(text("SELECT COUNT(*) FROM projects"))
             total_raw = count_result.scalar()
@@ -1205,8 +1205,12 @@ class DatabaseService:
 
             result = await session.execute(
                 text("""
-                    SELECT * FROM projects
-                    ORDER BY created_at DESC
+                    SELECT p.*,
+                           u.email AS user_email,
+                           u.full_name AS user_name
+                    FROM projects p
+                    LEFT JOIN users u ON p.user_id = u.id
+                    ORDER BY p.created_at DESC
                     LIMIT :limit OFFSET :skip
                 """),
                 {"limit": limit, "skip": skip},

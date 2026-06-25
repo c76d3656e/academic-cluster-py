@@ -150,12 +150,9 @@ async def list_projects(
     skip = max(0, skip)
     limit = max(1, min(limit, 100))
 
-    if current_user.get("role") == "admin":
-        projects, total = await db.list_all_projects(skip, limit)
-    else:
-        projects, total = await db.list_projects_by_user(
-            current_user["id"], skip, limit
-        )
+    projects, total = await db.list_projects_by_user(
+        current_user["id"], skip, limit
+    )
 
     return ProjectListResponse(
         projects=[

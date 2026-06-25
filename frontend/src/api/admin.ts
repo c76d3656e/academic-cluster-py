@@ -180,6 +180,7 @@ export interface ProjectAdmin {
   query: string
   status: string
   user_id: string
+  user_name: string
   user_email: string
   paper_count: number
   created_at: string

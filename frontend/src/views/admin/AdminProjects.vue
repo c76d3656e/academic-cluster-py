@@ -84,7 +84,7 @@ async function handleDelete(id: string, name: string) {
             <TableRow v-for="p in projects" :key="p.id">
               <TableCell class="font-medium">{{ p.name }}</TableCell>
               <TableCell class="text-muted-foreground max-w-[200px] truncate hidden md:table-cell">{{ p.query }}</TableCell>
-              <TableCell class="text-muted-foreground text-sm hidden md:table-cell">{{ p.user_email || '-' }}</TableCell>
+              <TableCell class="text-muted-foreground text-sm hidden md:table-cell">{{ p.user_name || p.user_email || '-' }}</TableCell>
               <TableCell>
                 <Badge :variant="getStatusVariant(p.status)" class="text-[0.65rem]">
                   {{ p.status }}
