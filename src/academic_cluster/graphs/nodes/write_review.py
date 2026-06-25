@@ -509,6 +509,7 @@ async def write_review_node(state: PipelineState) -> dict[str, Any]:
                     evidence_cards=ctx["section_evidence"],
                     kg_entities=kg_entities,
                     kg_relations=kg_relations,
+                    topic=state.query,
                 )
 
         outline_results = await asyncio.gather(

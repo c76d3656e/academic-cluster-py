@@ -525,6 +525,8 @@ async def plan_section_outline(
     evidence_cards: list[dict[str, Any]],
     kg_entities: list[dict[str, Any]],
     kg_relations: list[dict[str, Any]],
+    *,
+    topic: str = "",
 ) -> dict[str, Any]:
     """
     为单个 section 生成详细的段落级写作规划。
@@ -604,6 +606,17 @@ async def plan_section_outline(
             f"核心问题提示（来自大纲生成阶段）: {core_question_hint}"
         )
 
+    # 构建 topic_contribution 和 debates 上下文
+    topic_contribution = section_plan.get("topic_contribution", "")
+    topic_contribution_section = ""
+    if topic_contribution:
+        topic_contribution_section = f"主题贡献: {topic_contribution}"
+
+    debates = section_plan.get("debates", "")
+    debates_section = ""
+    if debates:
+        debates_section = f"学术争论: {debates}"
+
     # 构建前序/后序 section 上下文块
     prev_section_context_section = ""
     if prev_context:
@@ -619,8 +632,9 @@ async def plan_section_outline(
         logger.warning("section_outline.md prompt not found, using inline fallback")
         prompt_template = (
             "你是一个学术综述的结构规划师。为以下章节生成段落级写作规划。\n\n"
+            "## 研究主题\n**{topic}**\n所有段落必须围绕此主题展开。\n\n"
             "章节标题: {section_title}\n章节描述: {section_description}\n"
-            "目标字数: {target_words}\n\n"
+            "目标字数: {target_words}\n{topic_contribution_section}\n{debates_section}\n\n"
             "{core_question_hint_section}\n\n{cluster_data}\n\n{evidence_cards}\n\n"
             "{kg_summary}\n\n{prev_section_context_section}\n\n{next_section_hint_section}\n\n"
             "返回 JSON: {{core_question, narrative_arc, paragraphs: [{{index, task_type, direction, target_words, "
@@ -630,9 +644,12 @@ async def plan_section_outline(
         )
 
     prompt = prompt_template.format(
+        topic=topic,
         section_title=section_title,
         section_description=section_description,
         target_words=target_words,
+        topic_contribution_section=topic_contribution_section,
+        debates_section=debates_section,
         core_question_hint_section=core_question_hint_section,
         cluster_data=cluster_context,
         evidence_cards=evidence_context,

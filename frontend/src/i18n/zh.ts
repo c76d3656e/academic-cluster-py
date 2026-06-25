@@ -143,6 +143,8 @@ export const zh = {
     noContentDesc: 'The pipeline completed but no sections were generated.',
     taskInterrupted: '任务已中断',
     taskInterruptedDesc: 'Pipeline 被手动终止，已完成的阶段数据显示在上方日志中',
+    taskFailed: '任务执行失败',
+    taskFailedDesc: 'Pipeline 执行过程中发生错误，点击下方按钮从断点恢复执行',
     connected: '已连接到研究流程',
     pipelineCompleted: '研究流程已完成！正在加载结果...',
     disconnected: '连接中断，正在重试...',

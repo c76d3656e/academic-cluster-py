@@ -49,8 +49,9 @@ class LiteLLMPool:
         self._router = Router(
             model_list=self._model_list,
             routing_strategy="simple-shuffle",
-            num_retries=1,
+            num_retries=3,
             timeout=300,
+            retry_after=2,
             enable_pre_call_checks=False,
             disable_cooldowns=True,
             **self._router_kwargs,

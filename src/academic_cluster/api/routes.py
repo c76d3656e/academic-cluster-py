@@ -307,6 +307,10 @@ async def start_pipeline(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    # 防止并发启动
+    if project_id in _running_pipelines:
+        raise HTTPException(status_code=409, detail="Pipeline already running")
+
     logger.info("Starting pipeline", project_id=project_id)
 
     from ..graphs.graph import run_pipeline
@@ -381,6 +385,10 @@ async def resume_pipeline(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    # 防止并发启动
+    if project_id in _running_pipelines:
+        raise HTTPException(status_code=409, detail="Pipeline already running")
+
     logger.info("Resuming pipeline from checkpoint", project_id=project_id)
 
     from ..graphs.graph import run_pipeline
@@ -408,10 +416,16 @@ async def resume_pipeline(
                 sse_manager=sse_manager,
                 resume=True,
             )
+        except asyncio.CancelledError:
+            logger.info("Pipeline resume cancelled", project_id=project_id)
+            await db.update_project_status(project_id, "interrupted")
         except Exception as e:
             logger.error("Pipeline resume failed", error=str(e))
+        finally:
+            _running_pipelines.pop(project_id, None)
 
-    _bg_task = asyncio.create_task(run_in_background())  # noqa: RUF006
+    task = asyncio.create_task(run_in_background())
+    _running_pipelines[project_id] = task
 
     return {"message": "Pipeline resumed from checkpoint", "project_id": project_id}
 

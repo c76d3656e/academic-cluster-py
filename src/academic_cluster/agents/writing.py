@@ -22,6 +22,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..prompts import (
     get_generate_outline_prompt,
+    get_generate_outline_system_prompt,
     get_write_section_prompt,
     get_write_system_prompt,
 )
@@ -357,6 +358,7 @@ async def generate_outline(
             paper_count = cs.get("paper_count", 0)
             findings = cs.get("key_findings", [])
             methods = cs.get("representative_methods", [])
+            topic_rel = cs.get("topic_relevance", {})
             lines = [f"### {label} ({paper_count} papers)"]
             if findings:
                 lines.append("key_findings:")
@@ -364,50 +366,26 @@ async def generate_outline(
                     lines.append(f"  - {f}")
             if methods:
                 lines.append("representative_methods: " + "; ".join(methods))
+            if topic_rel:
+                rel_score = topic_rel.get("score", "")
+                rel_rationale = topic_rel.get("rationale", "")
+                if rel_rationale:
+                    lines.append(
+                        f"topic_relevance: {rel_rationale} (score={rel_score})"
+                    )
             cs_parts.append("\n".join(lines))
         community_context = "\n\n".join(cs_parts)
 
     # 加载大纲生成提示模板
     outline_prompt_template = get_generate_outline_prompt()
     if not outline_prompt_template:
-        outline_prompt_template = """你是一位精通学术写作的综述专家。请基于以下聚类分析结果和知识图谱数据，生成一份综述文章的详细大纲。
-
-研究主题: {topic}
-
-## 聚类统计（Cluster Stats）
-{cluster_stats}
-
-## 知识图谱摘要（关键实体和关系）
-{kg_summary}
-
-{community_summaries}
-
-请生成一份有深度的综述大纲，返回以下 JSON 格式：
-
-{{
-  "title": "综述标题——应精准概括研究主题与切入点，体现学术深度",
-  "sections": [
-    {{
-      "name": "section_0",
-      "title": "具体、学术化的章节标题",
-      "description": "本章的写作目标与核心论点概述",
-      "target_words": 2000,
-      "key_clusters": [0],
-      "key_entities": ["关键实体"]
-    }}
-  ]
-}}
-
-## 大纲设计要求
-
-1. **标题要精准、学术化**：不要使用「大背景」「核心分析」等泛泛标题。每个标题应直接反映该章节的核心内容。
-2. **章节数量（强制）**：必须生成 4-6 个 sections。禁止只生成 1-2 个章节。每个 section 对应综述的一个独立主题方向。如果某方面研究成果丰富，可拆为两章；如果某一方向尚不成熟，合并或精简。
-3. **每章应有明确的核心论点**：不要写成"介绍A、B、C方法"，而是有分析逻辑的论述方向。
-4. **字数分配合理**：核心论述章节（通常 2-3 章）占总字数 60% 以上。
-5. **综合优先于列举**：每个章节的 description 必须明确指出综合方式（对比/归纳/演进/分类），而非简单描述为"介绍XX方法"。例如：
-   - "对比三类主流方法在精度与效率上的权衡，分析各自适用场景"
-   - "归纳该领域从手工特征到端到端学习的演进趋势"
-   - 禁止："介绍A方法、B方法、C方法"这类罗列式描述"""
+        logger.warning("generate_outline.md prompt not found, using minimal fallback")
+        outline_prompt_template = (
+            "研究主题: {topic}\n\n"
+            "## 聚类统计\n{cluster_stats}\n\n{community_summaries}\n\n"
+            "## 知识图谱摘要\n{kg_summary}\n\n"
+            "请生成综述大纲 JSON。"
+        )
 
     # 构建社区摘要段落（如果模板不包含占位符则追加到末尾）
     community_block = ""
@@ -444,19 +422,14 @@ async def generate_outline(
             f"{layer_guidance_block}\n\n## 知识图谱摘要",
         )
 
+    # 加载 system prompt
+    system_prompt = (
+        get_generate_outline_system_prompt()
+        or "你是一位精通学术写作的综述专家。请基于提供的聚类和知识图谱数据生成大纲。"
+    )
+
     messages = [
-        SystemMessage(
-            content=(
-                "你是一位精通学术写作的综述专家。请基于提供的聚类和知识图谱数据生成大纲。所有标题和描述必须使用中文。\n\n"
-                "关键原则：综述是综合分析，不是文献堆叠。每个章节的 description 必须体现主题式的分析逻辑，"
-                "而非逐篇介绍论文。大纲应为后续写作奠定'综合优先于列举'的基调——"
-                "每个 section 的核心论点应围绕机制/方法/结论的对比或归纳展开，而非罗列各论文的发现。\n\n"
-                "层次结构指导：聚类已按研究演进阶段分为 Foundation（基础层）、Development（发展层）、Frontier（前沿层）三层。"
-                "请据此安排章节顺序：Foundation 层聚类对应综述前部（研究背景、经典方法），"
-                "Development 层聚类对应综述中部（技术演进、方法对比），"
-                "Frontier 层聚类对应综述后部（前沿方向、未来展望）。"
-            )
-        ),
+        SystemMessage(content=system_prompt),
         HumanMessage(content=prompt),
     ]
 
@@ -650,8 +623,10 @@ async def write_section(
             title = card.get("title", card.get("paper_title", ""))
             claim = card.get("claim", card.get("key_finding", ""))
             span = card.get("evidence_span", "")
-            card.get("method", "")
+            method = card.get("method", "")
             line = f"{i}. {title}"
+            if method:
+                line += f" [method: {method}]"
             if claim:
                 line += f" — {claim}"
             if span:

@@ -38,6 +38,12 @@ The following research evidence is relevant to this section and may be used to s
 
 ## Writing Requirements
 
+### Topic Relevance (Highest Priority)
+- The research topic is stated at the top of this prompt. ALL paragraphs must directly relate to this topic.
+- Each paragraph's central thesis must explicitly connect to the research topic — do not merely describe papers in a cluster without linking them to the topic question.
+- Every factual claim must not only cite a paper but also explain its relevance to the research topic.
+- If a paragraph's content cannot be connected to the topic, either rewrite it to establish the connection or remove it entirely.
+
 ### Academic Style
 - Use formal, rigorous academic Chinese
 - Demonstrate deep domain understanding through precise technical terminology

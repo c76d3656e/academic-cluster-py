@@ -143,6 +143,8 @@ export const en = {
     noContentDesc: 'The pipeline completed but no sections were generated.',
     taskInterrupted: 'Task Interrupted',
     taskInterruptedDesc: 'Pipeline was manually terminated. Completed stage data is shown in the logs above.',
+    taskFailed: 'Task Failed',
+    taskFailedDesc: 'An error occurred during pipeline execution. Click the button below to resume from the last checkpoint.',
     connected: 'Connected to progress stream',
     pipelineCompleted: 'Pipeline completed! Loading results...',
     disconnected: 'Connection lost, retrying...',

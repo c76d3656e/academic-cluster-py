@@ -304,13 +304,13 @@ onMounted(async () => {
         <p class="text-sm text-muted-foreground mt-1">{{ t('pipeline.noContentDesc') }}</p>
       </div>
 
-      <!-- Interrupted state -->
-      <div v-else-if="project.status === 'interrupted' && !hasReview" class="text-center py-16">
+      <!-- Interrupted / Failed state -->
+      <div v-else-if="(project.status === 'interrupted' || project.status === 'failed') && !hasReview" class="text-center py-16">
         <div class="text-muted-foreground/60 mb-2">
           <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="mx-auto"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
         </div>
-        <p class="text-foreground font-medium">{{ t('pipeline.taskInterrupted') }}</p>
-        <p class="text-sm text-muted-foreground mt-1">{{ t('pipeline.taskInterruptedDesc') }}</p>
+        <p class="text-foreground font-medium">{{ project.status === 'failed' ? t('pipeline.taskFailed') : t('pipeline.taskInterrupted') }}</p>
+        <p class="text-sm text-muted-foreground mt-1">{{ project.status === 'failed' ? t('pipeline.taskFailedDesc') : t('pipeline.taskInterruptedDesc') }}</p>
         <Button size="sm" class="mt-4" :disabled="isResuming" @click="resumePipeline">
           {{ isResuming ? t('pipeline.resuming') : t('pipeline.resumePipeline') }}
         </Button>

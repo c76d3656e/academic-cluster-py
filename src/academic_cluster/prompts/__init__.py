@@ -58,6 +58,11 @@ def get_generate_outline_prompt() -> str:
     return _load_prompt("generate_outline.md")
 
 
+def get_generate_outline_system_prompt() -> str:
+    """获取大纲生成 system prompt"""
+    return _load_prompt("generate_outline_system.md")
+
+
 def get_review_structure_prompt() -> str:
     """获取综述结构指南"""
     return _load_prompt("review_structure.md")

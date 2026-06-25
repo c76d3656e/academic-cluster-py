@@ -345,19 +345,38 @@ async def ainvoke_with_callbacks(
             router_kwargs = dict(kwargs)
             router_kwargs.pop("config", None)
 
-            async with semaphore:
-                response = await asyncio.wait_for(
-                    pool.router.acompletion(
-                        model=litellm_model,
-                        messages=messages,
-                        temperature=_temperature,
-                        max_tokens=_max_tokens,
-                        timeout=timeout,
-                        frequency_penalty=0.5,
-                        **router_kwargs,
-                    ),
-                    timeout=timeout + 60,
-                )
+            max_retries = 3
+            last_timeout_error = None
+            for attempt in range(max_retries):
+                try:
+                    async with semaphore:
+                        response = await asyncio.wait_for(
+                            pool.router.acompletion(
+                                model=litellm_model,
+                                messages=messages,
+                                temperature=_temperature,
+                                max_tokens=_max_tokens,
+                                timeout=timeout,
+                                frequency_penalty=0.5,
+                                **router_kwargs,
+                            ),
+                            timeout=timeout + 60,
+                        )
+                    break  # success
+                except TimeoutError as te:
+                    last_timeout_error = te
+                    if attempt < max_retries - 1:
+                        wait_s = 5 * (attempt + 1)
+                        logger.warning(
+                            "LLM call timed out, retrying",
+                            attempt=attempt + 1,
+                            max_retries=max_retries,
+                            wait_s=wait_s,
+                            node=node_name,
+                        )
+                        await asyncio.sleep(wait_s)
+                    else:
+                        raise last_timeout_error from None
 
             response = _router_response_to_aimessage(response, provider_alias)
             response = sanitize_llm_response(response)

@@ -2,12 +2,19 @@
 
 **重要：所有内容必须使用中文。**
 
+## 研究主题（所有段落必须围绕此主题展开）
+
+**{topic}**
+
+每个段落的 direction 和 synthesis_instruction 必须明确与上述研究主题的关联。禁止仅泛泛介绍聚类中的论文内容，必须将论文的研究发现与主题问题建立直接联系。
+
 ## 当前章节信息
 
 章节标题: {section_title}
 章节描述: {section_description}
 目标字数: {target_words} 字
-
+{topic_contribution_section}
+{debates_section}
 {core_question_hint_section}
 
 ## 聚类数据（该章节关联的研究社区）

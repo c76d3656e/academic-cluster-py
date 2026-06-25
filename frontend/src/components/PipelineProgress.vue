@@ -69,7 +69,7 @@ const pipelineStages = PIPELINE_STAGES
         {{ t('pipeline.executionLog', { count: progressLogs.length }) }}
       </summary>
       <div class="max-h-64 overflow-y-auto space-y-1 font-mono text-xs text-muted-foreground px-5 pb-4">
-        <div v-for="(log, i) in progressLogs" :key="i" class="flex gap-2 py-1 border-b border-border/50 last:border-0">
+        <div v-for="(log, i) in [...progressLogs].reverse()" :key="i" class="flex gap-2 py-1 border-b border-border/50 last:border-0">
           <span class="shrink-0 tabular-nums text-muted-foreground/60">{{ log.time }}</span>
           <span v-if="log.node" class="shrink-0 text-foreground/40">[{{ log.node }}]</span>
           <span class="text-foreground/70">{{ log.message }}</span>
