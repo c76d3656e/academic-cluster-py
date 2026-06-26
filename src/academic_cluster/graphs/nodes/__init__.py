@@ -37,6 +37,7 @@ from .rerank import rerank_node
 from .search import search_node
 from .section_revision import section_revision_node
 from .targeted_refine import targeted_refine_node
+from .topic_relevance_filter import topic_relevance_filter_node
 from .user_confirm import user_confirm_node
 from .visualize_community import visualize_community_node
 from .write_review import write_review_node
@@ -69,6 +70,7 @@ __all__ = [
     "search_node",
     "section_revision_node",
     "targeted_refine_node",
+    "topic_relevance_filter_node",
     "user_confirm_node",
     "visualize_community_node",
     "write_review_node",

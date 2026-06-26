@@ -262,6 +262,35 @@ DEFAULT_CONFIG = {
         "group": "聚类",
         "type": "float",
     },
+    # 相关性过滤
+    "relevance.enabled": {
+        "value": "true",
+        "label": "启用 Topic 相关性过滤",
+        "description": "开启后，对核心和辅助文献做 Topic 相关性评估，过滤弱相关论文",
+        "group": "相关性过滤",
+        "type": "bool",
+    },
+    "relevance.threshold": {
+        "value": "0.4",
+        "label": "相关性阈值",
+        "description": "LLM 评估的相关性分数低于此值的论文将被过滤",
+        "group": "相关性过滤",
+        "type": "float",
+    },
+    "relevance.concurrency": {
+        "value": "-1",
+        "label": "相关性评估并发度",
+        "description": "-1 表示自动：按已启用 LLM provider 的 rpm_limit 总和设置并发；正整数表示手动上限。",
+        "group": "相关性过滤",
+        "type": "int",
+    },
+    "relevance.timeout_s": {
+        "value": "120",
+        "label": "单篇 LLM 超时秒数",
+        "description": "单篇论文相关性评估 LLM 调用的最长等待秒数",
+        "group": "相关性过滤",
+        "type": "int",
+    },
     # 写作阶段
     "writing.total_target_words": {
         "value": "12000",
@@ -490,6 +519,11 @@ def build_node_config(raw: dict[str, str]) -> dict[str, object]:
         # writing
         "total_target_words": _int("writing.total_target_words", 12000),
         "section_reference_target": _int("writing.section_reference_target", 30),
+        # relevance filter
+        "topic_relevance_enabled": _bool("relevance.enabled", True),
+        "topic_relevance_threshold": _float("relevance.threshold", 0.4),
+        "topic_relevance_concurrency": _int("relevance.concurrency", -1),
+        "topic_relevance_timeout_s": _int("relevance.timeout_s", 120),
     }
 
 

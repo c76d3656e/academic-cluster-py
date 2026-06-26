@@ -96,6 +96,10 @@ class PipelineState(BaseModel):
     orphan_cluster_count: int = 0
     needs_revision: bool = False
 
+    # === Topic 相关性过滤 ===
+    topic_relevance_scores: dict[str, float] = Field(default_factory=dict)
+    topic_filtered_count: int = 0
+
     # === 可观测性 ===
     # tracker 已移至 ContextVar，避免 AsyncPostgresSaver 序列化不可序列化对象
     # 通过 get_current_tracker() 获取

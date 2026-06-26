@@ -126,6 +126,11 @@ def get_inter_community_conflict_prompt() -> str:
     return _load_prompt("inter_community_conflict.md")
 
 
+def get_topic_relevance_filter_prompt() -> str:
+    """获取 Topic 相关性过滤评估提示"""
+    return _load_prompt("topic_relevance_filter.md")
+
+
 # === 写作规则（统一管理） ===
 
 from .writing_rules import (  # noqa: E402, F401

@@ -46,6 +46,7 @@ from .nodes import (
     search_node,
     section_revision_node,
     targeted_refine_node,
+    topic_relevance_filter_node,
     user_confirm_node,
     visualize_community_node,
     write_review_node,
@@ -236,6 +237,10 @@ def create_pipeline_graph() -> StateGraph[PipelineState]:
     workflow.add_node(
         "evidence_cards", with_audit("evidence_cards")(evidence_cards_node)
     )
+    workflow.add_node(
+        "topic_relevance_filter",
+        with_audit("topic_relevance_filter")(topic_relevance_filter_node),
+    )
     workflow.add_node("kg_extraction", with_audit("kg_extraction")(kg_extraction_node))
     workflow.add_node(
         "community_memory", with_audit("community_memory")(community_memory_node)
@@ -278,7 +283,8 @@ def create_pipeline_graph() -> StateGraph[PipelineState]:
     workflow.add_edge("pgvector_knn", "rerank")
     workflow.add_edge("rerank", "community_detection")
     workflow.add_edge("community_detection", "visualize_community")
-    workflow.add_edge("visualize_community", "evidence_cards")
+    workflow.add_edge("visualize_community", "topic_relevance_filter")
+    workflow.add_edge("topic_relevance_filter", "evidence_cards")
     workflow.add_edge("evidence_cards", "kg_extraction")
     workflow.add_edge("kg_extraction", "community_memory")
     workflow.add_edge("community_memory", "inter_community_conflict")
@@ -582,6 +588,13 @@ def _build_progress_message(node_name: str, state: dict[str, Any]) -> str:
         return f"社区检测中，发现 {len(state.get('cluster_ids', []))} 个簇"
     if node_name == "visualize_community":
         return "社区可视化中"
+    if node_name == "topic_relevance_filter":
+        filtered = state.get("topic_filtered_count", 0)
+        return (
+            f"Topic 相关性过滤中，已过滤 {filtered} 篇"
+            if filtered
+            else "Topic 相关性评估中"
+        )
     if node_name == "evidence_cards":
         return f"正在生成 {len(state.get('evidence_card_ids', []))} 个证据卡片"
     if node_name == "kg_extraction":
