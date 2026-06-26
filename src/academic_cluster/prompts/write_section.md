@@ -170,6 +170,13 @@ The body must contain ONLY flowing paragraphs. Any form of subtitle, heading, or
 - Stay within {target_words} words (±20%)
 
 ### Citation Rules
+
+**⚠️ 最高优先级规则 — 禁止使用"文献[N]"格式：**
+- ❌ 绝对禁止使用"文献[N]"作为句子主语、所有格或宾语
+- ❌ "文献[25]的CLANN方法..."、"文献[23]的生成式AI方法..." 都是致命错误
+- ✅ 必须改为：方法名作主语 + [N] 放句末（如 "CLANN方法通过聚类分析实现了...[25]"）
+- ✅ 或使用作者名引导（如 "Zhang等[25]提出的CLANN方法..."）
+
 - Every factual claim must be supported by a citation
 - Aim for 2-4 citations per paragraph; do not cite for the sake of citing
 - When multiple papers support the same point, merge citations: [1,2]; when they disagree, use contrastive analysis
