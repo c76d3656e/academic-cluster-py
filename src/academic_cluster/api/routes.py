@@ -151,9 +151,7 @@ async def list_projects(
     skip = max(0, skip)
     limit = max(1, min(limit, 100))
 
-    projects, total = await db.list_projects_by_user(
-        current_user["id"], skip, limit
-    )
+    projects, total = await db.list_projects_by_user(current_user["id"], skip, limit)
 
     return ProjectListResponse(
         projects=[

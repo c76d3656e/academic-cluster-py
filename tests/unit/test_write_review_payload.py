@@ -72,9 +72,27 @@ async def test_write_section_units_single_call(monkeypatch):
         "core_question": "q",
         "narrative_arc": "arc",
         "paragraphs": [
-            {"index": 1, "task_type": "context", "direction": "a", "target_words": 300, "synthesis_instruction": "x"},
-            {"index": 2, "task_type": "comparison", "direction": "b", "target_words": 300, "synthesis_instruction": "y"},
-            {"index": 3, "task_type": "limitation", "direction": "c", "target_words": 300, "synthesis_instruction": "z"},
+            {
+                "index": 1,
+                "task_type": "context",
+                "direction": "a",
+                "target_words": 300,
+                "synthesis_instruction": "x",
+            },
+            {
+                "index": 2,
+                "task_type": "comparison",
+                "direction": "b",
+                "target_words": 300,
+                "synthesis_instruction": "y",
+            },
+            {
+                "index": 3,
+                "task_type": "limitation",
+                "direction": "c",
+                "target_words": 300,
+                "synthesis_instruction": "z",
+            },
         ],
     }
 

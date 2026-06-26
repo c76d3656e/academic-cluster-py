@@ -26,7 +26,7 @@ from .progress import send_progress
 logger = structlog.get_logger()
 
 DEFAULT_TOPIC_RELEVANCE_THRESHOLD = 0.4
-DEFAULT_TOPIC_RELEVANCE_TIMEOUT_S = 120
+DEFAULT_TOPIC_RELEVANCE_TIMEOUT_S = 300
 DEFAULT_TOPIC_RELEVANCE_CONCURRENCY = -1
 
 
@@ -78,6 +78,7 @@ async def _evaluate_single_paper(
     """Evaluate a single paper for topic relevance via LLM CoT.
 
     Returns (paper_id, relevance_score).
+    Raises on LLM transport errors; returns default score on parse failures.
     """
     prompt_template = get_topic_relevance_filter_prompt()
     paper_data = [
@@ -93,7 +94,7 @@ async def _evaluate_single_paper(
         papers=json.dumps(paper_data, ensure_ascii=False, indent=2),
     )
 
-    llm = create_llm(temperature=0.1, max_tokens=512)
+    llm = create_llm(temperature=0.1)
     response = await ainvoke_with_callbacks(
         llm,
         [
@@ -105,11 +106,22 @@ async def _evaluate_single_paper(
         timeout=timeout_s,
     )
 
-    raw = _parse_json_object(response.content)
+    paper_id = str(paper.get("id", ""))
+
+    try:
+        raw = _parse_json_object(response.content)
+    except (ValueError, json.JSONDecodeError) as e:
+        logger.warning(
+            "Failed to parse LLM response, using default score",
+            paper_id=paper_id,
+            error=str(e)[:200],
+            content_preview=str(response.content)[:200],
+        )
+        return paper_id, 0.5
+
     assessments = raw if isinstance(raw, list) else raw.get("assessments", [])
 
-    paper_id = str(paper.get("id", ""))
-    score = 1.0  # 默认通过
+    score = 0.5  # 默认中性分数
     for item in assessments:
         pid = str(item.get("paper_id", ""))
         if pid == paper_id:
@@ -239,7 +251,15 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
                     )
                     return result[0], result[1], None
                 except Exception as e:
-                    return str(paper.get("id", "")), None, e
+                    paper_id = str(paper.get("id", ""))
+                    err_type = type(e).__name__
+                    logger.warning(
+                        "Paper evaluation failed",
+                        paper_id=paper_id,
+                        error_type=err_type,
+                        error=str(e)[:200],
+                    )
+                    return paper_id, None, e
                 finally:
                     async with completed_lock:
                         completed_count += 1
