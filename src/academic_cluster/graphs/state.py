@@ -72,7 +72,7 @@ class PipelineState(BaseModel):
     gap_analysis_ids: list[str] = Field(default_factory=list)
     needs_targeted_refinement: bool = False
     refinement_attempt: int = 0
-    max_refinement_attempts: int = 5
+    max_refinement_attempts: int = 2
 
     # === 写作阶段 ===
     outline_id: str | None = None

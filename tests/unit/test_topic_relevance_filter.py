@@ -97,6 +97,7 @@ async def test_filter_removes_low_relevance(monkeypatch):
         query="machine learning",
         core_paper_ids=["p1", "p2"],
         auxiliary_paper_ids=["p3", "p4"],
+        topic_relevance_scores={},
         config={
             "topic_relevance_enabled": True,
             "topic_relevance_threshold": 0.4,
@@ -155,6 +156,7 @@ async def test_filter_keeps_all_relevant(monkeypatch):
         query="topic",
         core_paper_ids=["p1", "p2"],
         auxiliary_paper_ids=[],
+        topic_relevance_scores={},
         config={
             "topic_relevance_enabled": True,
             "topic_relevance_threshold": 0.4,
@@ -208,6 +210,7 @@ async def test_backfill_from_auxiliary(monkeypatch):
         query="topic",
         core_paper_ids=core,
         auxiliary_paper_ids=aux,
+        topic_relevance_scores={},
         config={
             "topic_relevance_enabled": True,
             "topic_relevance_threshold": 0.4,
@@ -256,6 +259,7 @@ async def test_filter_degrades_on_total_failure(monkeypatch):
         query="topic",
         core_paper_ids=["p1"],
         auxiliary_paper_ids=[],
+        topic_relevance_scores={},
         config={
             "topic_relevance_enabled": True,
             "topic_relevance_threshold": 0.4,
@@ -309,6 +313,7 @@ async def test_unassessed_papers_filtered_out(monkeypatch):
         query="topic",
         core_paper_ids=["p1", "p2"],
         auxiliary_paper_ids=[],
+        topic_relevance_scores={},
         config={
             "topic_relevance_enabled": True,
             "topic_relevance_threshold": 0.4,
@@ -344,6 +349,7 @@ async def test_filter_skips_when_disabled(monkeypatch):
         query="topic",
         core_paper_ids=["p1"],
         auxiliary_paper_ids=[],
+        topic_relevance_scores={},
         config={"topic_relevance_enabled": False},
     )
 
@@ -401,6 +407,7 @@ async def test_pre_clustering_filters_paper_ids(monkeypatch):
         paper_ids=["p1", "p2", "p3"],
         core_paper_ids=[],
         auxiliary_paper_ids=[],
+        topic_relevance_scores={},
         config={
             "topic_relevance_enabled": True,
             "topic_relevance_threshold": 0.4,
@@ -418,3 +425,65 @@ async def test_pre_clustering_filters_paper_ids(monkeypatch):
     assert result["topic_filtered_count"] == 1
     assert "core_paper_ids" not in result
     assert "auxiliary_paper_ids" not in result
+
+
+async def test_idempotent_skips_existing_scores(monkeypatch):
+    """Papers with existing scores should not be re-evaluated."""
+    papers = [
+        {"id": "p1", "title": "Already scored", "abstract": ""},
+        {"id": "p2", "title": "New paper", "abstract": ""},
+    ]
+    db = _FakeDb(papers)
+    evaluated_ids: list[str] = []
+
+    async def fake_evaluate(paper, topic, timeout_s):
+        evaluated_ids.append(paper["id"])
+        scores = {"p2": 0.9}
+        return paper["id"], scores.get(paper["id"], 0.5)
+
+    async def noop_progress(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.get_database",
+        lambda: db,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter._evaluate_single_paper",
+        fake_evaluate,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.send_progress",
+        noop_progress,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.get_llm_available_slots",
+        lambda **_: 10,
+    )
+
+    state = SimpleNamespace(
+        project_id="proj-1",
+        query="topic",
+        paper_ids=["p1", "p2"],
+        core_paper_ids=[],
+        auxiliary_paper_ids=[],
+        topic_relevance_scores={"p1": 0.8},  # p1 already scored
+        config={
+            "topic_relevance_enabled": True,
+            "topic_relevance_threshold": 0.4,
+            "topic_relevance_concurrency": 4,
+            "topic_relevance_timeout_s": 90,
+            "core_reference_count": 160,
+        },
+    )
+
+    result = await topic_relevance_filter_node(state)
+
+    # p1 should NOT be re-evaluated
+    assert evaluated_ids == ["p2"]
+    # p1 (0.8) and p2 (0.9) both above threshold
+    assert "p1" in result["paper_ids"]
+    assert "p2" in result["paper_ids"]
+    # scores should be merged
+    assert result["topic_relevance_scores"]["p1"] == 0.8
+    assert result["topic_relevance_scores"]["p2"] == 0.9

@@ -173,23 +173,32 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
             )
         return {}
 
+    # 幂等性：已评估过的论文跳过，只评估新增的
+    existing_scores = dict(state.topic_relevance_scores or {})
+    new_paper_ids = [pid for pid in all_paper_ids if pid not in existing_scores]
+
     logger.info(
         "Starting topic relevance filter",
         mode="pre-clustering" if pre_clustering else "post-clustering",
         core_count=len(core_ids),
         auxiliary_count=len(aux_ids),
         total_papers=len(all_paper_ids),
+        already_scored=len(existing_scores),
+        new_to_evaluate=len(new_paper_ids),
         threshold=threshold,
     )
 
-    await send_progress(
-        state.project_id,
-        "topic_relevance_filter",
-        f"正在评估 {len(all_paper_ids)} 篇论文的 Topic 相关性...",
-    )
+    if not new_paper_ids:
+        logger.info("All papers already scored, skipping LLM evaluation")
+    else:
+        await send_progress(
+            state.project_id,
+            "topic_relevance_filter",
+            f"正在评估 {len(new_paper_ids)} 篇新增论文的 Topic 相关性（已有 {len(existing_scores)} 篇分数）...",
+        )
 
     db = get_database()
-    papers = await db.get_papers_by_ids(all_paper_ids)
+    papers = await db.get_papers_by_ids(new_paper_ids)
 
     # 并发度：参考 evidence_cards，使用 provider slots
     requested_concurrency = int(
@@ -209,51 +218,57 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
         effective=concurrency,
     )
 
-    semaphore = asyncio.Semaphore(concurrency)
-    completed_count = 0
-    total_papers = len(papers)
-    completed_lock = asyncio.Lock()
-    scores: dict[str, float] = {}
-
-    async def _bounded_evaluate(
-        idx: int, paper: dict[str, Any]
-    ) -> tuple[str, float | None, Exception | None]:
-        nonlocal completed_count
-        async with semaphore:
-            try:
-                result = await asyncio.wait_for(
-                    _evaluate_single_paper(paper, state.query, timeout_s),
-                    timeout=timeout_s + 30,
-                )
-                return result[0], result[1], None
-            except Exception as e:
-                return str(paper.get("id", "")), None, e
-            finally:
-                async with completed_lock:
-                    completed_count += 1
-                    if completed_count % 10 == 0 or completed_count == total_papers:
-                        await send_progress(
-                            state.project_id,
-                            "topic_relevance_filter",
-                            f"相关性评估中 {completed_count}/{total_papers}...",
-                            progress=completed_count / total_papers,
-                        )
-
-    tasks = [_bounded_evaluate(i, paper) for i, paper in enumerate(papers)]
+    new_scores: dict[str, float] = {}
     failed_count = 0
 
-    for future in asyncio.as_completed(tasks):
-        paper_id, score, error = await future
-        if error:
-            failed_count += 1
-            logger.debug(
-                "Paper relevance evaluation failed, keeping as relevant",
-                paper_id=paper_id,
-                error=str(error),
-            )
-        elif score is not None:
-            scores[paper_id] = score
+    if new_paper_ids:
+        semaphore = asyncio.Semaphore(concurrency)
+        completed_count = 0
+        total_new = len(papers)
+        completed_lock = asyncio.Lock()
 
+        async def _bounded_evaluate(
+            idx: int, paper: dict[str, Any]
+        ) -> tuple[str, float | None, Exception | None]:
+            nonlocal completed_count
+            async with semaphore:
+                try:
+                    result = await asyncio.wait_for(
+                        _evaluate_single_paper(paper, state.query, timeout_s),
+                        timeout=timeout_s + 30,
+                    )
+                    return result[0], result[1], None
+                except Exception as e:
+                    return str(paper.get("id", "")), None, e
+                finally:
+                    async with completed_lock:
+                        completed_count += 1
+                        if completed_count % 10 == 0 or completed_count == total_new:
+                            await send_progress(
+                                state.project_id,
+                                "topic_relevance_filter",
+                                f"相关性评估中 {completed_count}/{total_new}...",
+                                progress=completed_count / total_new,
+                            )
+
+        tasks = [_bounded_evaluate(i, paper) for i, paper in enumerate(papers)]
+
+        for future in asyncio.as_completed(tasks):
+            paper_id, score, error = await future
+            if error:
+                failed_count += 1
+                logger.debug(
+                    "Paper relevance evaluation failed",
+                    paper_id=paper_id,
+                    error=str(error),
+                )
+            elif score is not None:
+                new_scores[paper_id] = score
+
+    # 合并已有分数和新评估分数
+    scores = {**existing_scores, **new_scores}
+
+    # 全部新论文评估失败且无历史分数时降级
     if not scores:
         logger.warning("All LLM evaluations failed, preserving original paper lists")
         await send_progress(
@@ -286,9 +301,9 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
             filtered=len(filtered_ids),
             filtered_count=filtered_count,
             threshold=threshold,
-            scores_computed=len(scores),
+            already_scored=len(existing_scores),
+            new_evaluated=len(new_scores),
             failed_count=failed_count,
-            total_papers=total_papers,
         )
 
         await send_progress(
@@ -328,9 +343,9 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
             filtered_aux=len(filtered_aux),
             filtered_count=filtered_count,
             threshold=threshold,
-            scores_computed=len(scores),
+            already_scored=len(existing_scores),
+            new_evaluated=len(new_scores),
             failed_count=failed_count,
-            total_papers=total_papers,
         )
 
         await send_progress(
