@@ -70,12 +70,12 @@ The following research evidence is relevant to this section and may be used to s
 ### Synthesis-First (Critical)
 Each paragraph must be organized around a central analytical thesis, with multiple papers as supporting evidence.
 
-**BANNED — paper-by-paper listing:**
+**BANNED! — paper-by-paper listing:**
 - "Author A [1] proposed X. Author B [2] proposed Y. Author C [3] proposed Z."
 - Sequential sentences each introducing a different paper without analytical connection
 - Simply juxtaposing findings without pointing out similarities and differences
 
-**REQUIRED — thematic synthesis:**
+**ALLOWED! — thematic synthesis:**
 - Organize paragraphs by mechanism, method category, or conclusion theme — not by individual papers
 - When comparing, explicitly state similarities, differences, and underlying reasons
 - Use comparative, inductive, evolutionary, or taxonomic synthesis strategies
@@ -86,79 +86,79 @@ Below are correct and incorrect examples demonstrating key writing rules.
 
 #### Example 1: Synthesis-First (Comparative Strategy)
 
-**BAD (paper-by-paper listing — BANNED):**
+**BANNED! (paper-by-paper listing):**
 > 张三等[1]提出了一种基于CNN的图像分类方法，准确率达到92%。李四等[2]提出了一种基于Transformer的方法，准确率达到95%。王五等[3]提出了一种混合架构方法，准确率达到97%。
 >
 > *问题：逐篇罗列，无分析关联，无综合对比。*
 
-**GOOD (thematic synthesis — REQUIRED):**
+**ALLOWED! (thematic synthesis):**
 > 深度学习在图像分类领域的演进呈现出从局部特征提取到全局建模的范式转变。早期CNN架构[1]通过卷积核捕获局部纹理特征，在标准基准上达到92%的分类准确率，但受限于感受野大小，难以建模长程依赖关系。Transformer架构[2]引入自注意力机制，将全局上下文建模能力提升至95%，但计算复杂度随图像分辨率二次增长。近期的混合架构[3]通过CNN提取局部特征后接入轻量化Transformer模块，在保持97%准确率的同时将计算开销降低40%，表明局部-全局特征的层次化融合是当前最具潜力的技术路线。
 >
 > *优点：按"局部→全局→融合"的演进线索组织，对比三种方法的优劣，分析演进驱动力。*
 
 #### Example 2: Citation Placement
 
-**BAD (citations used as subject — BANNED):**
+**BANNED! (citations used as subject):**
 > [1]提出了基于注意力的机制。[2]通过实验证明了该方法的有效性。[3]进一步改进了该架构。
 
-**GOOD (citations support claims — REQUIRED):**
+**ALLOWED! (citations support claims):**
 > 注意力机制的核心思想是通过权重分配实现特征的选择性聚焦[1]。实验表明，该机制在长序列建模中的性能较传统RNN提升23%[2]。后续工作通过引入稀疏注意力将计算复杂度从O(n²)降至O(n log n)，使该架构在万级token序列上的推理成为可能[3]。
 
 #### Example 3: Paragraph Opening Variety
 
-**BAD (consecutive paragraphs start with same pattern):**
+**BANNED! (consecutive paragraphs start with same pattern):**
 > 随着深度学习技术的发展，CNN在图像领域取得了突破[1]。
 > 随着硬件算力的提升，Transformer架构逐渐成为主流[2]。
 > *问题：连续两段以"随着..."开头，句式单调。*
 
-**GOOD (varied openings):**
+**ALLOWED! (varied openings):**
 > 卷积神经网络通过层次化特征提取在图像识别任务中实现了突破性进展[1]。
 > GPU集群算力的指数级增长为Transformer架构的工程落地提供了硬件基础[2]。
 > *优点：第一段以方法名作主语，第二段以硬件因素作主语，开头结构不同。*
 
-#### Example 4: "文献[N]" Pattern — ABSOLUTELY BANNED
+#### Example 4: "文献[N]" Pattern — BANNED!
 
 The pattern "文献[N]" (literature [N]) is NEVER allowed in any form — not as subject, not as possessive modifier, not in parentheses. Every occurrence below is a fatal error.
 
-**ALL OF THESE ARE BANNED:**
-> ❌ 文献[25]的混合建模研究显示，通过整合机理模型与数据驱动方法，可将效率提升40%[25]。
-> ❌ 文献[30]的两阶段浸出-沉淀法使磷回收率超过98%[30]。
-> ❌ 文献[42]指出，多尺度耦合计算中仍存在35%的算力浪费[42]。
-> ❌ （文献[24][28]已证实该方法的有效性）
-> ❌ 根据文献[15]的实验结果，该方法优于基线模型[15]。
+**BANNED! — ALL OF THESE ARE FORBIDDEN:**
+> BANNED! 文献[25]的混合建模研究显示，通过整合机理模型与数据驱动方法，可将效率提升40%[25]。
+> BANNED! 文献[30]的两阶段浸出-沉淀法使磷回收率超过98%[30]。
+> BANNED! 文献[42]指出，多尺度耦合计算中仍存在35%的算力浪费[42]。
+> BANNED! （文献[24][28]已证实该方法的有效性）
+> BANNED! 根据文献[15]的实验结果，该方法优于基线模型[15]。
 >
 > *问题：所有"文献[N]"的变体都被禁止——无论是作主语、所有格修饰语、还是介词宾语。*
 
-**REQUIRED — rewrite using one of these three patterns:**
+**ALLOWED! — rewrite using one of these three patterns:**
 
 Pattern A — **事实/方法作主语 + [N] 放句末**:
-> ✅ 混合建模研究显示，通过整合机理模型与数据驱动方法，可将尾矿处理效率提升40%以上[25]。
-> ✅ 两阶段浸出-沉淀法使磷酸盐尾矿磷回收率超过98%，纯度达到97.9%[30]。
+> ALLOWED! 混合建模研究显示，通过整合机理模型与数据驱动方法，可将尾矿处理效率提升40%以上[25]。
+> ALLOWED! 两阶段浸出-沉淀法使磷酸盐尾矿磷回收率超过98%，纯度达到97.9%[30]。
 
 Pattern B — **作者名 + [N] 引导**:
-> ✅ Zhang等[25]的混合建模研究表明，整合机理模型与数据驱动方法可将效率提升40%以上。
-> ✅ Li等[30]提出的两阶段浸出-沉淀法使磷回收率超过98%。
+> ALLOWED! Zhang等[25]的混合建模研究表明，整合机理模型与数据驱动方法可将效率提升40%以上。
+> ALLOWED! Li等[30]提出的两阶段浸出-沉淀法使磷回收率超过98%。
 
 Pattern C — **"有研究/已有工作" + [N]**:
-> ✅ 有研究[25]通过混合建模方法证实，整合机理模型与数据驱动方法可将效率提升40%以上。
-> ✅ 已有工作[30]表明，两阶段浸出-沉淀法可使磷回收率超过98%。
+> ALLOWED! 有研究[25]通过混合建模方法证实，整合机理模型与数据驱动方法可将效率提升40%以上。
+> ALLOWED! 已有工作[30]表明，两阶段浸出-沉淀法可使磷回收率超过98%。
 
-#### Example 5: Body Text Subtitles — ABSOLUTELY BANNED
+#### Example 5: Body Text Subtitles — BANNED!
 
 The body must contain ONLY flowing paragraphs. Any form of subtitle, heading, or section divider is a fatal error.
 
-**ALL OF THESE ARE BANNED:**
-> ❌ 传统处置模式与资源化路径的环境经济差异——以处置成本、碳排放与资源收益的量化对比揭示核心矛盾
-> ❌ 一、研究背景与问题提出
-> ❌ ## 方法论演进
-> ❌ 【技术路线对比】
-> ❌ （一）传统处置方法
-> ❌ > 方法概述：本文从三个维度...
+**BANNED! — ALL OF THESE ARE FORBIDDEN:**
+> BANNED! 传统处置模式与资源化路径的环境经济差异——以处置成本、碳排放与资源收益的量化对比揭示核心矛盾
+> BANNED! 一、研究背景与问题提出
+> BANNED! ## 方法论演进
+> BANNED! 【技术路线对比】
+> BANNED! （一）传统处置方法
+> BANNED! > 方法概述：本文从三个维度...
 >
 > *问题：正文不允许任何形式的标题、小标题、分隔符、段落标注。读者不需要段落的"标签"，段落本身的内容就应该清楚表达其主题。*
 
-**REQUIRED — 直接写段落，不加任何标题前缀：**
-> ✅ 传统处置模式以安全填埋和尾矿库堆存为主，虽能短期控制风险，但长期占用土地资源且存在溃坝隐患。资源化路径则通过提取有价组分实现变废为宝，但初期投资成本较高。两类模式在处置成本、碳排放和资源收益三个维度上呈现出显著差异...
+**ALLOWED! — 直接写段落，不加任何标题前缀：**
+> ALLOWED! 传统处置模式以安全填埋和尾矿库堆存为主，虽能短期控制风险，但长期占用土地资源且存在溃坝隐患。资源化路径则通过提取有价组分实现变废为宝，但初期投资成本较高。两类模式在处置成本、碳排放和资源收益三个维度上呈现出显著差异...
 
 ### Output Rules
 - Output only the section body (plain paragraph text)
@@ -171,11 +171,11 @@ The body must contain ONLY flowing paragraphs. Any form of subtitle, heading, or
 
 ### Citation Rules
 
-**⚠️ 最高优先级规则 — 禁止使用"文献[N]"格式：**
-- ❌ 绝对禁止使用"文献[N]"作为句子主语、所有格或宾语
-- ❌ "文献[25]的CLANN方法..."、"文献[23]的生成式AI方法..." 都是致命错误
-- ✅ 必须改为：方法名作主语 + [N] 放句末（如 "CLANN方法通过聚类分析实现了...[25]"）
-- ✅ 或使用作者名引导（如 "Zhang等[25]提出的CLANN方法..."）
+**BANNED! — 最高优先级规则 — 禁止使用"文献[N]"格式：**
+- BANNED! 绝对禁止使用"文献[N]"作为句子主语、所有格或宾语
+- BANNED! "文献[25]的CLANN方法..."、"文献[23]的生成式AI方法..." 都是致命错误
+- ALLOWED! 必须改为：方法名作主语 + [N] 放句末（如 "CLANN方法通过聚类分析实现了...[25]"）
+- ALLOWED! 或使用作者名引导（如 "Zhang等[25]提出的CLANN方法..."）
 
 - Every factual claim must be supported by a citation
 - Aim for 2-4 citations per paragraph; do not cite for the sake of citing
@@ -195,28 +195,28 @@ The body must contain ONLY flowing paragraphs. Any form of subtitle, heading, or
 
 #### Citation Position Examples (MUST follow):
 
-**Correct:**
-- ✅ `多尺度耦合计算中仍存在35%的算力浪费，主要源于异构计算单元间的通信开销[42]。` — [N] at end of claim
-- ✅ `结合概率密度演化方程，实现岩体参数的时序演化模拟[43]。` — [N] at end of method statement
-- ✅ `该方法在Exascale架构上展现出显著优势，计算精度较传统方法提升22.7%[52]。` — [N] at end of conclusion
-- ✅ `Zhang等[18]提出了基于自注意力的加速器` — author name leads + [N]
-- ✅ `HAR-AttenNet利用多头注意力机制解决了这一问题[18]` — [N] at sentence end
-- ✅ `Transformer在长序列建模中表现优异，但计算复杂度较高[18,19]` — [N] after claim
+**ALLOWED! — Correct patterns:**
+- ALLOWED! `多尺度耦合计算中仍存在35%的算力浪费，主要源于异构计算单元间的通信开销[42]。` — [N] at end of claim
+- ALLOWED! `结合概率密度演化方程，实现岩体参数的时序演化模拟[43]。` — [N] at end of method statement
+- ALLOWED! `该方法在Exascale架构上展现出显著优势，计算精度较传统方法提升22.7%[52]。` — [N] at end of conclusion
+- ALLOWED! `Zhang等[18]提出了基于自注意力的加速器` — author name leads + [N]
+- ALLOWED! `HAR-AttenNet利用多头注意力机制解决了这一问题[18]` — [N] at sentence end
+- ALLOWED! `Transformer在长序列建模中表现优异，但计算复杂度较高[18,19]` — [N] after claim
 
-**Absolutely forbidden (highest priority rules):**
-- ❌ NEVER start a sentence with "文献[N]": `文献[42]指出...`, `文献[43]通过...` are all banned
-- ❌ NEVER use [N] as subject or object of a sentence: `[18]提出了...` is banned
-- ❌ NEVER wrap citations in parentheses: `（文献[24][28]已证实...）` is banned
-- ❌ `Rocco Palmitessa等人在《Accelerating hydrodynamic simulations...》中提出了...` — missing [N], uses 《》 marks
-- ❌ NEVER mention an author name or paper title without an accompanying [N]: `Rocco Palmitessa等人在《...》中提出了...` is banned — write `Rocco Palmitessa等人[18]提出了...` instead
-- ❌ NEVER use 《》(Chinese book title marks) to wrap paper titles — use [N] citation only
+**BANNED! — Absolutely forbidden (highest priority rules):**
+- BANNED! NEVER start a sentence with "文献[N]": `文献[42]指出...`, `文献[43]通过...` are all banned
+- BANNED! NEVER use [N] as subject or object of a sentence: `[18]提出了...` is banned
+- BANNED! NEVER wrap citations in parentheses: `（文献[24][28]已证实...）` is banned
+- BANNED! `Rocco Palmitessa等人在《Accelerating hydrodynamic simulations...》中提出了...` — missing [N], uses 《》 marks
+- BANNED! NEVER mention an author name or paper title without an accompanying [N]: `Rocco Palmitessa等人在《...》中提出了...` is banned — write `Rocco Palmitessa等人[18]提出了...` instead
+- BANNED! NEVER use 《》(Chinese book title marks) to wrap paper titles — use [N] citation only
 
-**Required pattern:**
-- ✅ State the fact/method/conclusion first, then place [N] before the end punctuation
-- ✅ `多尺度耦合计算中仍存在35%的算力浪费[42]。`
-- ✅ `结合概率密度演化方程实现时序演化模拟[43]。`
-- ✅ `Zhang等[18]提出了基于自注意力的加速器。` (author-led is OK)
-- ✅ `HAR-AttenNet利用多头注意力机制解决了这个问题[18]。`
+**ALLOWED! — Required pattern:**
+- ALLOWED! State the fact/method/conclusion first, then place [N] before the end punctuation
+- ALLOWED! `多尺度耦合计算中仍存在35%的算力浪费[42]。`
+- ALLOWED! `结合概率密度演化方程实现时序演化模拟[43]。`
+- ALLOWED! `Zhang等[18]提出了基于自注意力的加速器。` (author-led is OK)
+- ALLOWED! `HAR-AttenNet利用多头注意力机制解决了这个问题[18]。`
 
 ### 禁止使用的表达
 
