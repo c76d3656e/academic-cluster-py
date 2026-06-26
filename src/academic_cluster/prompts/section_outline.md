@@ -55,6 +55,49 @@
 }}
 ```
 
+## 示例
+
+以下是一个高质量的段落规划示例，展示了期望的分析深度和综合策略：
+
+```json
+{{
+  "core_question": "传统CNN架构在处理长序列输入时存在哪些根本性限制，这些限制如何推动了注意力机制的兴起？",
+  "narrative_arc": "CNN的感受野限制→局部特征提取的瓶颈→注意力机制的提出→全局建模能力的突破→计算复杂度的新挑战",
+  "paragraphs": [
+    {{
+      "index": 1,
+      "task_type": "context",
+      "direction": "CNN在视觉任务中的成功与其感受野有限性之间的矛盾——标准3×3卷积核的有效感受野仅覆盖输入的约5%，导致长程依赖建模能力不足",
+      "target_words": 350,
+      "key_papers": ["p1", "p3"],
+      "key_evidence": ["evidence_1"],
+      "synthesis_instruction": "归纳CNN架构在不同任务（图像分类、目标检测、语义分割）中表现出的共性瓶颈，指出感受野限制是跨任务的共性问题而非个别案例"
+    }},
+    {{
+      "index": 2,
+      "task_type": "approach",
+      "direction": "注意力机制通过Query-Key-Value的三元组计算实现输入序列中任意位置间的直接关联，从根本上突破了感受野限制",
+      "target_words": 400,
+      "key_papers": ["p2", "p5"],
+      "key_evidence": ["evidence_2", "evidence_3"],
+      "synthesis_instruction": "对比自注意力机制与传统卷积在特征交互方式上的本质差异：卷积通过固定核权重实现局部交互，注意力通过动态权重实现全局交互，分析这一设计转变对模型表达能力的影响"
+    }},
+    {{
+      "index": 3,
+      "task_type": "result",
+      "direction": "Transformer架构在机器翻译和语言建模上的突破性表现证实了全局建模的有效性，但O(n²)的计算复杂度成为新瓶颈",
+      "target_words": 350,
+      "key_papers": ["p5", "p7"],
+      "key_evidence": ["evidence_4"],
+      "synthesis_instruction": "对比Transformer与RNN/LSTM在序列建模任务上的性能差异，量化全局建模带来的收益（BLEU分数、困惑度等），同时指出二次复杂度在长序列场景下的实际约束"
+    }}
+  ],
+  "transition_from_prev": "前述章节分析了CNN架构的核心设计范式及其在视觉任务中的成功应用，但这些成就背后隐藏着一个根本性矛盾——局部感受野与全局建模需求之间的张力",
+  "transition_to_next": "注意力机制虽然解决了全局建模问题，但其二次计算复杂度催生了新一轮的效率优化研究",
+  "already_covered": ["CNN的基本架构原理", "卷积操作的数学定义"]
+}}
+```
+
 ## 规划设计要求
 
 1. **段落数量由你自主决定**：一般每段 300-600 字。根据 target_words 计算合理段数（如 2000 字约 4-6 段，1500 字约 3-5 段）。段落数不宜过多或过少。

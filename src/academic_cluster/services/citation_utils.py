@@ -839,6 +839,22 @@ _BODY_LABEL_PREFIX_RE = re.compile(
     r")\s*[:：]\s*",
     re.IGNORECASE | re.MULTILINE,
 )
+# Descriptive subtitle pattern: standalone long line without sentence-ending punctuation
+# Often uses "——" to connect two parts, acts as a section divider
+_BODY_DESCRIPTIVE_SUBTITLE_RE = re.compile(
+    r"^\s*"
+    r"(?:"  # numbered/bulleted prefix patterns
+    r"[一二三四五六七八九十]+[、.]\s*"
+    r"|（[一二三四五六七八九十]+）\s*"
+    r"|\d+[、.]\s*"
+    r"|[•●◆▪]\s*"
+    r")?"
+    r"[一-鿿][一-鿿\w\s，、；：！？（）()《》\-—–…·/和与及或中在的了是对为]"
+    r"{15,}"  # at least 15 characters
+    r"(?:[——][一-鿿][一-鿿\w\s，、；：！？（）()《》\-—–…·/和与及或中在的了是对为]{5,})?"
+    r"\s*$",
+    re.MULTILINE,
+)
 
 
 def strip_body_structure_leakage(content: str) -> str:
@@ -857,5 +873,6 @@ def strip_body_structure_leakage(content: str) -> str:
 
     content = _BODY_HEADING_RE.sub(_heading_to_sentence, content)
     content = _BODY_LABEL_PREFIX_RE.sub("", content)
+    content = _BODY_DESCRIPTIVE_SUBTITLE_RE.sub("", content)
     content = re.sub(r"\n{3,}", "\n\n", content)
     return content.strip()

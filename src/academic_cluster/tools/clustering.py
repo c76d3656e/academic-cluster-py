@@ -43,16 +43,18 @@ def build_hybrid_graph(
     evidence_cards: list[dict[str, Any]],
     core_paper_ids: list[str],
     weights: dict[str, float] | None = None,
+    max_entity_paper_ratio: float = 0.25,
+    max_entity_paper_count: int = 50,
 ) -> nx.Graph:
     """
     构建混合图
 
     融合 5 种边信号：
-    1. Vector KNN (weight: 0.45) - 向量相似度边
-    2. KG Relation (weight: 0.25) - 知识图谱关系边
-    3. Shared Entity (weight: 0.15) - 共享实体边
-    4. Evidence (weight: 0.10) - 共享证据边
-    5. Quality Prior (weight: 0.05) - 高质量论文对
+    1. Vector KNN - 向量相似度边
+    2. KG Relation - 知识图谱关系边
+    3. Shared Entity - 共享实体边
+    4. Evidence - 共享证据边
+    5. Quality Prior - 高质量论文对
 
     Args:
         knn_edges: KNN 图边列表 [{source, target, weight}]
@@ -61,6 +63,8 @@ def build_hybrid_graph(
         evidence_cards: 证据卡片列表 [{paper_id, ...}]
         core_paper_ids: 核心论文 ID 列表
         weights: 各信号权重
+        max_entity_paper_ratio: 实体出现在超过此比例的论文中则跳过（过滤高频泛实体）
+        max_entity_paper_count: 实体出现在超过此数量的论文中则跳过（硬上限）
 
     Returns:
         NetworkX 图
@@ -80,6 +84,9 @@ def build_hybrid_graph(
             "quality": 0.05,
         }
 
+    total_papers = max(1, len(core_paper_ids))
+    max_entity_count = min(max_entity_paper_count, int(total_papers * max_entity_paper_ratio))
+
     G = nx.Graph()
 
     # 添加所有核心论文作为节点
@@ -98,13 +105,14 @@ def build_hybrid_graph(
             else:
                 G.add_edge(source, target, weight=weight, types=["knn"])
 
-    # 2. 添加 KG 关系边
+    # 2. 添加 KG 关系边（过滤高频关系）
+    skipped_relations = 0
     for relation in kg_relations:
-        relation.get("source_entity")
-        relation.get("target_entity")
         paper_ids = relation.get("paper_ids") or []
+        if len(paper_ids) > max_entity_count:
+            skipped_relations += 1
+            continue
 
-        # 通过共享关系连接论文
         for i, paper_a in enumerate(paper_ids):
             for paper_b in paper_ids[i + 1 :]:
                 if G.has_node(paper_a) and G.has_node(paper_b):
@@ -116,14 +124,7 @@ def build_hybrid_graph(
                             paper_a, paper_b, weight=weight, types=["kg_relation"]
                         )
 
-    # 3. 添加共享实体边
-    entity_to_papers = defaultdict(list)
-    for entity in kg_entities:
-        entity_id = entity.get("id")
-        for paper_id in entity.get("paper_ids") or []:
-            entity_to_papers[entity_id].append(paper_id)
-
-    # 实体类型权重
+    # 3. 添加共享实体边（过滤高频泛实体）
     entity_type_weights = {
         "ResearchProblem": 1.0,
         "Method": 1.0,
@@ -134,10 +135,16 @@ def build_hybrid_graph(
         "Domain": 0.8,
     }
 
+    skipped_entities = 0
     for entity in kg_entities:
-        entity_type = entity.get("type", "Concept")
+        entity_type = entity.get("entity_type") or entity.get("type", "Concept")
         type_weight = entity_type_weights.get(entity_type, 0.8)
         paper_ids = entity.get("paper_ids") or []
+
+        # 频率过滤：出现太多论文的实体太泛，跳过
+        if len(paper_ids) > max_entity_count:
+            skipped_entities += 1
+            continue
 
         for i, paper_a in enumerate(paper_ids):
             for paper_b in paper_ids[i + 1 :]:
@@ -183,6 +190,9 @@ def build_hybrid_graph(
         "Hybrid graph built",
         nodes=G.number_of_nodes(),
         edges=G.number_of_edges(),
+        skipped_entities=skipped_entities,
+        skipped_relations=skipped_relations,
+        max_entity_count=max_entity_count,
     )
 
     return G

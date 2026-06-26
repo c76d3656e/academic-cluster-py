@@ -39,7 +39,8 @@ async def kg_extraction_node(state: PipelineState) -> dict[str, Any]:
     if kg_scope == "reranked":
         kg_paper_ids = list(state.reranked_paper_ids or [])
     else:
-        kg_paper_ids = list(state.core_paper_ids or [])
+        # core_paper_ids 由 community_detection 设置，如果还未运行则 fallback
+        kg_paper_ids = list(state.core_paper_ids or state.reranked_paper_ids or [])
 
     logger.info(
         "Starting KG extraction",

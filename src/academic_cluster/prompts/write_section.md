@@ -80,10 +80,91 @@ Each paragraph must be organized around a central analytical thesis, with multip
 - When comparing, explicitly state similarities, differences, and underlying reasons
 - Use comparative, inductive, evolutionary, or taxonomic synthesis strategies
 
+### Few-Shot Examples
+
+Below are correct and incorrect examples demonstrating key writing rules.
+
+#### Example 1: Synthesis-First (Comparative Strategy)
+
+**BAD (paper-by-paper listing — BANNED):**
+> 张三等[1]提出了一种基于CNN的图像分类方法，准确率达到92%。李四等[2]提出了一种基于Transformer的方法，准确率达到95%。王五等[3]提出了一种混合架构方法，准确率达到97%。
+>
+> *问题：逐篇罗列，无分析关联，无综合对比。*
+
+**GOOD (thematic synthesis — REQUIRED):**
+> 深度学习在图像分类领域的演进呈现出从局部特征提取到全局建模的范式转变。早期CNN架构[1]通过卷积核捕获局部纹理特征，在标准基准上达到92%的分类准确率，但受限于感受野大小，难以建模长程依赖关系。Transformer架构[2]引入自注意力机制，将全局上下文建模能力提升至95%，但计算复杂度随图像分辨率二次增长。近期的混合架构[3]通过CNN提取局部特征后接入轻量化Transformer模块，在保持97%准确率的同时将计算开销降低40%，表明局部-全局特征的层次化融合是当前最具潜力的技术路线。
+>
+> *优点：按"局部→全局→融合"的演进线索组织，对比三种方法的优劣，分析演进驱动力。*
+
+#### Example 2: Citation Placement
+
+**BAD (citations used as subject — BANNED):**
+> [1]提出了基于注意力的机制。[2]通过实验证明了该方法的有效性。[3]进一步改进了该架构。
+
+**GOOD (citations support claims — REQUIRED):**
+> 注意力机制的核心思想是通过权重分配实现特征的选择性聚焦[1]。实验表明，该机制在长序列建模中的性能较传统RNN提升23%[2]。后续工作通过引入稀疏注意力将计算复杂度从O(n²)降至O(n log n)，使该架构在万级token序列上的推理成为可能[3]。
+
+#### Example 3: Paragraph Opening Variety
+
+**BAD (consecutive paragraphs start with same pattern):**
+> 随着深度学习技术的发展，CNN在图像领域取得了突破[1]。
+> 随着硬件算力的提升，Transformer架构逐渐成为主流[2]。
+> *问题：连续两段以"随着..."开头，句式单调。*
+
+**GOOD (varied openings):**
+> 卷积神经网络通过层次化特征提取在图像识别任务中实现了突破性进展[1]。
+> GPU集群算力的指数级增长为Transformer架构的工程落地提供了硬件基础[2]。
+> *优点：第一段以方法名作主语，第二段以硬件因素作主语，开头结构不同。*
+
+#### Example 4: "文献[N]" Pattern — ABSOLUTELY BANNED
+
+The pattern "文献[N]" (literature [N]) is NEVER allowed in any form — not as subject, not as possessive modifier, not in parentheses. Every occurrence below is a fatal error.
+
+**ALL OF THESE ARE BANNED:**
+> ❌ 文献[25]的混合建模研究显示，通过整合机理模型与数据驱动方法，可将效率提升40%[25]。
+> ❌ 文献[30]的两阶段浸出-沉淀法使磷回收率超过98%[30]。
+> ❌ 文献[42]指出，多尺度耦合计算中仍存在35%的算力浪费[42]。
+> ❌ （文献[24][28]已证实该方法的有效性）
+> ❌ 根据文献[15]的实验结果，该方法优于基线模型[15]。
+>
+> *问题：所有"文献[N]"的变体都被禁止——无论是作主语、所有格修饰语、还是介词宾语。*
+
+**REQUIRED — rewrite using one of these three patterns:**
+
+Pattern A — **事实/方法作主语 + [N] 放句末**:
+> ✅ 混合建模研究显示，通过整合机理模型与数据驱动方法，可将尾矿处理效率提升40%以上[25]。
+> ✅ 两阶段浸出-沉淀法使磷酸盐尾矿磷回收率超过98%，纯度达到97.9%[30]。
+
+Pattern B — **作者名 + [N] 引导**:
+> ✅ Zhang等[25]的混合建模研究表明，整合机理模型与数据驱动方法可将效率提升40%以上。
+> ✅ Li等[30]提出的两阶段浸出-沉淀法使磷回收率超过98%。
+
+Pattern C — **"有研究/已有工作" + [N]**:
+> ✅ 有研究[25]通过混合建模方法证实，整合机理模型与数据驱动方法可将效率提升40%以上。
+> ✅ 已有工作[30]表明，两阶段浸出-沉淀法可使磷回收率超过98%。
+
+#### Example 5: Body Text Subtitles — ABSOLUTELY BANNED
+
+The body must contain ONLY flowing paragraphs. Any form of subtitle, heading, or section divider is a fatal error.
+
+**ALL OF THESE ARE BANNED:**
+> ❌ 传统处置模式与资源化路径的环境经济差异——以处置成本、碳排放与资源收益的量化对比揭示核心矛盾
+> ❌ 一、研究背景与问题提出
+> ❌ ## 方法论演进
+> ❌ 【技术路线对比】
+> ❌ （一）传统处置方法
+> ❌ > 方法概述：本文从三个维度...
+>
+> *问题：正文不允许任何形式的标题、小标题、分隔符、段落标注。读者不需要段落的"标签"，段落本身的内容就应该清楚表达其主题。*
+
+**REQUIRED — 直接写段落，不加任何标题前缀：**
+> ✅ 传统处置模式以安全填埋和尾矿库堆存为主，虽能短期控制风险，但长期占用土地资源且存在溃坝隐患。资源化路径则通过提取有价组分实现变废为宝，但初期投资成本较高。两类模式在处置成本、碳排放和资源收益三个维度上呈现出显著差异...
+
 ### Output Rules
 - Output only the section body (plain paragraph text)
 - Do NOT output a section title, reference list, bibliography, or meta-commentary
 - **禁止在正文中使用任何级别的标题**（#、##、###、#### 等）。正文只允许纯段落文本，段落之间用空行分隔。不要添加"研究背景"、"方法概述"、"实验结果"等小标题
+- **禁止任何形式的段落标注或分隔符**：包括但不限于"一、二、三"、"（一）（二）"、"【】"、破折号标题（"——以XX揭示XX"）、冒号标签（"方法概述："）等。正文必须是纯段落流
 - Treat paper samples, evidence summaries, claim, evidence_span, method, metric, limitation, confidence, reference candidates, citation candidates, cluster data, community context, and evidence_limitations as internal working material — do not copy them into the output
 - Do NOT output candidate lists, evidence-card JSON, audit notes, or implementation details
 - Stay within {target_words} words (±20%)

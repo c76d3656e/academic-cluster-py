@@ -1,8 +1,8 @@
 """
-Initial community detection node.
+Community detection node.
 
-This stage runs before KG/evidence generation and uses only reranked papers
-plus KNN quality edges to form communities and select core/auxiliary papers.
+This stage runs after KG extraction and fuses KNN similarity edges with
+KG entity/relation signals to form communities, then selects core/auxiliary papers.
 """
 
 from __future__ import annotations
@@ -165,23 +165,25 @@ def select_community_balanced_papers(
 
 
 async def community_detection_node(state: PipelineState) -> dict[str, Any]:
-    """Run initial community detection without KG/evidence and choose core 160."""
+    """Run community detection with KG entity signals and choose core papers."""
     config = state.config or {}
     algorithm = config.get("clustering_algorithm", "leiden")
     resolution = config.get("clustering_resolution", 1.0)
     raw_weights = config.get("hybrid_graph_weights", {}) or {}
     weights = {
-        "knn": raw_weights.get("knn", 0.95),
-        "kg_relation": 0.0,
-        "shared_entity": 0.0,
+        "knn": raw_weights.get("knn", 0.60),
+        "kg_relation": raw_weights.get("kg_relation", 0.15),
+        "shared_entity": raw_weights.get("shared_entity", 0.10),
         "evidence": 0.0,
         "quality": raw_weights.get("quality", 0.05),
     }
 
     logger.info(
-        "Starting initial community detection",
+        "Starting community detection with KG signals",
         algorithm=algorithm,
         reranked_count=len(state.reranked_paper_ids),
+        kg_entities=len(state.kg_entity_ids or []),
+        kg_relations=len(state.kg_relation_ids or []),
     )
 
     db = get_database()
@@ -192,10 +194,19 @@ async def community_detection_node(state: PipelineState) -> dict[str, Any]:
         knn_edges = await vector_store.get_knn_graph(
             paper_ids=all_paper_ids, k=10, threshold=0.3
         )
+
+        # 从 DB 加载 KG 实体和关系
+        kg_entities: list[dict[str, Any]] = []
+        kg_relations: list[dict[str, Any]] = []
+        if state.kg_entity_ids:
+            kg_entities = await db.get_kg_entities_by_ids(state.kg_entity_ids)
+        if state.kg_relation_ids:
+            kg_relations = await db.get_kg_relations_by_ids(state.kg_relation_ids)
+
         hybrid_graph = build_hybrid_graph(
             knn_edges=knn_edges,
-            kg_relations=[],
-            kg_entities=[],
+            kg_relations=kg_relations,
+            kg_entities=kg_entities,
             evidence_cards=[],
             core_paper_ids=all_paper_ids,
             weights=weights,
@@ -213,7 +224,7 @@ async def community_detection_node(state: PipelineState) -> dict[str, Any]:
         for cluster in clusters:
             cluster["project_id"] = state.project_id
             cluster.setdefault("algorithm", algorithm)
-            cluster.setdefault("parameters", {"resolution": resolution, "pre_kg": True})
+            cluster.setdefault("parameters", {"resolution": resolution, "kg_enriched": True})
             cluster_id = await db.save_cluster(cluster)
             cluster["id"] = cluster_id
             cluster_ids.append(cluster_id)
@@ -233,13 +244,14 @@ async def community_detection_node(state: PipelineState) -> dict[str, Any]:
         )
 
         logger.info(
-            "Initial community detection completed",
+            "Community detection completed",
             clusters=len(cluster_ids),
             total_nodes=hybrid_graph.number_of_nodes(),
             total_edges=hybrid_graph.number_of_edges(),
             core_count=len(core_paper_ids),
             auxiliary_count=len(auxiliary_paper_ids),
-            pre_kg=True,
+            kg_entities_used=len(kg_entities),
+            kg_relations_used=len(kg_relations),
             community_balanced=True,
         )
 
@@ -253,7 +265,8 @@ async def community_detection_node(state: PipelineState) -> dict[str, Any]:
                 "total_edges": hybrid_graph.number_of_edges(),
                 "core_count": len(core_paper_ids),
                 "auxiliary_count": len(auxiliary_paper_ids),
-                "pre_kg": True,
+                "kg_entities_used": len(kg_entities),
+                "kg_relations_used": len(kg_relations),
                 "community_balanced": True,
             },
         )
