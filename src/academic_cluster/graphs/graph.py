@@ -281,10 +281,10 @@ def create_pipeline_graph() -> StateGraph[PipelineState]:
     workflow.add_edge("bm25", "embedding")
     workflow.add_edge("embedding", "pgvector_knn")
     workflow.add_edge("pgvector_knn", "rerank")
-    workflow.add_edge("rerank", "community_detection")
+    workflow.add_edge("rerank", "topic_relevance_filter")
+    workflow.add_edge("topic_relevance_filter", "community_detection")
     workflow.add_edge("community_detection", "visualize_community")
-    workflow.add_edge("visualize_community", "topic_relevance_filter")
-    workflow.add_edge("topic_relevance_filter", "evidence_cards")
+    workflow.add_edge("visualize_community", "evidence_cards")
     workflow.add_edge("evidence_cards", "kg_extraction")
     workflow.add_edge("kg_extraction", "community_memory")
     workflow.add_edge("community_memory", "inter_community_conflict")
@@ -298,7 +298,7 @@ def create_pipeline_graph() -> StateGraph[PipelineState]:
             "outline_generation": "outline_generation",
         },
     )
-    workflow.add_edge("targeted_refine", "evidence_cards")
+    workflow.add_edge("targeted_refine", "topic_relevance_filter")
     workflow.add_edge("outline_generation", "write_review")
     workflow.add_edge("write_review", "coverage_audit")
 

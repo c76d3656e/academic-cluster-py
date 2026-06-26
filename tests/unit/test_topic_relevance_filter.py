@@ -360,3 +360,61 @@ async def test_state_default_values():
     state = PipelineState(project_id="test", query="q")
     assert state.topic_relevance_scores == {}
     assert state.topic_filtered_count == 0
+
+
+async def test_pre_clustering_filters_paper_ids(monkeypatch):
+    """Pre-clustering mode: filter paper_ids when core/aux are empty."""
+    papers = [
+        {"id": "p1", "title": "Relevant", "abstract": ""},
+        {"id": "p2", "title": "Irrelevant", "abstract": ""},
+        {"id": "p3", "title": "Good", "abstract": ""},
+    ]
+    db = _FakeDb(papers)
+
+    async def fake_evaluate(paper, topic, timeout_s):
+        scores = {"p1": 0.9, "p2": 0.1, "p3": 0.8}
+        return paper["id"], scores.get(paper["id"], 1.0)
+
+    async def noop_progress(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.get_database",
+        lambda: db,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter._evaluate_single_paper",
+        fake_evaluate,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.send_progress",
+        noop_progress,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.get_llm_available_slots",
+        lambda **_: 10,
+    )
+
+    state = SimpleNamespace(
+        project_id="proj-1",
+        query="topic",
+        paper_ids=["p1", "p2", "p3"],
+        core_paper_ids=[],
+        auxiliary_paper_ids=[],
+        config={
+            "topic_relevance_enabled": True,
+            "topic_relevance_threshold": 0.4,
+            "topic_relevance_concurrency": 4,
+            "topic_relevance_timeout_s": 90,
+            "core_reference_count": 160,
+        },
+    )
+
+    result = await topic_relevance_filter_node(state)
+
+    assert "p1" in result["paper_ids"]
+    assert "p2" not in result["paper_ids"]
+    assert "p3" in result["paper_ids"]
+    assert result["topic_filtered_count"] == 1
+    assert "core_paper_ids" not in result
+    assert "auxiliary_paper_ids" not in result

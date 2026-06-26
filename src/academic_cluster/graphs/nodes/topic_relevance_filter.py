@@ -1,12 +1,11 @@
 """
 Topic 相关性过滤节点
 
-对 core_paper_ids 和 auxiliary_paper_ids 进行相关性评估：
-1. 并发 LLM CoT 评估每篇论文与研究主题的相关性（0-1 分）
-2. 低于阈值的论文从 core/auxiliary 中移除
-3. 核心文献不足时从辅助文献中补足
+两种模式：
+- 聚类前：过滤 paper_ids，移除弱相关论文后再进入聚类
+- 聚类后：过滤 core/auxiliary，不足时从辅助文献补足
 
-失败降级：单篇失败不影响其他论文，全部失败则保留原始列表。
+并发 LLM CoT 逐篇评估（0-1 分），单篇失败不影响其他论文，全部失败则降级保留原始列表。
 """
 
 import asyncio
@@ -126,11 +125,11 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
     """
     Topic 相关性过滤
 
-    对 core + auxiliary 论文做 LLM 相关性评估：
-    - 并发处理，单篇失败不影响其他论文
-    - 低于阈值的从 core/auxiliary 中移除
-    - 核心文献不足时从 auxiliary 中补足到目标数量
-    - 全部失败时降级保留原始列表
+    两种模式：
+    - 聚类前（core/aux 为空，paper_ids 存在）：过滤所有论文，返回过滤后的 paper_ids
+    - 聚类后（core/aux 存在）：过滤 core/aux，不足时从 auxiliary 补足
+
+    并发处理，单篇失败不影响其他论文，全部失败时降级保留原始列表。
     """
     tracker = get_current_tracker()
     if tracker:
@@ -156,7 +155,13 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
 
     core_ids = list(state.core_paper_ids or [])
     aux_ids = list(state.auxiliary_paper_ids or [])
-    all_paper_ids = core_ids + aux_ids
+
+    # 判断模式：core/aux 为空时从 paper_ids 取所有论文（聚类前过滤）
+    pre_clustering = not core_ids and not aux_ids
+    if pre_clustering:
+        all_paper_ids = list(state.paper_ids or [])
+    else:
+        all_paper_ids = core_ids + aux_ids
 
     if not all_paper_ids:
         logger.info("No papers to evaluate for topic relevance")
@@ -170,8 +175,10 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
 
     logger.info(
         "Starting topic relevance filter",
+        mode="pre-clustering" if pre_clustering else "post-clustering",
         core_count=len(core_ids),
         auxiliary_count=len(aux_ids),
+        total_papers=len(all_paper_ids),
         threshold=threshold,
     )
 
@@ -266,59 +273,91 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
             "status": "relevance_filter_degraded",
         }
 
-    # 过滤：未被 LLM 评估到的论文默认不通过（score=0.0）
-    filtered_core = [pid for pid in core_ids if scores.get(pid, 0.0) >= threshold]
-    filtered_aux = [pid for pid in aux_ids if scores.get(pid, 0.0) >= threshold]
+    if pre_clustering:
+        # 聚类前模式：过滤所有论文，返回 paper_ids
+        filtered_ids = [
+            pid for pid in all_paper_ids if scores.get(pid, 0.0) >= threshold
+        ]
+        filtered_count = len(all_paper_ids) - len(filtered_ids)
 
-    # 补足核心文献：从 auxiliary 中按顺序补到目标数量
-    target = int(config.get("core_reference_count", 160))
-    if len(filtered_core) < target:
-        already_in_core = set(filtered_core)
-        available = [pid for pid in filtered_aux if pid not in already_in_core]
-        need = target - len(filtered_core)
-        filtered_core.extend(available[:need])
-        promoted = set(available[:need])
-        filtered_aux = [pid for pid in filtered_aux if pid not in promoted]
+        logger.info(
+            "Topic relevance filter completed (pre-clustering)",
+            original=len(all_paper_ids),
+            filtered=len(filtered_ids),
+            filtered_count=filtered_count,
+            threshold=threshold,
+            scores_computed=len(scores),
+            failed_count=failed_count,
+            total_papers=total_papers,
+        )
 
-    original_count = len(core_ids) + len(aux_ids)
-    filtered_count = original_count - len(filtered_core) - len(filtered_aux)
+        await send_progress(
+            state.project_id,
+            "topic_relevance_filter",
+            f"相关性过滤完成，移除 {filtered_count} 篇弱相关论文",
+        )
 
-    logger.info(
-        "Topic relevance filter completed",
-        original_core=len(core_ids),
-        filtered_core=len(filtered_core),
-        original_aux=len(aux_ids),
-        filtered_aux=len(filtered_aux),
-        filtered_count=filtered_count,
-        threshold=threshold,
-        scores_computed=len(scores),
-        failed_count=failed_count,
-        total_papers=total_papers,
-    )
+        result: dict[str, Any] = {
+            "paper_ids": filtered_ids,
+            "topic_relevance_scores": scores,
+            "topic_filtered_count": filtered_count,
+            "status": "relevance_filtered",
+        }
+    else:
+        # 聚类后模式：过滤 core/aux，补足核心文献
+        filtered_core = [pid for pid in core_ids if scores.get(pid, 0.0) >= threshold]
+        filtered_aux = [pid for pid in aux_ids if scores.get(pid, 0.0) >= threshold]
 
-    await send_progress(
-        state.project_id,
-        "topic_relevance_filter",
-        f"相关性过滤完成，移除 {filtered_count} 篇弱相关论文",
-    )
+        target = int(config.get("core_reference_count", 160))
+        if len(filtered_core) < target:
+            already_in_core = set(filtered_core)
+            available = [pid for pid in filtered_aux if pid not in already_in_core]
+            need = target - len(filtered_core)
+            filtered_core.extend(available[:need])
+            promoted = set(available[:need])
+            filtered_aux = [pid for pid in filtered_aux if pid not in promoted]
 
-    result: dict[str, Any] = {
-        "core_paper_ids": filtered_core,
-        "auxiliary_paper_ids": filtered_aux,
-        "topic_relevance_scores": scores,
-        "topic_filtered_count": filtered_count,
-        "status": "relevance_filtered",
-    }
+        original_count = len(core_ids) + len(aux_ids)
+        filtered_count = original_count - len(filtered_core) - len(filtered_aux)
+
+        logger.info(
+            "Topic relevance filter completed (post-clustering)",
+            original_core=len(core_ids),
+            filtered_core=len(filtered_core),
+            original_aux=len(aux_ids),
+            filtered_aux=len(filtered_aux),
+            filtered_count=filtered_count,
+            threshold=threshold,
+            scores_computed=len(scores),
+            failed_count=failed_count,
+            total_papers=total_papers,
+        )
+
+        await send_progress(
+            state.project_id,
+            "topic_relevance_filter",
+            f"相关性过滤完成，移除 {filtered_count} 篇弱相关论文",
+        )
+
+        result = {
+            "core_paper_ids": filtered_core,
+            "auxiliary_paper_ids": filtered_aux,
+            "topic_relevance_scores": scores,
+            "topic_filtered_count": filtered_count,
+            "status": "relevance_filtered",
+        }
 
     if tracker:
+        summary: dict[str, Any] = {"filtered_count": filtered_count}
+        if not pre_clustering:
+            summary["core_after"] = len(filtered_core)
+            summary["aux_after"] = len(filtered_aux)
+        else:
+            summary["papers_after"] = len(filtered_ids)
         await tracker.end_node(
             "topic_relevance_filter",
             "succeeded",
-            output_summary={
-                "filtered_count": filtered_count,
-                "core_after": len(filtered_core),
-                "aux_after": len(filtered_aux),
-            },
+            output_summary=summary,
         )
 
     return result
