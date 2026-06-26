@@ -266,9 +266,9 @@ async def topic_relevance_filter_node(state: PipelineState) -> dict[str, Any]:
             "status": "relevance_filter_degraded",
         }
 
-    # 过滤：未被 LLM 评估到的论文默认通过（score=1.0）
-    filtered_core = [pid for pid in core_ids if scores.get(pid, 1.0) >= threshold]
-    filtered_aux = [pid for pid in aux_ids if scores.get(pid, 1.0) >= threshold]
+    # 过滤：未被 LLM 评估到的论文默认不通过（score=0.0）
+    filtered_core = [pid for pid in core_ids if scores.get(pid, 0.0) >= threshold]
+    filtered_aux = [pid for pid in aux_ids if scores.get(pid, 0.0) >= threshold]
 
     # 补足核心文献：从 auxiliary 中按顺序补到目标数量
     target = int(config.get("core_reference_count", 160))

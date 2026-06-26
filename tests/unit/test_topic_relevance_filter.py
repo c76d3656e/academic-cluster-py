@@ -271,6 +271,60 @@ async def test_filter_degrades_on_total_failure(monkeypatch):
     assert result["topic_filtered_count"] == 0
 
 
+async def test_unassessed_papers_filtered_out(monkeypatch):
+    """Papers that fail evaluation default to score 0.0 and should be filtered."""
+    papers = [
+        {"id": "p1", "title": "Good", "abstract": ""},
+        {"id": "p2", "title": "Failed", "abstract": ""},
+    ]
+    db = _FakeDb(papers)
+
+    async def partial_evaluate(paper, topic, timeout_s):
+        if paper["id"] == "p2":
+            raise RuntimeError("LLM timeout")
+        return paper["id"], 0.9
+
+    async def noop_progress(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.get_database",
+        lambda: db,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter._evaluate_single_paper",
+        partial_evaluate,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.send_progress",
+        noop_progress,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.graphs.nodes.topic_relevance_filter.get_llm_available_slots",
+        lambda **_: 10,
+    )
+
+    state = SimpleNamespace(
+        project_id="proj-1",
+        query="topic",
+        core_paper_ids=["p1", "p2"],
+        auxiliary_paper_ids=[],
+        config={
+            "topic_relevance_enabled": True,
+            "topic_relevance_threshold": 0.4,
+            "topic_relevance_concurrency": 4,
+            "topic_relevance_timeout_s": 90,
+            "core_reference_count": 2,
+        },
+    )
+
+    result = await topic_relevance_filter_node(state)
+
+    assert "p1" in result["core_paper_ids"]
+    assert "p2" not in result["core_paper_ids"]
+    assert result["topic_filtered_count"] == 1
+
+
 async def test_filter_skips_when_disabled(monkeypatch):
     """When topic_relevance_enabled=false, return empty dict."""
     called = False
