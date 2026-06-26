@@ -277,6 +277,31 @@ class DatabaseService:
         logger.info("Saved cluster", cluster_id=cluster_id)
         return cluster_id
 
+    async def delete_project_clusters(self, project_id: str) -> None:
+        """删除指定项目的所有聚类及其分配关系（用于重新运行聚类前清理）"""
+        async with self.session() as session:
+            # 先删除 cluster_assignments（外键依赖）
+            await session.execute(
+                text("""
+                    DELETE FROM cluster_assignments
+                    WHERE cluster_id IN (
+                        SELECT id FROM clusters WHERE project_id = :project_id
+                    )
+                """),
+                {"project_id": project_id},
+            )
+
+            # 再删除 clusters
+            await session.execute(
+                text("DELETE FROM clusters WHERE project_id = :project_id"),
+                {"project_id": project_id},
+            )
+
+        logger.info(
+            "Deleted project clusters",
+            project_id=project_id,
+        )
+
     async def save_kg_entities(self, entities: list[dict[str, Any]]) -> list[str]:
         """保存知识图谱实体（ON CONFLICT 合并 paper_ids，支持并发写入）"""
         entity_ids = []

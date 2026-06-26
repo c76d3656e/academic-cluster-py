@@ -85,7 +85,9 @@ def build_hybrid_graph(
         }
 
     total_papers = max(1, len(core_paper_ids))
-    max_entity_count = min(max_entity_paper_count, int(total_papers * max_entity_paper_ratio))
+    max_entity_count = min(
+        max_entity_paper_count, int(total_papers * max_entity_paper_ratio)
+    )
 
     G = nx.Graph()
 

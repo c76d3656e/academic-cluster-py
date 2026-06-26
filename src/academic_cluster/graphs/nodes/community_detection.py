@@ -190,7 +190,9 @@ async def community_detection_node(state: PipelineState) -> dict[str, Any]:
     vector_store = get_vector_store()
 
     try:
-        all_paper_ids = state.reranked_paper_ids or list(dict.fromkeys(state.paper_ids))
+        # 优先使用 topic_relevance_filter 过滤后的论文列表
+        # state.paper_ids 是过滤后的，state.reranked_paper_ids 是过滤前的
+        all_paper_ids = list(dict.fromkeys(state.paper_ids)) or state.reranked_paper_ids
         knn_edges = await vector_store.get_knn_graph(
             paper_ids=all_paper_ids, k=10, threshold=0.3
         )
@@ -219,12 +221,17 @@ async def community_detection_node(state: PipelineState) -> dict[str, Any]:
             seed=42,
         )
 
+        # 清理该项目的旧聚类数据（防止重试循环导致重复聚类）
+        await db.delete_project_clusters(state.project_id)
+
         cluster_ids: list[str] = []
         saved_clusters: list[dict[str, Any]] = []
         for cluster in clusters:
             cluster["project_id"] = state.project_id
             cluster.setdefault("algorithm", algorithm)
-            cluster.setdefault("parameters", {"resolution": resolution, "kg_enriched": True})
+            cluster.setdefault(
+                "parameters", {"resolution": resolution, "kg_enriched": True}
+            )
             cluster_id = await db.save_cluster(cluster)
             cluster["id"] = cluster_id
             cluster_ids.append(cluster_id)
@@ -235,7 +242,7 @@ async def community_detection_node(state: PipelineState) -> dict[str, Any]:
 
         core_count = int(config.get("core_reference_count", 160))
         auxiliary_count = int(config.get("auxiliary_reference_count", 160))
-        reranked_papers = await db.get_papers_by_ids(state.reranked_paper_ids)
+        reranked_papers = await db.get_papers_by_ids(all_paper_ids)
         core_paper_ids, auxiliary_paper_ids = select_community_balanced_papers(
             clusters=saved_clusters,
             reranked_papers=reranked_papers,

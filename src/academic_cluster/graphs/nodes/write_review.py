@@ -309,7 +309,8 @@ async def write_review_node(state: PipelineState) -> dict[str, Any]:
             from ...services.vector_store import get_vector_store
 
             vector_store = get_vector_store()
-            all_paper_ids = state.reranked_paper_ids or state.core_paper_ids
+            # 优先使用过滤后的论文列表
+            all_paper_ids = state.paper_ids or state.core_paper_ids
             hybrid_edges = await vector_store.get_knn_graph(
                 paper_ids=all_paper_ids, k=10, threshold=0.3
             )

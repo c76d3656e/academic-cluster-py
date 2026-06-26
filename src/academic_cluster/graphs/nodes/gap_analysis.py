@@ -185,8 +185,8 @@ async def gap_analysis_node(state: PipelineState) -> dict[str, Any]:
         evidence_cards = await db.get_evidence_cards_by_ids(state.evidence_card_ids)
         kg_entities = await db.get_kg_entities_by_ids(state.kg_entity_ids)
 
-        # 获取论文详情（用于 gap 分析）
-        all_paper_ids = state.reranked_paper_ids or state.paper_ids
+        # 获取论文详情（用于 gap 分析）- 优先使用过滤后的论文列表
+        all_paper_ids = state.paper_ids or state.reranked_paper_ids
         papers = await db.get_papers_by_ids(all_paper_ids)
 
         # 复用 community_detection 的 gap 分析逻辑

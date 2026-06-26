@@ -33,8 +33,8 @@ async def visualize_community_node(state: PipelineState) -> dict[str, Any]:
         # 获取聚类结果
         clusters = await db.get_clusters_by_ids(state.cluster_ids)
 
-        # 获取论文详情（使用全部 reranked 论文进行可视化）
-        papers = await db.get_papers_by_ids(state.reranked_paper_ids)
+        # 获取论文详情（使用过滤后的论文进行可视化）
+        papers = await db.get_papers_by_ids(state.paper_ids or state.reranked_paper_ids)
 
         # 获取混合图（简化版本，只包含核心论文间的边）
         import networkx as nx
