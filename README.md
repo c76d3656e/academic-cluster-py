@@ -13,6 +13,7 @@
 - **多模型支持** — 支持 OpenAI、Anthropic、Gitee 等多种 LLM 提供商，支持负载均衡
 - **现代 Web 界面** — Vue 3 + FastAPI 构建的响应式前端，支持实时进度跟踪
 
+试用网页 : https://review.c76d3656e.sbs/
 
 ## 快速开始
 
