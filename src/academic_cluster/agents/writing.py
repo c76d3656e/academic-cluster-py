@@ -251,7 +251,7 @@ async def generate_outline(
     Returns:
         大纲数据
     """
-    agent = create_writing_agent()
+    agent = create_writing_agent(max_tokens=None))
 
     # 层次标签中文映射
     _LAYER_LABELS = {
