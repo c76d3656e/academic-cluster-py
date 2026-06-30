@@ -165,7 +165,7 @@ async def _llm_topic_relevance_filter(
 - 如果不确定，倾向于保留"""
 
         try:
-            llm = create_llm(temperature=0.0, max_tokens=1024)
+            llm = create_llm(temperature=0.0, max_tokens=1024, task="search")
             messages = [
                 SystemMessage(
                     content="Return one compact JSON object only. No markdown."
@@ -173,7 +173,7 @@ async def _llm_topic_relevance_filter(
                 HumanMessage(content=prompt),
             ]
             response = await asyncio.wait_for(
-                ainvoke_with_callbacks(llm, messages), timeout=30.0
+                ainvoke_with_callbacks(llm, messages), timeout=300.0
             )
             content = response.content
             if isinstance(content, list):
@@ -223,7 +223,7 @@ async def _generate_search_queries(
     """使用 LLM 生成优化的搜索 query（对齐 Rust 版 parse_topic）"""
     from ...services.llm_client import ainvoke_with_callbacks, create_llm
 
-    llm = create_llm(temperature=0.3)
+    llm = create_llm(temperature=0.3, task="search")
 
     prompt_template = get_parse_topic_prompt()
     if not prompt_template:
@@ -240,7 +240,7 @@ async def _generate_search_queries(
 
     try:
         response = await asyncio.wait_for(
-            ainvoke_with_callbacks(llm, messages), timeout=60.0
+            ainvoke_with_callbacks(llm, messages), timeout=300.0
         )
         content = response.content
         if isinstance(content, list):
@@ -306,9 +306,9 @@ async def _evaluate_coverage(
     ]
 
     try:
-        llm = create_llm(temperature=0.0, max_tokens=1024)
+        llm = create_llm(temperature=0.0, max_tokens=1024, task="search")
         response = await asyncio.wait_for(
-            ainvoke_with_callbacks(llm, messages), timeout=30.0
+            ainvoke_with_callbacks(llm, messages), timeout=300.0
         )
         content = response.content
         if isinstance(content, list):
@@ -365,9 +365,9 @@ async def _refine_queries(
     ]
 
     try:
-        llm = create_llm(temperature=0.3, max_tokens=1024)
+        llm = create_llm(temperature=0.3, max_tokens=1024, task="search")
         response = await asyncio.wait_for(
-            ainvoke_with_callbacks(llm, messages), timeout=30.0
+            ainvoke_with_callbacks(llm, messages), timeout=300.0
         )
         content = response.content
         if isinstance(content, list):
@@ -472,10 +472,10 @@ async def search_node(state: PipelineState) -> dict[str, Any]:
             try:
                 results = await asyncio.wait_for(
                     asyncio.gather(*search_tasks, return_exceptions=True),
-                    timeout=120.0,
+                    timeout=300.0,
                 )
             except TimeoutError:
-                logger.error(f"Search round {round_num} timed out after 120s")
+                logger.error(f"Search round {round_num} timed out after 300s")
                 results = []
                 for task in search_tasks:
                     if task.done() and not task.cancelled():

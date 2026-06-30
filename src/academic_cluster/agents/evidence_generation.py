@@ -57,7 +57,7 @@ def create_evidence_agent(
     """创建证据生成 Agent"""
     from ..services.llm_client import create_llm
 
-    return create_llm(temperature=temperature)
+    return create_llm(temperature=temperature, task="evidence")
 
 
 async def generate_evidence_card(

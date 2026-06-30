@@ -106,7 +106,7 @@ async def generate_abstract_node(state: PipelineState) -> dict[str, object]:
     )
 
     try:
-        llm = create_llm(temperature=0.2, max_tokens=1024)
+        llm = create_llm(temperature=0.2, max_tokens=1024, task="kg")
         response = await ainvoke_with_callbacks(
             llm,
             [

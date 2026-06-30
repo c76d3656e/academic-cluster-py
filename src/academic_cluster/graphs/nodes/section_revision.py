@@ -121,7 +121,7 @@ async def _llm_rewrite_invalid_sentences(
 输出修订后的完整章节正文。"""
 
     try:
-        llm = create_llm(temperature=0.3, max_tokens=8192)
+        llm = create_llm(temperature=0.3, max_tokens=8192, task="writing")
         messages = [
             SystemMessage(
                 content="你是一位学术综述修订专家。只输出修订后的章节正文，不要解释。"

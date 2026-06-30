@@ -31,7 +31,7 @@ async def _generate_targeted_queries(
     """使用 LLM 生成针对性补充 query（对齐 Rust 版 cluster_targeted_refine）"""
     from ...services.llm_client import ainvoke_with_callbacks, create_llm
 
-    llm = create_llm(temperature=0.3)
+    llm = create_llm(temperature=0.3, task="writing")
 
     prompt_template = get_cluster_targeted_refine_prompt()
     if not prompt_template:

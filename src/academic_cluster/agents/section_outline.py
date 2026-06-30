@@ -659,7 +659,7 @@ async def plan_section_outline(
     )
 
     # 创建 LLM（低温度以保证规划稳定性）
-    agent = create_llm(temperature=0.3, max_tokens=4096)
+    agent = create_llm(temperature=0.3, max_tokens=4096, task="outline")
 
     messages = [
         SystemMessage(

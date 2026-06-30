@@ -264,7 +264,10 @@ def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict[str
             {
                 "model_name": group_name,
                 "litellm_params": litellm_params,
-                "model_info": {"provider_alias": name},
+                "model_info": {
+                    "provider_alias": name,
+                    "visibility": item.get("visibility", ["public"]),
+                },
             }
         )
 
@@ -314,7 +317,8 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
         registry_has_rows = bool(total_result.scalar() or 0)
         result = await session.execute(
             text("""
-                SELECT kind, display_name, base_url, model, api_key_enc, rpm_limit, priority
+                SELECT kind, display_name, base_url, model, api_key_enc,
+                       rpm_limit, priority, metadata
                 FROM provider_registry
                 WHERE is_enabled = true
                 ORDER BY kind, priority DESC, created_at ASC
@@ -342,6 +346,21 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
                     error=str(e),
                 )
                 continue
+        # 从 metadata 中解析 visibility
+        metadata_raw = row[7]
+        visibility = ["public"]
+        if metadata_raw:
+            try:
+                if isinstance(metadata_raw, str):
+                    metadata = json.loads(metadata_raw)
+                elif isinstance(metadata_raw, dict):
+                    metadata = metadata_raw
+                else:
+                    metadata = {}
+                visibility = metadata.get("visibility", ["public"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         configs[kind].append(
             {
                 "name": row[1],
@@ -350,6 +369,7 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
                 "api_key": api_key,
                 "rpm_limit": row[5] or 10,
                 "priority": row[6] or 100,
+                "visibility": visibility,
             }
         )
 
@@ -447,7 +467,10 @@ async def init_pools() -> None:
                     "api_base": base + "/v1",
                     "rpm": 10,
                 },
-                "model_info": {"provider_alias": settings.llm_provider},
+                "model_info": {
+                    "provider_alias": settings.llm_provider,
+                    "visibility": ["public"],
+                },
             }
         ]
     if llm_model_list:
@@ -471,7 +494,10 @@ async def init_pools() -> None:
                     "api_base": base + "/v1",
                     "rpm": 10,
                 },
-                "model_info": {"provider_alias": settings.embedding_provider},
+                "model_info": {
+                    "provider_alias": settings.embedding_provider,
+                    "visibility": ["public"],
+                },
             }
         ]
     if emb_model_list:

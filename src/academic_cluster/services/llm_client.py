@@ -18,6 +18,15 @@ from langchain_openai import ChatOpenAI
 
 logger = structlog.get_logger()
 
+_TASK_TAGS: dict[str, set[str]] = {
+    "kg":       {"kg", "public"},
+    "evidence": {"ec", "public"},
+    "outline":  {"ol", "public"},
+    "writing":  {"wr", "public"},
+    "search":   {"se", "public"},
+    "default":  {"public"},
+}
+
 _rr_counter = 0
 _llm_queue_semaphore: asyncio.Semaphore | None = None
 _llm_queue_capacity = 0
@@ -169,6 +178,7 @@ _rr_counter = 0
 def create_llm(
     temperature: float = 0.7,
     max_tokens: int | None = None,
+    task: str = "default",
 ) -> ChatOpenAI:
     """
     从 Provider Pool 创建 ChatOpenAI 实例。
@@ -179,6 +189,7 @@ def create_llm(
     Args:
         temperature: 温度参数
         max_tokens: 最大 token 数
+        task: 任务标签，用于 visibility 过滤（默认 "default" 仅匹配 public）
 
     Returns:
         ChatOpenAI 实例
@@ -193,9 +204,18 @@ def create_llm(
     if not deployments:
         raise RuntimeError("No LLM deployments configured")
 
+    # visibility 过滤
+    allowed = _TASK_TAGS.get(task, {"public"})
+    candidates = [
+        d for d in deployments
+        if set(d.get("model_info", {}).get("visibility", ["public"])) & allowed
+    ]
+    if not candidates:
+        candidates = deployments  # fallback 全池
+
     # 轮询选择
-    _rr_counter = (_rr_counter + 1) % len(deployments)
-    deployment = deployments[_rr_counter]
+    _rr_counter = (_rr_counter + 1) % len(candidates)
+    deployment = candidates[_rr_counter]
     params = deployment["litellm_params"]
 
     # 始终使用 provider 自身配置的模型名（不同 provider 模型不通用）
@@ -519,6 +539,7 @@ async def ainvoke_with_callbacks(
 def create_llm_with_retry(
     temperature: float = 0.7,
     max_tokens: int | None = None,
+    task: str = "default",
     max_retries: int = 3,
 ) -> Any:
     """
@@ -543,7 +564,7 @@ def create_llm_with_retry(
             reraise=True,
         )
         async def _call() -> Any:
-            llm = create_llm(temperature=temperature, max_tokens=max_tokens)
+            llm = create_llm(temperature=temperature, max_tokens=max_tokens, task=task)
             return await ainvoke_with_callbacks(llm, messages)
 
         return await _call()
@@ -555,6 +576,7 @@ async def invoke_llm(
     messages: list[Any],
     temperature: float = 0.7,
     max_tokens: int | None = None,
+    task: str = "default",
 ) -> Any:
     """
     便捷函数：创建 LLM 并调用，自动注入 callback。
@@ -562,5 +584,5 @@ async def invoke_llm(
     Returns:
         LLM response
     """
-    llm = create_llm(temperature=temperature, max_tokens=max_tokens)
+    llm = create_llm(temperature=temperature, max_tokens=max_tokens, task=task)
     return await ainvoke_with_callbacks(llm, messages)

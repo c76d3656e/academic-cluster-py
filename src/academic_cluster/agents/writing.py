@@ -205,7 +205,7 @@ async def _ainvoke_with_retry(
 def create_writing_agent(
     model: str | None = None,
     temperature: float = 0.7,
-    max_tokens: int = 4096,
+    max_tokens: int | None = None,
 ) -> ChatOpenAI:
     """
     创建写作 Agent
@@ -219,7 +219,7 @@ def create_writing_agent(
     """
     from ..services.llm_client import create_llm
 
-    llm = create_llm(temperature=temperature, max_tokens=max_tokens)
+    llm = create_llm(temperature=temperature, max_tokens=max_tokens, task="writing")
     logger.info("Writing agent created")
     return llm
 

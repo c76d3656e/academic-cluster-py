@@ -116,7 +116,7 @@ async def _refine_gaps_with_llm(
     prompt = prompt_template.format(topic=topic, communities=communities_text)
 
     try:
-        llm = create_llm(temperature=0.0, max_tokens=1024)
+        llm = create_llm(temperature=0.0, max_tokens=1024, task="evidence")
         response = await asyncio.wait_for(
             ainvoke_with_callbacks(
                 llm,

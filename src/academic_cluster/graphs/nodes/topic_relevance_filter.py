@@ -94,7 +94,7 @@ async def _evaluate_single_paper(
         papers=json.dumps(paper_data, ensure_ascii=False, indent=2),
     )
 
-    llm = create_llm(temperature=0.1)
+    llm = create_llm(temperature=0.1, task="kg")
     response = await ainvoke_with_callbacks(
         llm,
         [

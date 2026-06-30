@@ -117,7 +117,7 @@ async def repair_json_with_llm(raw: str, schema_hint: str = "") -> Any | None:
     user_prompt += f"\n\nMalformed output:\n{raw}"
 
     try:
-        llm = create_llm(temperature=0.0, max_tokens=4096)
+        llm = create_llm(temperature=0.0, max_tokens=4096, task="default")
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),

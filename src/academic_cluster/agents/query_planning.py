@@ -142,7 +142,7 @@ def create_query_planning_agent(
     from ..services.llm_client import create_llm
 
     # 创建 LLM
-    llm = create_llm(temperature=temperature)
+    llm = create_llm(temperature=temperature, task="search")
 
     # 绑定工具
     agent = llm.bind_tools(

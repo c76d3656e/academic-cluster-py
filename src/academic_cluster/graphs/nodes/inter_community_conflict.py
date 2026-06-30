@@ -101,7 +101,7 @@ async def inter_community_conflict_node(
             communities=json.dumps(community_lines, ensure_ascii=False, indent=2),
         )
 
-        llm = create_llm(temperature=0.2, max_tokens=2048)
+        llm = create_llm(temperature=0.2, max_tokens=2048, task="evidence")
         response = await ainvoke_with_callbacks(
             llm,
             [

@@ -644,7 +644,7 @@ async def evaluate_section_blind(
     )
 
     # 创建 LLM（评估需要确定性，使用 temperature=0.0）
-    llm = create_llm(temperature=0.0, max_tokens=4096)
+    llm = create_llm(temperature=0.0, max_tokens=4096, task="writing")
 
     messages = [
         SystemMessage(
@@ -770,7 +770,7 @@ async def evaluate_section_visible(
     )
 
     # 创建 LLM（评估需要确定性，使用 temperature=0.0）
-    llm = create_llm(temperature=0.0, max_tokens=4096)
+    llm = create_llm(temperature=0.0, max_tokens=4096, task="writing")
 
     messages = [
         SystemMessage(
@@ -1027,7 +1027,7 @@ async def revise_section(
 请输出修订后的完整章节正文："""
 
     # 创建 LLM（修订需要适度创造性，使用 temperature=0.3）
-    llm = create_llm(temperature=0.3, max_tokens=8192)
+    llm = create_llm(temperature=0.3, max_tokens=8192, task="writing")
 
     messages = [
         SystemMessage(

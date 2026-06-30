@@ -21,12 +21,12 @@ async def _seed_admin(db: Any, settings: Any) -> None:
 
     from ..services.auth import get_password_service
 
-    admin_password = settings.admin_password
-    if not admin_password:
+    # 未配置密码时使用默认密码
+    admin_password = settings.admin_password or "admin123"
+    if not settings.admin_password:
         logger.info(
-            "Admin password not configured (ADMIN_PASSWORD is empty), skipping admin seed"
+            "ADMIN_PASSWORD not set, using default 'admin123'"
         )
-        return
 
     password_service = get_password_service()
     admin_email = settings.admin_email

@@ -455,7 +455,7 @@ async def enrich_community_memory_with_llm(
         kg_relations=json.dumps(relation_lines, ensure_ascii=False),
     )
 
-    llm = create_llm(temperature=0.2, max_tokens=2200)
+    llm = create_llm(temperature=0.2, max_tokens=2200, task="kg")
     response = await ainvoke_with_callbacks(
         llm,
         [

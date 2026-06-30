@@ -33,6 +33,7 @@ const form = ref({
   rpm_limit: 10,
   input_price_per_m: 0,
   output_price_per_m: 0,
+  visibility: ['public'] as string[],
 })
 
 const showSourceDialog = shallowRef(false)
@@ -72,6 +73,7 @@ function openCreate() {
     rpm_limit: 10,
     input_price_per_m: 0,
     output_price_per_m: 0,
+    visibility: ['public'],
   }
   showDialog.value = true
 }
@@ -87,6 +89,7 @@ function openEdit(p: ProviderInfo) {
     rpm_limit: p.rpm_limit,
     input_price_per_m: p.input_price_per_m,
     output_price_per_m: p.output_price_per_m,
+    visibility: (p.metadata?.visibility as string[]) || ['public'],
   }
   showDialog.value = true
 }
@@ -197,6 +200,7 @@ async function handleSave() {
       rpm_limit: form.value.rpm_limit,
       input_price_per_m: form.value.input_price_per_m,
       output_price_per_m: form.value.output_price_per_m,
+      metadata: { visibility: form.value.visibility },
     }
 
     if (editingId.value) {
@@ -473,6 +477,36 @@ onMounted(loadData)
           <div>
             <Label class="text-sm">{{ t('admin.apiKey') }} {{ editingId ? t('admin.apiKeyKeep') : '' }}</Label>
             <Input v-model="form.api_key" type="password" :placeholder="t('admin.apiKeyPlaceholder')" class="mt-1" />
+          </div>
+          <div class="border-t border-border pt-4">
+            <Label class="text-sm font-medium">可见角色 / Visibility</Label>
+            <p class="text-[0.65rem] text-muted-foreground mb-3">选择此 Provider 可被哪些任务使用</p>
+            <div class="grid grid-cols-3 gap-y-2 gap-x-4">
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" v-model="form.visibility" value="public" class="rounded" />
+                公共 (public)
+              </label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" v-model="form.visibility" value="kg" />
+                KG提取 (kg)
+              </label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" v-model="form.visibility" value="ec" />
+                证据卡片 (ec)
+              </label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" v-model="form.visibility" value="se" />
+                学术搜索 (se)
+              </label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" v-model="form.visibility" value="ol" />
+                大纲生成 (ol)
+              </label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" v-model="form.visibility" value="wr" />
+                综述撰写 (wr)
+              </label>
+            </div>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

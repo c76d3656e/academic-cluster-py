@@ -61,6 +61,7 @@ export interface ProviderInfo {
   created_by: string | null
   created_at: string | null
   updated_at: string | null
+  metadata?: Record<string, unknown>
 }
 
 export interface ProviderCreateRequest {
@@ -79,6 +80,7 @@ export interface ProviderCreateRequest {
   test_model?: string
   input_price_per_m?: number
   output_price_per_m?: number
+  visibility?: string[]
   metadata?: Record<string, unknown>
 }
 

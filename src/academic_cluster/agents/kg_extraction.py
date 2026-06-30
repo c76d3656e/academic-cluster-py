@@ -461,7 +461,7 @@ def create_kg_extraction_agent(
     """创建知识图谱提取 Agent"""
     from ..services.llm_client import create_llm
 
-    llm = create_llm(temperature=temperature)
+    llm = create_llm(temperature=temperature, task="kg")
     logger.info("KG extraction agent created")
     return llm
 
