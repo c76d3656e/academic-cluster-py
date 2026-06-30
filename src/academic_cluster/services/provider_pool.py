@@ -440,7 +440,13 @@ async def init_pools() -> None:
                 embedding=len(db_configs.get("embedding", [])),
                 rerank=len(db_configs.get("rerank", [])),
             )
-            return
+            # DB 有记录但所有 LLM provider 都因密钥解密失败被跳过时，fallback 到 env
+            if _llm_pool is not None:
+                return
+            logger.warning(
+                "DB-based LLM pool is empty (all providers skipped?), "
+                "falling back to env config"
+            )
     except Exception as e:
         logger.warning(
             "Failed to initialize provider pools from DB, falling back to env",
