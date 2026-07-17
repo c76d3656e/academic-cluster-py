@@ -1,0 +1,6385 @@
+{
+  "fixture_bundle_version": "1.0.0",
+  "graph": {
+    "edges": [
+      {
+        "conditional": false,
+        "source": "__start__",
+        "target": "supervisor"
+      },
+      {
+        "conditional": false,
+        "source": "analysis",
+        "target": "supervisor"
+      },
+      {
+        "conditional": false,
+        "source": "finalize",
+        "target": "__end__"
+      },
+      {
+        "conditional": false,
+        "source": "peer_review",
+        "target": "supervisor"
+      },
+      {
+        "conditional": false,
+        "source": "research",
+        "target": "supervisor"
+      },
+      {
+        "conditional": true,
+        "source": "supervisor",
+        "target": "analysis"
+      },
+      {
+        "conditional": true,
+        "source": "supervisor",
+        "target": "finalize"
+      },
+      {
+        "conditional": true,
+        "source": "supervisor",
+        "target": "peer_review"
+      },
+      {
+        "conditional": true,
+        "source": "supervisor",
+        "target": "research"
+      },
+      {
+        "conditional": true,
+        "source": "supervisor",
+        "target": "writing"
+      },
+      {
+        "conditional": false,
+        "source": "writing",
+        "target": "supervisor"
+      }
+    ],
+    "entry": "supervisor",
+    "nodes": [
+      "supervisor",
+      "research",
+      "analysis",
+      "writing",
+      "peer_review",
+      "finalize"
+    ],
+    "terminal": "__end__"
+  },
+  "promptfoo": {
+    "node_engine": "^20.20.0 || >=22.22.0",
+    "offline": true,
+    "version": "0.121.19"
+  },
+  "routing_scenarios": [
+    {
+      "acceptance": {
+        "expected_accepted": true,
+        "expected_artifact_version": "1.0.0"
+      },
+      "context": {
+        "before": {
+          "execution_id": "contract-execution",
+          "project_id": "contract-project",
+          "topic": "deterministic agent contracts"
+        },
+        "expected_entry": "supervisor",
+        "required_state_fields": [
+          "project_id",
+          "execution_id",
+          "topic"
+        ]
+      },
+      "contract_version": "1.0.0",
+      "error": {
+        "expected_route": "finalize",
+        "mode": "fail_closed",
+        "state_patch": {
+          "current_phase": "finalize",
+          "status": "failed",
+          "terminal_failure": true
+        }
+      },
+      "expected_variant": "route",
+      "fallback": {
+        "expected_route": "finalize",
+        "mode": "bounded_completion",
+        "state_patch": {
+          "current_phase": "finalize",
+          "max_revision_attempts": 2,
+          "needs_revision": false,
+          "revision_attempt": 2,
+          "status": "completed_with_warnings"
+        }
+      },
+      "fixture_version": "1.0.0",
+      "node": "supervisor",
+      "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json"
+    },
+    {
+      "acceptance": {
+        "expected_accepted": true,
+        "expected_artifact_version": "1.0.0"
+      },
+      "context": {
+        "before": {
+          "execution_id": "contract-execution",
+          "project_id": "contract-project",
+          "target_papers": 2,
+          "topic": "deterministic agent contracts"
+        },
+        "expected_entry": "research",
+        "required_state_fields": [
+          "project_id",
+          "execution_id",
+          "topic",
+          "target_papers"
+        ]
+      },
+      "contract_version": "1.0.0",
+      "error": {
+        "expected_route": "research",
+        "mode": "bounded_retry",
+        "state_patch": {
+          "current_phase": "research",
+          "failed_phase": "research",
+          "max_phase_attempts": 2,
+          "phase_attempts": {
+            "research": 1
+          },
+          "status": "research_failed",
+          "terminal_failure": false
+        }
+      },
+      "expected_variant": "success",
+      "fallback": {
+        "expected_route": "finalize",
+        "mode": "prohibit_empty_research",
+        "state_patch": {
+          "current_phase": "research",
+          "errors": [
+            "research: no project papers"
+          ],
+          "failed_phase": "research",
+          "max_phase_attempts": 2,
+          "phase_attempts": {
+            "research": 2
+          },
+          "status": "research_failed",
+          "terminal_failure": true
+        }
+      },
+      "fixture_version": "1.0.0",
+      "node": "research",
+      "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json"
+    },
+    {
+      "acceptance": {
+        "expected_accepted": true,
+        "expected_artifact_version": "1.0.0"
+      },
+      "context": {
+        "before": {
+          "execution_id": "contract-execution",
+          "paper_ids": [
+            "paper-1"
+          ],
+          "papers": [
+            {
+              "id": "paper-1",
+              "title": "Fixture"
+            }
+          ],
+          "project_id": "contract-project",
+          "research_complete": true,
+          "research_round": 1,
+          "target_papers": 2,
+          "topic": "deterministic agent contracts"
+        },
+        "expected_entry": "analysis",
+        "required_state_fields": [
+          "project_id",
+          "execution_id",
+          "topic",
+          "papers",
+          "research_complete"
+        ]
+      },
+      "contract_version": "1.0.0",
+      "error": {
+        "expected_route": "analysis",
+        "mode": "bounded_retry",
+        "state_patch": {
+          "current_phase": "analysis",
+          "failed_phase": "analysis",
+          "max_phase_attempts": 2,
+          "phase_attempts": {
+            "analysis": 1
+          },
+          "status": "analysis_failed",
+          "terminal_failure": false
+        }
+      },
+      "expected_variant": "success",
+      "fallback": {
+        "expected_route": "research",
+        "mode": "bounded_supplemental_research",
+        "state_patch": {
+          "analysis_complete": false,
+          "coverage": {
+            "coverage_score": 0.3
+          },
+          "coverage_score": 0.3,
+          "current_phase": "analysis",
+          "embedding_model": "fixture-embedding-v1",
+          "embeddings_ready": true,
+          "failed_phase": null,
+          "max_research_rounds": 2,
+          "research_round": 1,
+          "status": "needs_more_research",
+          "suggested_queries": [
+            "missing subtopic"
+          ],
+          "terminal_failure": false
+        }
+      },
+      "fixture_version": "1.0.0",
+      "node": "analysis",
+      "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json"
+    },
+    {
+      "acceptance": {
+        "expected_accepted": true,
+        "expected_artifact_version": "1.0.0"
+      },
+      "context": {
+        "before": {
+          "analysis_complete": true,
+          "evidence_cards": [
+            {
+              "claim": "Evidence-backed claim",
+              "paper_id": "paper-1"
+            }
+          ],
+          "execution_id": "contract-execution",
+          "paper_ids": [
+            "paper-1"
+          ],
+          "papers": [
+            {
+              "id": "paper-1",
+              "title": "Fixture"
+            }
+          ],
+          "project_id": "contract-project",
+          "research_complete": true,
+          "target_words": 1000,
+          "topic": "deterministic agent contracts"
+        },
+        "expected_entry": "writing",
+        "required_state_fields": [
+          "project_id",
+          "execution_id",
+          "topic",
+          "papers",
+          "evidence_cards",
+          "analysis_complete"
+        ]
+      },
+      "contract_version": "1.0.0",
+      "error": {
+        "expected_route": "writing",
+        "mode": "bounded_retry",
+        "state_patch": {
+          "current_phase": "writing",
+          "failed_phase": "writing",
+          "max_phase_attempts": 2,
+          "phase_attempts": {
+            "writing": 1
+          },
+          "status": "writing_failed",
+          "terminal_failure": false
+        }
+      },
+      "expected_variant": "success",
+      "fallback": {
+        "expected_route": "writing",
+        "mode": "bounded_revision",
+        "state_patch": {
+          "current_phase": "writing",
+          "max_revision_attempts": 2,
+          "needs_revision": true,
+          "revision_attempt": 1,
+          "revision_feedback": "Strengthen evidence and citations.",
+          "status": "needs_revision"
+        }
+      },
+      "fixture_version": "1.0.0",
+      "node": "writing",
+      "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json"
+    },
+    {
+      "acceptance": {
+        "expected_accepted": true,
+        "expected_artifact_version": "1.0.0"
+      },
+      "context": {
+        "before": {
+          "analysis_complete": true,
+          "execution_id": "contract-execution",
+          "final_review": "# Review\n\nEvidence [1].",
+          "papers": [
+            {
+              "id": "paper-1",
+              "title": "Fixture"
+            }
+          ],
+          "project_id": "contract-project",
+          "quality_threshold": 75.0,
+          "research_complete": true,
+          "topic": "deterministic agent contracts",
+          "writing_complete": true
+        },
+        "expected_entry": "peer_review",
+        "required_state_fields": [
+          "project_id",
+          "execution_id",
+          "topic",
+          "final_review",
+          "writing_complete",
+          "quality_threshold"
+        ]
+      },
+      "contract_version": "1.0.0",
+      "error": {
+        "expected_route": "peer_review",
+        "mode": "bounded_retry",
+        "state_patch": {
+          "current_phase": "peer_review",
+          "failed_phase": "peer_review",
+          "max_phase_attempts": 2,
+          "phase_attempts": {
+            "peer_review": 1
+          },
+          "status": "peer_review_failed",
+          "terminal_failure": false
+        }
+      },
+      "expected_variant": "success",
+      "fallback": {
+        "expected_route": "writing",
+        "mode": "quality_revision",
+        "state_patch": {
+          "current_phase": "peer_review",
+          "failed_phase": null,
+          "max_revision_attempts": 2,
+          "needs_revision": true,
+          "peer_review_complete": false,
+          "peer_review_report": {
+            "overall_score": 60.0
+          },
+          "quality_score": 60.0,
+          "revision_attempt": 1,
+          "revision_feedback": "Add stronger supporting evidence.",
+          "status": "needs_revision"
+        }
+      },
+      "fixture_version": "1.0.0",
+      "node": "peer_review",
+      "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json"
+    },
+    {
+      "acceptance": {
+        "expected_accepted": true,
+        "expected_artifact_version": "1.0.0"
+      },
+      "context": {
+        "before": {
+          "analysis_complete": true,
+          "execution_id": "contract-execution",
+          "final_references": [
+            {
+              "new_number": 1,
+              "original_number": 1,
+              "paper_id": "paper-1"
+            }
+          ],
+          "final_review": "# Review\n\nEvidence [1].",
+          "papers": [
+            {
+              "id": "paper-1",
+              "title": "Fixture"
+            }
+          ],
+          "peer_review_complete": true,
+          "project_id": "contract-project",
+          "research_complete": true,
+          "topic": "deterministic agent contracts",
+          "writing_complete": true
+        },
+        "expected_entry": "finalize",
+        "required_state_fields": [
+          "project_id",
+          "execution_id",
+          "topic",
+          "final_review",
+          "peer_review_complete"
+        ]
+      },
+      "contract_version": "1.0.0",
+      "error": {
+        "expected_route": "__end__",
+        "mode": "terminal_failure",
+        "state_patch": {
+          "current_phase": "completed",
+          "errors": [
+            "terminal contract failure"
+          ],
+          "status": "failed",
+          "terminal_failure": true
+        }
+      },
+      "expected_variant": "success",
+      "fallback": {
+        "expected_route": "__end__",
+        "mode": "warning_completion",
+        "state_patch": {
+          "current_phase": "completed",
+          "status": "completed_with_warnings",
+          "warnings": [
+            "quality threshold exhausted"
+          ]
+        }
+      },
+      "fixture_version": "1.0.0",
+      "node": "finalize",
+      "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json"
+    }
+  ],
+  "runtime_acceptance_fixtures": [
+    {
+      "contract_version": "1.0.0",
+      "expected_variant": "route",
+      "fixture_version": "1.0.0",
+      "node": "supervisor",
+      "output": {
+        "current_phase": "research",
+        "decision_reason": "phase completion state",
+        "status": "running"
+      },
+      "scenario": "success",
+      "state": {
+        "abstract": "Fixture abstract [1].",
+        "analysis_complete": false,
+        "cited_reference_numbers": [
+          1
+        ],
+        "coverage": {
+          "clusters": [],
+          "coverage_score": 0.8
+        },
+        "coverage_score": 0.8,
+        "current_phase": "supervisor",
+        "decision_reason": "",
+        "embedding_model": "embedding-fixture",
+        "embeddings_ready": false,
+        "errors": [],
+        "evidence_cards": [
+          {
+            "claim": "Fixture evidence",
+            "paper_id": "paper-1"
+          }
+        ],
+        "execution_id": "execution-fixture",
+        "failed_phase": null,
+        "final_references": [
+          {
+            "new_number": 1,
+            "original_number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "final_review": "Fixture review [1].",
+        "gap_analysis": {},
+        "knowledge_graph": {},
+        "max_phase_attempts": 2,
+        "max_research_rounds": 2,
+        "max_revision_attempts": 2,
+        "needs_revision": false,
+        "outline": {
+          "sections": [],
+          "title": "Fixture review"
+        },
+        "paper_ids": [
+          "paper-1"
+        ],
+        "papers": [
+          {
+            "id": "paper-1",
+            "title": "Agent systems"
+          }
+        ],
+        "peer_review_complete": false,
+        "peer_review_report": {
+          "overall_score": 88.0
+        },
+        "phase_attempts": {},
+        "project_id": "project-fixture",
+        "quality_score": 88.0,
+        "quality_threshold": 75.0,
+        "reference_map": [
+          {
+            "number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "research_complete": false,
+        "research_round": 0,
+        "research_summary": {},
+        "revision_attempt": 0,
+        "revision_feedback": "",
+        "sections": [
+          {
+            "content": "Evidence [1].",
+            "section_id": "1"
+          }
+        ],
+        "status": "created",
+        "suggested_queries": [],
+        "target_papers": 10,
+        "target_words": 3000,
+        "terminal_failure": false,
+        "topic": "deterministic agent fixture",
+        "warnings": [],
+        "writing_complete": false
+      }
+    },
+    {
+      "contract_version": "1.0.0",
+      "expected_variant": "success",
+      "fixture_version": "1.0.0",
+      "node": "research",
+      "output": {
+        "current_phase": "research",
+        "failed_phase": null,
+        "paper_ids": [
+          "paper-1"
+        ],
+        "papers": [
+          {
+            "id": "paper-1"
+          }
+        ],
+        "research_complete": true,
+        "research_round": 1,
+        "research_summary": {
+          "total_found": 1
+        },
+        "status": "running",
+        "suggested_queries": [],
+        "terminal_failure": false
+      },
+      "scenario": "success",
+      "state": {
+        "abstract": "Fixture abstract [1].",
+        "analysis_complete": false,
+        "cited_reference_numbers": [
+          1
+        ],
+        "coverage": {
+          "clusters": [],
+          "coverage_score": 0.8
+        },
+        "coverage_score": 0.8,
+        "current_phase": "supervisor",
+        "decision_reason": "",
+        "embedding_model": "embedding-fixture",
+        "embeddings_ready": false,
+        "errors": [],
+        "evidence_cards": [
+          {
+            "claim": "Fixture evidence",
+            "paper_id": "paper-1"
+          }
+        ],
+        "execution_id": "execution-fixture",
+        "failed_phase": null,
+        "final_references": [
+          {
+            "new_number": 1,
+            "original_number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "final_review": "Fixture review [1].",
+        "gap_analysis": {},
+        "knowledge_graph": {},
+        "max_phase_attempts": 2,
+        "max_research_rounds": 2,
+        "max_revision_attempts": 2,
+        "needs_revision": false,
+        "outline": {
+          "sections": [],
+          "title": "Fixture review"
+        },
+        "paper_ids": [
+          "paper-1"
+        ],
+        "papers": [
+          {
+            "id": "paper-1",
+            "title": "Agent systems"
+          }
+        ],
+        "peer_review_complete": false,
+        "peer_review_report": {
+          "overall_score": 88.0
+        },
+        "phase_attempts": {},
+        "project_id": "project-fixture",
+        "quality_score": 88.0,
+        "quality_threshold": 75.0,
+        "reference_map": [
+          {
+            "number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "research_complete": false,
+        "research_round": 0,
+        "research_summary": {},
+        "revision_attempt": 0,
+        "revision_feedback": "",
+        "sections": [
+          {
+            "content": "Evidence [1].",
+            "section_id": "1"
+          }
+        ],
+        "status": "created",
+        "suggested_queries": [],
+        "target_papers": 10,
+        "target_words": 3000,
+        "terminal_failure": false,
+        "topic": "deterministic agent fixture",
+        "warnings": [],
+        "writing_complete": false
+      }
+    },
+    {
+      "contract_version": "1.0.0",
+      "expected_variant": "success",
+      "fixture_version": "1.0.0",
+      "node": "analysis",
+      "output": {
+        "analysis_complete": true,
+        "coverage": {
+          "coverage_score": 0.8
+        },
+        "coverage_score": 0.8,
+        "current_phase": "analysis",
+        "embedding_model": "embedding-fixture",
+        "embeddings_ready": true,
+        "evidence_cards": [
+          {
+            "claim": "Fixture evidence",
+            "paper_id": "paper-1"
+          }
+        ],
+        "failed_phase": null,
+        "gap_analysis": {},
+        "knowledge_graph": {},
+        "status": "running",
+        "terminal_failure": false,
+        "warnings": []
+      },
+      "scenario": "success",
+      "state": {
+        "abstract": "Fixture abstract [1].",
+        "analysis_complete": false,
+        "cited_reference_numbers": [
+          1
+        ],
+        "coverage": {
+          "clusters": [],
+          "coverage_score": 0.8
+        },
+        "coverage_score": 0.8,
+        "current_phase": "supervisor",
+        "decision_reason": "",
+        "embedding_model": "embedding-fixture",
+        "embeddings_ready": false,
+        "errors": [],
+        "evidence_cards": [
+          {
+            "claim": "Fixture evidence",
+            "paper_id": "paper-1"
+          }
+        ],
+        "execution_id": "execution-fixture",
+        "failed_phase": null,
+        "final_references": [
+          {
+            "new_number": 1,
+            "original_number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "final_review": "Fixture review [1].",
+        "gap_analysis": {},
+        "knowledge_graph": {},
+        "max_phase_attempts": 2,
+        "max_research_rounds": 2,
+        "max_revision_attempts": 2,
+        "needs_revision": false,
+        "outline": {
+          "sections": [],
+          "title": "Fixture review"
+        },
+        "paper_ids": [
+          "paper-1"
+        ],
+        "papers": [
+          {
+            "id": "paper-1",
+            "title": "Agent systems"
+          }
+        ],
+        "peer_review_complete": false,
+        "peer_review_report": {
+          "overall_score": 88.0
+        },
+        "phase_attempts": {},
+        "project_id": "project-fixture",
+        "quality_score": 88.0,
+        "quality_threshold": 75.0,
+        "reference_map": [
+          {
+            "number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "research_complete": false,
+        "research_round": 0,
+        "research_summary": {},
+        "revision_attempt": 0,
+        "revision_feedback": "",
+        "sections": [
+          {
+            "content": "Evidence [1].",
+            "section_id": "1"
+          }
+        ],
+        "status": "created",
+        "suggested_queries": [],
+        "target_papers": 10,
+        "target_words": 3000,
+        "terminal_failure": false,
+        "topic": "deterministic agent fixture",
+        "warnings": [],
+        "writing_complete": false
+      }
+    },
+    {
+      "contract_version": "1.0.0",
+      "expected_variant": "success",
+      "fixture_version": "1.0.0",
+      "node": "writing",
+      "output": {
+        "abstract": "Fixture abstract [1].",
+        "cited_reference_numbers": [
+          1
+        ],
+        "current_phase": "writing",
+        "failed_phase": null,
+        "final_references": [
+          {
+            "new_number": 1,
+            "original_number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "final_review": "Fixture review [1].",
+        "needs_revision": false,
+        "outline": {
+          "title": "Fixture review"
+        },
+        "peer_review_complete": false,
+        "reference_map": [
+          {
+            "number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "revision_attempt": 0,
+        "revision_feedback": "",
+        "sections": [
+          {
+            "content": "Evidence [1].",
+            "section_id": "1"
+          }
+        ],
+        "status": "running",
+        "terminal_failure": false,
+        "writing_complete": true
+      },
+      "scenario": "success",
+      "state": {
+        "abstract": "Fixture abstract [1].",
+        "analysis_complete": false,
+        "cited_reference_numbers": [
+          1
+        ],
+        "coverage": {
+          "clusters": [],
+          "coverage_score": 0.8
+        },
+        "coverage_score": 0.8,
+        "current_phase": "supervisor",
+        "decision_reason": "",
+        "embedding_model": "embedding-fixture",
+        "embeddings_ready": false,
+        "errors": [],
+        "evidence_cards": [
+          {
+            "claim": "Fixture evidence",
+            "paper_id": "paper-1"
+          }
+        ],
+        "execution_id": "execution-fixture",
+        "failed_phase": null,
+        "final_references": [
+          {
+            "new_number": 1,
+            "original_number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "final_review": "Fixture review [1].",
+        "gap_analysis": {},
+        "knowledge_graph": {},
+        "max_phase_attempts": 2,
+        "max_research_rounds": 2,
+        "max_revision_attempts": 2,
+        "needs_revision": false,
+        "outline": {
+          "sections": [],
+          "title": "Fixture review"
+        },
+        "paper_ids": [
+          "paper-1"
+        ],
+        "papers": [
+          {
+            "id": "paper-1",
+            "title": "Agent systems"
+          }
+        ],
+        "peer_review_complete": false,
+        "peer_review_report": {
+          "overall_score": 88.0
+        },
+        "phase_attempts": {},
+        "project_id": "project-fixture",
+        "quality_score": 88.0,
+        "quality_threshold": 75.0,
+        "reference_map": [
+          {
+            "number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "research_complete": false,
+        "research_round": 0,
+        "research_summary": {},
+        "revision_attempt": 0,
+        "revision_feedback": "",
+        "sections": [
+          {
+            "content": "Evidence [1].",
+            "section_id": "1"
+          }
+        ],
+        "status": "created",
+        "suggested_queries": [],
+        "target_papers": 10,
+        "target_words": 3000,
+        "terminal_failure": false,
+        "topic": "deterministic agent fixture",
+        "warnings": [],
+        "writing_complete": false
+      }
+    },
+    {
+      "contract_version": "1.0.0",
+      "expected_variant": "success",
+      "fixture_version": "1.0.0",
+      "node": "peer_review",
+      "output": {
+        "current_phase": "peer_review",
+        "failed_phase": null,
+        "needs_revision": false,
+        "peer_review_complete": true,
+        "peer_review_report": {
+          "overall_score": 88.0
+        },
+        "quality_score": 88.0,
+        "status": "running",
+        "terminal_failure": false
+      },
+      "scenario": "success",
+      "state": {
+        "abstract": "Fixture abstract [1].",
+        "analysis_complete": false,
+        "cited_reference_numbers": [
+          1
+        ],
+        "coverage": {
+          "clusters": [],
+          "coverage_score": 0.8
+        },
+        "coverage_score": 0.8,
+        "current_phase": "supervisor",
+        "decision_reason": "",
+        "embedding_model": "embedding-fixture",
+        "embeddings_ready": false,
+        "errors": [],
+        "evidence_cards": [
+          {
+            "claim": "Fixture evidence",
+            "paper_id": "paper-1"
+          }
+        ],
+        "execution_id": "execution-fixture",
+        "failed_phase": null,
+        "final_references": [
+          {
+            "new_number": 1,
+            "original_number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "final_review": "Fixture review [1].",
+        "gap_analysis": {},
+        "knowledge_graph": {},
+        "max_phase_attempts": 2,
+        "max_research_rounds": 2,
+        "max_revision_attempts": 2,
+        "needs_revision": false,
+        "outline": {
+          "sections": [],
+          "title": "Fixture review"
+        },
+        "paper_ids": [
+          "paper-1"
+        ],
+        "papers": [
+          {
+            "id": "paper-1",
+            "title": "Agent systems"
+          }
+        ],
+        "peer_review_complete": false,
+        "peer_review_report": {
+          "overall_score": 88.0
+        },
+        "phase_attempts": {},
+        "project_id": "project-fixture",
+        "quality_score": 88.0,
+        "quality_threshold": 75.0,
+        "reference_map": [
+          {
+            "number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "research_complete": false,
+        "research_round": 0,
+        "research_summary": {},
+        "revision_attempt": 0,
+        "revision_feedback": "",
+        "sections": [
+          {
+            "content": "Evidence [1].",
+            "section_id": "1"
+          }
+        ],
+        "status": "created",
+        "suggested_queries": [],
+        "target_papers": 10,
+        "target_words": 3000,
+        "terminal_failure": false,
+        "topic": "deterministic agent fixture",
+        "warnings": [],
+        "writing_complete": false
+      }
+    },
+    {
+      "contract_version": "1.0.0",
+      "expected_variant": "success",
+      "fixture_version": "1.0.0",
+      "node": "finalize",
+      "output": {
+        "current_phase": "completed",
+        "status": "completed"
+      },
+      "scenario": "success",
+      "state": {
+        "abstract": "Fixture abstract [1].",
+        "analysis_complete": false,
+        "cited_reference_numbers": [
+          1
+        ],
+        "coverage": {
+          "clusters": [],
+          "coverage_score": 0.8
+        },
+        "coverage_score": 0.8,
+        "current_phase": "supervisor",
+        "decision_reason": "",
+        "embedding_model": "embedding-fixture",
+        "embeddings_ready": false,
+        "errors": [],
+        "evidence_cards": [
+          {
+            "claim": "Fixture evidence",
+            "paper_id": "paper-1"
+          }
+        ],
+        "execution_id": "execution-fixture",
+        "failed_phase": null,
+        "final_references": [
+          {
+            "new_number": 1,
+            "original_number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "final_review": "Fixture review [1].",
+        "gap_analysis": {},
+        "knowledge_graph": {},
+        "max_phase_attempts": 2,
+        "max_research_rounds": 2,
+        "max_revision_attempts": 2,
+        "needs_revision": false,
+        "outline": {
+          "sections": [],
+          "title": "Fixture review"
+        },
+        "paper_ids": [
+          "paper-1"
+        ],
+        "papers": [
+          {
+            "id": "paper-1",
+            "title": "Agent systems"
+          }
+        ],
+        "peer_review_complete": false,
+        "peer_review_report": {
+          "overall_score": 88.0
+        },
+        "phase_attempts": {},
+        "project_id": "project-fixture",
+        "quality_score": 88.0,
+        "quality_threshold": 75.0,
+        "reference_map": [
+          {
+            "number": 1,
+            "paper_id": "paper-1"
+          }
+        ],
+        "research_complete": false,
+        "research_round": 0,
+        "research_summary": {},
+        "revision_attempt": 0,
+        "revision_feedback": "",
+        "sections": [
+          {
+            "content": "Evidence [1].",
+            "section_id": "1"
+          }
+        ],
+        "status": "created",
+        "suggested_queries": [],
+        "target_papers": 10,
+        "target_words": 3000,
+        "terminal_failure": false,
+        "topic": "deterministic agent fixture",
+        "warnings": [],
+        "writing_complete": false
+      }
+    }
+  ],
+  "runtime_acceptance_results": [
+    {
+      "accepted": true,
+      "errors": [],
+      "evaluated_criteria": [
+        "supervisor.input.version",
+        "supervisor.input.required",
+        "supervisor.input.types",
+        "supervisor.output.variant",
+        "supervisor.error.policy",
+        "supervisor.fallback.policy"
+      ],
+      "input_artifact": {
+        "artifact_id": "academic-cluster.agent.supervisor.input",
+        "direction": "input",
+        "node": "supervisor",
+        "payload": {
+          "analysis_complete": false,
+          "errors": [],
+          "execution_id": "execution-fixture",
+          "failed_phase": null,
+          "final_review": "Fixture review [1].",
+          "max_phase_attempts": 2,
+          "max_research_rounds": 2,
+          "max_revision_attempts": 2,
+          "needs_revision": false,
+          "papers": [
+            {
+              "id": "paper-1",
+              "title": "Agent systems"
+            }
+          ],
+          "peer_review_complete": false,
+          "phase_attempts": {},
+          "project_id": "project-fixture",
+          "research_complete": false,
+          "research_round": 0,
+          "revision_attempt": 0,
+          "status": "created",
+          "terminal_failure": false,
+          "warnings": [],
+          "writing_complete": false
+        },
+        "variant": null,
+        "version": "1.0.0"
+      },
+      "node": "supervisor",
+      "output_artifact": {
+        "artifact_id": "academic-cluster.agent.supervisor.output",
+        "direction": "output",
+        "node": "supervisor",
+        "payload": {
+          "current_phase": "research",
+          "decision_reason": "phase completion state",
+          "status": "running"
+        },
+        "variant": "route",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "accepted": true,
+      "errors": [],
+      "evaluated_criteria": [
+        "research.input.version",
+        "research.input.required",
+        "research.input.types",
+        "research.output.variant",
+        "research.error.policy",
+        "research.fallback.policy"
+      ],
+      "input_artifact": {
+        "artifact_id": "academic-cluster.agent.research.input",
+        "direction": "input",
+        "node": "research",
+        "payload": {
+          "errors": [],
+          "execution_id": "execution-fixture",
+          "max_phase_attempts": 2,
+          "phase_attempts": {},
+          "project_id": "project-fixture",
+          "research_round": 0,
+          "suggested_queries": [],
+          "target_papers": 10,
+          "topic": "deterministic agent fixture",
+          "warnings": []
+        },
+        "variant": null,
+        "version": "1.0.0"
+      },
+      "node": "research",
+      "output_artifact": {
+        "artifact_id": "academic-cluster.agent.research.output",
+        "direction": "output",
+        "node": "research",
+        "payload": {
+          "current_phase": "research",
+          "failed_phase": null,
+          "paper_ids": [
+            "paper-1"
+          ],
+          "papers": [
+            {
+              "id": "paper-1"
+            }
+          ],
+          "research_complete": true,
+          "research_round": 1,
+          "research_summary": {
+            "total_found": 1
+          },
+          "status": "running",
+          "suggested_queries": [],
+          "terminal_failure": false
+        },
+        "variant": "success",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "accepted": true,
+      "errors": [],
+      "evaluated_criteria": [
+        "analysis.input.version",
+        "analysis.input.required",
+        "analysis.input.types",
+        "analysis.output.variant",
+        "analysis.error.policy",
+        "analysis.fallback.policy"
+      ],
+      "input_artifact": {
+        "artifact_id": "academic-cluster.agent.analysis.input",
+        "direction": "input",
+        "node": "analysis",
+        "payload": {
+          "errors": [],
+          "execution_id": "execution-fixture",
+          "max_phase_attempts": 2,
+          "papers": [
+            {
+              "id": "paper-1",
+              "title": "Agent systems"
+            }
+          ],
+          "phase_attempts": {},
+          "project_id": "project-fixture",
+          "target_papers": 10,
+          "topic": "deterministic agent fixture",
+          "warnings": []
+        },
+        "variant": null,
+        "version": "1.0.0"
+      },
+      "node": "analysis",
+      "output_artifact": {
+        "artifact_id": "academic-cluster.agent.analysis.output",
+        "direction": "output",
+        "node": "analysis",
+        "payload": {
+          "analysis_complete": true,
+          "coverage": {
+            "coverage_score": 0.8
+          },
+          "coverage_score": 0.8,
+          "current_phase": "analysis",
+          "embedding_model": "embedding-fixture",
+          "embeddings_ready": true,
+          "evidence_cards": [
+            {
+              "claim": "Fixture evidence",
+              "paper_id": "paper-1"
+            }
+          ],
+          "failed_phase": null,
+          "gap_analysis": {},
+          "knowledge_graph": {},
+          "status": "running",
+          "terminal_failure": false,
+          "warnings": []
+        },
+        "variant": "success",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "accepted": true,
+      "errors": [],
+      "evaluated_criteria": [
+        "writing.input.version",
+        "writing.input.required",
+        "writing.input.types",
+        "writing.output.variant",
+        "writing.error.policy",
+        "writing.fallback.policy"
+      ],
+      "input_artifact": {
+        "artifact_id": "academic-cluster.agent.writing.input",
+        "direction": "input",
+        "node": "writing",
+        "payload": {
+          "coverage": {
+            "clusters": [],
+            "coverage_score": 0.8
+          },
+          "errors": [],
+          "evidence_cards": [
+            {
+              "claim": "Fixture evidence",
+              "paper_id": "paper-1"
+            }
+          ],
+          "execution_id": "execution-fixture",
+          "final_references": [
+            {
+              "new_number": 1,
+              "original_number": 1,
+              "paper_id": "paper-1"
+            }
+          ],
+          "max_phase_attempts": 2,
+          "needs_revision": false,
+          "outline": {
+            "sections": [],
+            "title": "Fixture review"
+          },
+          "papers": [
+            {
+              "id": "paper-1",
+              "title": "Agent systems"
+            }
+          ],
+          "phase_attempts": {},
+          "project_id": "project-fixture",
+          "quality_score": 88.0,
+          "reference_map": [
+            {
+              "number": 1,
+              "paper_id": "paper-1"
+            }
+          ],
+          "revision_attempt": 0,
+          "revision_feedback": "",
+          "sections": [
+            {
+              "content": "Evidence [1].",
+              "section_id": "1"
+            }
+          ],
+          "target_words": 3000,
+          "topic": "deterministic agent fixture",
+          "warnings": []
+        },
+        "variant": null,
+        "version": "1.0.0"
+      },
+      "node": "writing",
+      "output_artifact": {
+        "artifact_id": "academic-cluster.agent.writing.output",
+        "direction": "output",
+        "node": "writing",
+        "payload": {
+          "abstract": "Fixture abstract [1].",
+          "cited_reference_numbers": [
+            1
+          ],
+          "current_phase": "writing",
+          "failed_phase": null,
+          "final_references": [
+            {
+              "new_number": 1,
+              "original_number": 1,
+              "paper_id": "paper-1"
+            }
+          ],
+          "final_review": "Fixture review [1].",
+          "needs_revision": false,
+          "outline": {
+            "title": "Fixture review"
+          },
+          "peer_review_complete": false,
+          "reference_map": [
+            {
+              "number": 1,
+              "paper_id": "paper-1"
+            }
+          ],
+          "revision_attempt": 0,
+          "revision_feedback": "",
+          "sections": [
+            {
+              "content": "Evidence [1].",
+              "section_id": "1"
+            }
+          ],
+          "status": "running",
+          "terminal_failure": false,
+          "writing_complete": true
+        },
+        "variant": "success",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "accepted": true,
+      "errors": [],
+      "evaluated_criteria": [
+        "peer_review.input.version",
+        "peer_review.input.required",
+        "peer_review.input.types",
+        "peer_review.output.variant",
+        "peer_review.error.policy",
+        "peer_review.fallback.policy"
+      ],
+      "input_artifact": {
+        "artifact_id": "academic-cluster.agent.peer_review.input",
+        "direction": "input",
+        "node": "peer_review",
+        "payload": {
+          "errors": [],
+          "execution_id": "execution-fixture",
+          "final_review": "Fixture review [1].",
+          "max_phase_attempts": 2,
+          "max_revision_attempts": 2,
+          "phase_attempts": {},
+          "project_id": "project-fixture",
+          "quality_threshold": 75.0,
+          "revision_attempt": 0,
+          "topic": "deterministic agent fixture",
+          "warnings": []
+        },
+        "variant": null,
+        "version": "1.0.0"
+      },
+      "node": "peer_review",
+      "output_artifact": {
+        "artifact_id": "academic-cluster.agent.peer_review.output",
+        "direction": "output",
+        "node": "peer_review",
+        "payload": {
+          "current_phase": "peer_review",
+          "failed_phase": null,
+          "needs_revision": false,
+          "peer_review_complete": true,
+          "peer_review_report": {
+            "overall_score": 88.0
+          },
+          "quality_score": 88.0,
+          "status": "running",
+          "terminal_failure": false
+        },
+        "variant": "success",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "accepted": true,
+      "errors": [],
+      "evaluated_criteria": [
+        "finalize.input.version",
+        "finalize.input.required",
+        "finalize.input.types",
+        "finalize.output.variant",
+        "finalize.error.policy",
+        "finalize.fallback.policy"
+      ],
+      "input_artifact": {
+        "artifact_id": "academic-cluster.agent.finalize.input",
+        "direction": "input",
+        "node": "finalize",
+        "payload": {
+          "abstract": "Fixture abstract [1].",
+          "coverage": {
+            "clusters": [],
+            "coverage_score": 0.8
+          },
+          "final_references": [
+            {
+              "new_number": 1,
+              "original_number": 1,
+              "paper_id": "paper-1"
+            }
+          ],
+          "final_review": "Fixture review [1].",
+          "outline": {
+            "sections": [],
+            "title": "Fixture review"
+          },
+          "peer_review_report": {
+            "overall_score": 88.0
+          },
+          "project_id": "project-fixture",
+          "quality_score": 88.0,
+          "status": "created",
+          "terminal_failure": false,
+          "warnings": []
+        },
+        "variant": null,
+        "version": "1.0.0"
+      },
+      "node": "finalize",
+      "output_artifact": {
+        "artifact_id": "academic-cluster.agent.finalize.output",
+        "direction": "output",
+        "node": "finalize",
+        "payload": {
+          "current_phase": "completed",
+          "status": "completed"
+        },
+        "variant": "success",
+        "version": "1.0.0"
+      }
+    }
+  ],
+  "runtime_contract_manifest": {
+    "contract_version": "1.0.0",
+    "manifest_version": "1.0.0",
+    "nodes": [
+      {
+        "contract": {
+          "acceptance_criteria": [
+            {
+              "check": "input_version",
+              "criterion_id": "supervisor.input.version",
+              "description": "Input Artifact version matches the node contract.",
+              "expected": "1.0.0"
+            },
+            {
+              "check": "input_required",
+              "criterion_id": "supervisor.input.required",
+              "description": "Every AgentState field read by the node is present.",
+              "expected": [
+                "project_id",
+                "execution_id",
+                "status",
+                "terminal_failure",
+                "failed_phase",
+                "phase_attempts",
+                "max_phase_attempts",
+                "research_round",
+                "max_research_rounds",
+                "needs_revision",
+                "revision_attempt",
+                "max_revision_attempts",
+                "research_complete",
+                "papers",
+                "analysis_complete",
+                "writing_complete",
+                "final_review",
+                "peer_review_complete",
+                "errors",
+                "warnings"
+              ]
+            },
+            {
+              "check": "input_types",
+              "criterion_id": "supervisor.input.types",
+              "description": "Projected values match their finite JSON runtime types.",
+              "expected": {
+                "analysis_complete": "boolean",
+                "errors": "array",
+                "execution_id": "string",
+                "failed_phase": "string",
+                "final_review": "string",
+                "max_phase_attempts": "integer",
+                "max_research_rounds": "integer",
+                "max_revision_attempts": "integer",
+                "needs_revision": "boolean",
+                "papers": "array",
+                "peer_review_complete": "boolean",
+                "phase_attempts": "object",
+                "project_id": "string",
+                "research_complete": "boolean",
+                "research_round": "integer",
+                "revision_attempt": "integer",
+                "status": "string",
+                "terminal_failure": "boolean",
+                "warnings": "array",
+                "writing_complete": "boolean"
+              }
+            },
+            {
+              "check": "output_variant",
+              "criterion_id": "supervisor.output.variant",
+              "description": "Output status selects one declared branch variant.",
+              "expected": [
+                "route",
+                "finalize",
+                "terminal_failure",
+                "revision_exhausted"
+              ]
+            },
+            {
+              "check": "error_policy",
+              "criterion_id": "supervisor.error.policy",
+              "description": "Cancellation and exceptions follow the declared policy.",
+              "expected": {
+                "cancellation": "propagate",
+                "exception_policy": "best_effort_only"
+              }
+            },
+            {
+              "check": "fallback_policy",
+              "criterion_id": "supervisor.fallback.policy",
+              "description": "At least one explicit fallback or degraded branch is declared.",
+              "expected": {
+                "minimum_rules": 1
+              }
+            }
+          ],
+          "context": {
+            "context_vars": [],
+            "invocations": [
+              {
+                "bindings": [
+                  {
+                    "expression": "AgentState",
+                    "parameter": "state",
+                    "source_fields": [
+                      "project_id",
+                      "execution_id",
+                      "status",
+                      "terminal_failure",
+                      "failed_phase",
+                      "phase_attempts",
+                      "max_phase_attempts",
+                      "research_round",
+                      "max_research_rounds",
+                      "needs_revision",
+                      "revision_attempt",
+                      "max_revision_attempts",
+                      "research_complete",
+                      "papers",
+                      "analysis_complete",
+                      "writing_complete",
+                      "final_review",
+                      "peer_review_complete",
+                      "errors",
+                      "warnings"
+                    ]
+                  }
+                ],
+                "operation": "decide_next_phase",
+                "required": true,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "execution_id",
+                    "source_fields": [
+                      "execution_id"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "project_id",
+                    "source_fields": [
+                      "project_id"
+                    ]
+                  },
+                  {
+                    "expression": "decide_next_phase(state)",
+                    "parameter": "decision",
+                    "source_fields": []
+                  },
+                  {
+                    "expression": "computed branch reason",
+                    "parameter": "reason",
+                    "source_fields": []
+                  }
+                ],
+                "operation": "database.record_agent_decision",
+                "required": false,
+                "side_effect": true
+              }
+            ],
+            "phase": "supervisor",
+            "side_effects": [
+              "best-effort supervisor decision audit"
+            ]
+          },
+          "errors": {
+            "cancellation": "propagate",
+            "declared_errors": [
+              {
+                "code": "contract_violation",
+                "condition": "Input or output Artifact violates its versioned schema.",
+                "exception_types": [
+                  "NodeContractValidationError"
+                ],
+                "handling": "fail_closed",
+                "result_status": "failed",
+                "retryable": false,
+                "terminal": true
+              },
+              {
+                "code": "cancelled",
+                "condition": "The asyncio task is cancelled by the runtime.",
+                "exception_types": [
+                  "asyncio.CancelledError"
+                ],
+                "handling": "propagate",
+                "result_status": "interrupted",
+                "retryable": false,
+                "terminal": false
+              },
+              {
+                "code": "decision_audit_persistence_error",
+                "condition": "record_agent_decision raises an Exception.",
+                "exception_types": [
+                  "Exception"
+                ],
+                "handling": "best_effort",
+                "result_status": null,
+                "retryable": false,
+                "terminal": false
+              }
+            ],
+            "exception_policy": "best_effort_only",
+            "failure_status": null,
+            "fallbacks": [
+              {
+                "action": "log warning and keep routing result",
+                "resulting_status": null,
+                "terminal": false,
+                "trigger": "decision audit persistence fails"
+              },
+              {
+                "action": "mark terminal failure",
+                "resulting_status": "failed",
+                "terminal": true,
+                "trigger": "coverage retry budget exhausted"
+              },
+              {
+                "action": "preserve review and append warning",
+                "resulting_status": "completed_with_warnings",
+                "terminal": true,
+                "trigger": "revision budget exhausted"
+              }
+            ],
+            "retry_fields": []
+          },
+          "input_artifact": {
+            "artifact_id": "academic-cluster.agent.supervisor.input",
+            "direction": "input",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "project_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "execution_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "status",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "terminal_failure",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "failed_phase",
+                "nullable": true,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "max_phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "research_round",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "max_research_rounds",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "needs_revision",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "revision_attempt",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "max_revision_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "research_complete",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "papers",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "analysis_complete",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "writing_complete",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "final_review",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "peer_review_complete",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": true
+              }
+            ],
+            "node": "supervisor",
+            "variants": [],
+            "version": "1.0.0"
+          },
+          "name": "supervisor",
+          "output_artifact": {
+            "artifact_id": "academic-cluster.agent.supervisor.output",
+            "direction": "output",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "current_phase",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "status",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "decision_reason",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "research_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "analysis_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "embeddings_ready",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "terminal_failure",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "failed_phase",
+                "nullable": true,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "writing_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "peer_review_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "needs_revision",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": false
+              }
+            ],
+            "node": "supervisor",
+            "variants": [
+              {
+                "description": "Route or bounded retry remains runnable.",
+                "name": "route",
+                "required_fields": [],
+                "statuses": [
+                  "running"
+                ]
+              },
+              {
+                "description": "All required phases are complete.",
+                "name": "finalize",
+                "required_fields": [],
+                "statuses": [
+                  "finalizing"
+                ]
+              },
+              {
+                "description": "Coverage or phase retry budget is exhausted.",
+                "name": "terminal_failure",
+                "required_fields": [
+                  "terminal_failure"
+                ],
+                "statuses": [
+                  "failed"
+                ]
+              },
+              {
+                "description": "Revision budget is exhausted; preserve the review.",
+                "name": "revision_exhausted",
+                "required_fields": [
+                  "needs_revision",
+                  "warnings"
+                ],
+                "statuses": [
+                  "completed_with_warnings"
+                ]
+              }
+            ],
+            "version": "1.0.0"
+          },
+          "version": "1.0.0"
+        },
+        "input_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:supervisor:input:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "analysis_complete": {
+              "type": "boolean"
+            },
+            "errors": {
+              "type": "array"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "failed_phase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "final_review": {
+              "type": "string"
+            },
+            "max_phase_attempts": {
+              "type": "integer"
+            },
+            "max_research_rounds": {
+              "type": "integer"
+            },
+            "max_revision_attempts": {
+              "type": "integer"
+            },
+            "needs_revision": {
+              "type": "boolean"
+            },
+            "papers": {
+              "type": "array"
+            },
+            "peer_review_complete": {
+              "type": "boolean"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "project_id": {
+              "type": "string"
+            },
+            "research_complete": {
+              "type": "boolean"
+            },
+            "research_round": {
+              "type": "integer"
+            },
+            "revision_attempt": {
+              "type": "integer"
+            },
+            "status": {
+              "type": "string"
+            },
+            "terminal_failure": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array"
+            },
+            "writing_complete": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "project_id",
+            "execution_id",
+            "status",
+            "terminal_failure",
+            "failed_phase",
+            "phase_attempts",
+            "max_phase_attempts",
+            "research_round",
+            "max_research_rounds",
+            "needs_revision",
+            "revision_attempt",
+            "max_revision_attempts",
+            "research_complete",
+            "papers",
+            "analysis_complete",
+            "writing_complete",
+            "final_review",
+            "peer_review_complete",
+            "errors",
+            "warnings"
+          ],
+          "title": "academic-cluster.agent.supervisor.input",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.supervisor.input",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "input",
+          "x-node": "supervisor"
+        },
+        "node": "supervisor",
+        "output_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:supervisor:output:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "running"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "decision_reason"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "finalizing"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "decision_reason"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "failed"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "decision_reason",
+                  "terminal_failure"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "completed_with_warnings"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "decision_reason",
+                  "needs_revision",
+                  "warnings"
+                ]
+              }
+            }
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "running"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "title": "route"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "finalizing"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "title": "finalize"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "failed"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "terminal_failure"
+              ],
+              "title": "terminal_failure"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "completed_with_warnings"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "needs_revision",
+                "warnings"
+              ],
+              "title": "revision_exhausted"
+            }
+          ],
+          "properties": {
+            "analysis_complete": {
+              "type": "boolean"
+            },
+            "current_phase": {
+              "type": "string"
+            },
+            "decision_reason": {
+              "type": "string"
+            },
+            "embeddings_ready": {
+              "type": "boolean"
+            },
+            "errors": {
+              "type": "array"
+            },
+            "failed_phase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "needs_revision": {
+              "type": "boolean"
+            },
+            "peer_review_complete": {
+              "type": "boolean"
+            },
+            "research_complete": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "string"
+            },
+            "terminal_failure": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array"
+            },
+            "writing_complete": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "current_phase",
+            "status",
+            "decision_reason"
+          ],
+          "title": "academic-cluster.agent.supervisor.output",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.supervisor.output",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "output",
+          "x-node": "supervisor"
+        }
+      },
+      {
+        "contract": {
+          "acceptance_criteria": [
+            {
+              "check": "input_version",
+              "criterion_id": "research.input.version",
+              "description": "Input Artifact version matches the node contract.",
+              "expected": "1.0.0"
+            },
+            {
+              "check": "input_required",
+              "criterion_id": "research.input.required",
+              "description": "Every AgentState field read by the node is present.",
+              "expected": [
+                "project_id",
+                "execution_id",
+                "topic",
+                "target_papers",
+                "suggested_queries",
+                "research_round",
+                "phase_attempts",
+                "max_phase_attempts",
+                "errors",
+                "warnings"
+              ]
+            },
+            {
+              "check": "input_types",
+              "criterion_id": "research.input.types",
+              "description": "Projected values match their finite JSON runtime types.",
+              "expected": {
+                "errors": "array",
+                "execution_id": "string",
+                "max_phase_attempts": "integer",
+                "phase_attempts": "object",
+                "project_id": "string",
+                "research_round": "integer",
+                "suggested_queries": "array",
+                "target_papers": "integer",
+                "topic": "string",
+                "warnings": "array"
+              }
+            },
+            {
+              "check": "output_variant",
+              "criterion_id": "research.output.variant",
+              "description": "Output status selects one declared branch variant.",
+              "expected": [
+                "success",
+                "phase_failure"
+              ]
+            },
+            {
+              "check": "error_policy",
+              "criterion_id": "research.error.policy",
+              "description": "Cancellation and exceptions follow the declared policy.",
+              "expected": {
+                "cancellation": "propagate",
+                "exception_policy": "phase_retry"
+              }
+            },
+            {
+              "check": "fallback_policy",
+              "criterion_id": "research.fallback.policy",
+              "description": "At least one explicit fallback or degraded branch is declared.",
+              "expected": {
+                "minimum_rules": 1
+              }
+            }
+          ],
+          "context": {
+            "context_vars": [
+              "project_id",
+              "execution_id",
+              "agent_phase"
+            ],
+            "invocations": [
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "topic",
+                    "source_fields": [
+                      "topic"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "project_id",
+                    "source_fields": [
+                      "project_id"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "target_papers",
+                    "source_fields": [
+                      "target_papers"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "supplemental_queries",
+                    "source_fields": [
+                      "suggested_queries"
+                    ]
+                  }
+                ],
+                "operation": "research_team.run_research",
+                "required": true,
+                "side_effect": false
+              }
+            ],
+            "phase": "research",
+            "side_effects": [
+              "paper persistence and project linking through research tools"
+            ]
+          },
+          "errors": {
+            "cancellation": "propagate",
+            "declared_errors": [
+              {
+                "code": "contract_violation",
+                "condition": "Input or output Artifact violates its versioned schema.",
+                "exception_types": [
+                  "NodeContractValidationError"
+                ],
+                "handling": "fail_closed",
+                "result_status": "failed",
+                "retryable": false,
+                "terminal": true
+              },
+              {
+                "code": "cancelled",
+                "condition": "The asyncio task is cancelled by the runtime.",
+                "exception_types": [
+                  "asyncio.CancelledError"
+                ],
+                "handling": "propagate",
+                "result_status": "interrupted",
+                "retryable": false,
+                "terminal": false
+              },
+              {
+                "code": "phase_execution_error",
+                "condition": "research raises before producing a valid success or fallback output.",
+                "exception_types": [
+                  "Exception"
+                ],
+                "handling": "phase_retry",
+                "result_status": "research_failed",
+                "retryable": true,
+                "terminal": false
+              },
+              {
+                "code": "phase_retry_exhausted",
+                "condition": "phase_attempts reaches max_phase_attempts.",
+                "exception_types": [],
+                "handling": "phase_retry",
+                "result_status": "research_failed",
+                "retryable": false,
+                "terminal": true
+              }
+            ],
+            "exception_policy": "phase_retry",
+            "failure_status": "research_failed",
+            "fallbacks": [
+              {
+                "action": "raise and enter bounded phase retry",
+                "resulting_status": "research_failed",
+                "terminal": false,
+                "trigger": "research returns no project papers"
+              }
+            ],
+            "retry_fields": [
+              "phase_attempts",
+              "max_phase_attempts"
+            ]
+          },
+          "input_artifact": {
+            "artifact_id": "academic-cluster.agent.research.input",
+            "direction": "input",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "project_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "execution_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "topic",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "target_papers",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "suggested_queries",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "research_round",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "max_phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": true
+              }
+            ],
+            "node": "research",
+            "variants": [],
+            "version": "1.0.0"
+          },
+          "name": "research",
+          "output_artifact": {
+            "artifact_id": "academic-cluster.agent.research.output",
+            "direction": "output",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "current_phase",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "status",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "papers",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "paper_ids",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "object",
+                "name": "research_summary",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "research_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "integer",
+                "name": "research_round",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "suggested_queries",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "failed_phase",
+                "nullable": true,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "terminal_failure",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": false
+              }
+            ],
+            "node": "research",
+            "variants": [
+              {
+                "description": "Project-scoped papers were returned and deduplicated.",
+                "name": "success",
+                "required_fields": [
+                  "papers",
+                  "paper_ids",
+                  "research_summary",
+                  "research_complete",
+                  "research_round",
+                  "suggested_queries"
+                ],
+                "statuses": [
+                  "running"
+                ]
+              },
+              {
+                "description": "Failure is converted to the bounded phase retry state.",
+                "name": "phase_failure",
+                "required_fields": [
+                  "phase_attempts",
+                  "errors",
+                  "warnings"
+                ],
+                "statuses": [
+                  "research_failed"
+                ]
+              }
+            ],
+            "version": "1.0.0"
+          },
+          "version": "1.0.0"
+        },
+        "input_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:research:input:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "errors": {
+              "type": "array"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "max_phase_attempts": {
+              "type": "integer"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "project_id": {
+              "type": "string"
+            },
+            "research_round": {
+              "type": "integer"
+            },
+            "suggested_queries": {
+              "type": "array"
+            },
+            "target_papers": {
+              "type": "integer"
+            },
+            "topic": {
+              "type": "string"
+            },
+            "warnings": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "project_id",
+            "execution_id",
+            "topic",
+            "target_papers",
+            "suggested_queries",
+            "research_round",
+            "phase_attempts",
+            "max_phase_attempts",
+            "errors",
+            "warnings"
+          ],
+          "title": "academic-cluster.agent.research.input",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.research.input",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "input",
+          "x-node": "research"
+        },
+        "node": "research",
+        "output_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:research:output:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "running"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "terminal_failure",
+                  "papers",
+                  "paper_ids",
+                  "research_summary",
+                  "research_complete",
+                  "research_round",
+                  "suggested_queries"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "research_failed"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "terminal_failure",
+                  "phase_attempts",
+                  "errors",
+                  "warnings"
+                ]
+              }
+            }
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "running"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "papers",
+                "paper_ids",
+                "research_summary",
+                "research_complete",
+                "research_round",
+                "suggested_queries"
+              ],
+              "title": "success"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "research_failed"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "phase_attempts",
+                "errors",
+                "warnings"
+              ],
+              "title": "phase_failure"
+            }
+          ],
+          "properties": {
+            "current_phase": {
+              "type": "string"
+            },
+            "errors": {
+              "type": "array"
+            },
+            "failed_phase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "paper_ids": {
+              "type": "array"
+            },
+            "papers": {
+              "type": "array"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "research_complete": {
+              "type": "boolean"
+            },
+            "research_round": {
+              "type": "integer"
+            },
+            "research_summary": {
+              "type": "object"
+            },
+            "status": {
+              "type": "string"
+            },
+            "suggested_queries": {
+              "type": "array"
+            },
+            "terminal_failure": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "current_phase",
+            "status",
+            "failed_phase",
+            "terminal_failure"
+          ],
+          "title": "academic-cluster.agent.research.output",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.research.output",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "output",
+          "x-node": "research"
+        }
+      },
+      {
+        "contract": {
+          "acceptance_criteria": [
+            {
+              "check": "input_version",
+              "criterion_id": "analysis.input.version",
+              "description": "Input Artifact version matches the node contract.",
+              "expected": "1.0.0"
+            },
+            {
+              "check": "input_required",
+              "criterion_id": "analysis.input.required",
+              "description": "Every AgentState field read by the node is present.",
+              "expected": [
+                "project_id",
+                "execution_id",
+                "topic",
+                "target_papers",
+                "papers",
+                "warnings",
+                "phase_attempts",
+                "max_phase_attempts",
+                "errors"
+              ]
+            },
+            {
+              "check": "input_types",
+              "criterion_id": "analysis.input.types",
+              "description": "Projected values match their finite JSON runtime types.",
+              "expected": {
+                "errors": "array",
+                "execution_id": "string",
+                "max_phase_attempts": "integer",
+                "papers": "array",
+                "phase_attempts": "object",
+                "project_id": "string",
+                "target_papers": "integer",
+                "topic": "string",
+                "warnings": "array"
+              }
+            },
+            {
+              "check": "output_variant",
+              "criterion_id": "analysis.output.variant",
+              "description": "Output status selects one declared branch variant.",
+              "expected": [
+                "supplemental_research",
+                "success",
+                "phase_failure"
+              ]
+            },
+            {
+              "check": "error_policy",
+              "criterion_id": "analysis.error.policy",
+              "description": "Cancellation and exceptions follow the declared policy.",
+              "expected": {
+                "cancellation": "propagate",
+                "exception_policy": "phase_retry"
+              }
+            },
+            {
+              "check": "fallback_policy",
+              "criterion_id": "analysis.fallback.policy",
+              "description": "At least one explicit fallback or degraded branch is declared.",
+              "expected": {
+                "minimum_rules": 1
+              }
+            }
+          ],
+          "context": {
+            "context_vars": [
+              "project_id",
+              "execution_id",
+              "agent_phase"
+            ],
+            "invocations": [
+              {
+                "bindings": [],
+                "operation": "embedding_service.get_active_embedding_model",
+                "required": true,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "papers",
+                    "source_fields": [
+                      "papers"
+                    ]
+                  },
+                  {
+                    "expression": "get_active_embedding_model()",
+                    "parameter": "model_name",
+                    "source_fields": []
+                  }
+                ],
+                "operation": "embedding_service.ensure_paper_embeddings",
+                "required": true,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "topic",
+                    "source_fields": [
+                      "topic"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "target_papers",
+                    "source_fields": [
+                      "target_papers"
+                    ]
+                  },
+                  {
+                    "expression": "active model",
+                    "parameter": "embedding_model",
+                    "source_fields": []
+                  }
+                ],
+                "operation": "agent_tools.cluster_and_evaluate_coverage",
+                "required": true,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "bounded JSON",
+                    "parameter": "papers_json",
+                    "source_fields": [
+                      "papers"
+                    ]
+                  }
+                ],
+                "operation": "agent_tools.extract_knowledge_graph",
+                "required": false,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "bounded JSON",
+                    "parameter": "papers_json",
+                    "source_fields": [
+                      "papers"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "topic",
+                    "source_fields": [
+                      "topic"
+                    ]
+                  }
+                ],
+                "operation": "agent_tools.generate_evidence",
+                "required": true,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "len(generated cards)",
+                    "parameter": "evidence_count",
+                    "source_fields": [
+                      "evidence_cards"
+                    ]
+                  },
+                  {
+                    "expression": "first 20 claims JSON",
+                    "parameter": "key_claims_json",
+                    "source_fields": [
+                      "evidence_cards"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "topic",
+                    "source_fields": [
+                      "topic"
+                    ]
+                  }
+                ],
+                "operation": "agent_tools.analyze_gaps_from_evidence",
+                "required": false,
+                "side_effect": false
+              }
+            ],
+            "phase": "analysis",
+            "side_effects": [
+              "embedding persistence",
+              "cluster persistence",
+              "knowledge graph persistence",
+              "evidence card persistence"
+            ]
+          },
+          "errors": {
+            "cancellation": "propagate",
+            "declared_errors": [
+              {
+                "code": "contract_violation",
+                "condition": "Input or output Artifact violates its versioned schema.",
+                "exception_types": [
+                  "NodeContractValidationError"
+                ],
+                "handling": "fail_closed",
+                "result_status": "failed",
+                "retryable": false,
+                "terminal": true
+              },
+              {
+                "code": "cancelled",
+                "condition": "The asyncio task is cancelled by the runtime.",
+                "exception_types": [
+                  "asyncio.CancelledError"
+                ],
+                "handling": "propagate",
+                "result_status": "interrupted",
+                "retryable": false,
+                "terminal": false
+              },
+              {
+                "code": "phase_execution_error",
+                "condition": "analysis raises before producing a valid success or fallback output.",
+                "exception_types": [
+                  "Exception"
+                ],
+                "handling": "phase_retry",
+                "result_status": "analysis_failed",
+                "retryable": true,
+                "terminal": false
+              },
+              {
+                "code": "phase_retry_exhausted",
+                "condition": "phase_attempts reaches max_phase_attempts.",
+                "exception_types": [],
+                "handling": "phase_retry",
+                "result_status": "analysis_failed",
+                "retryable": false,
+                "terminal": true
+              }
+            ],
+            "exception_policy": "phase_retry",
+            "failure_status": "analysis_failed",
+            "fallbacks": [
+              {
+                "action": "request suggested queries or the original topic",
+                "resulting_status": "needs_more_research",
+                "terminal": false,
+                "trigger": "coverage score below 0.55"
+              },
+              {
+                "action": "append warning and continue with evidence",
+                "resulting_status": "running",
+                "terminal": false,
+                "trigger": "knowledge graph extraction errors or truncation"
+              },
+              {
+                "action": "append warning and retain degraded gap artifact",
+                "resulting_status": "running",
+                "terminal": false,
+                "trigger": "gap analysis reports an error"
+              },
+              {
+                "action": "raise and enter bounded phase retry",
+                "resulting_status": "analysis_failed",
+                "terminal": false,
+                "trigger": "no real evidence cards remain"
+              }
+            ],
+            "retry_fields": [
+              "phase_attempts",
+              "max_phase_attempts"
+            ]
+          },
+          "input_artifact": {
+            "artifact_id": "academic-cluster.agent.analysis.input",
+            "direction": "input",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "project_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "execution_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "topic",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "target_papers",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "papers",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "max_phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": true
+              }
+            ],
+            "node": "analysis",
+            "variants": [],
+            "version": "1.0.0"
+          },
+          "name": "analysis",
+          "output_artifact": {
+            "artifact_id": "academic-cluster.agent.analysis.output",
+            "direction": "output",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "current_phase",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "status",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "embeddings_ready",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "embedding_model",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "object",
+                "name": "coverage",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "number",
+                "name": "coverage_score",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "suggested_queries",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "analysis_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "failed_phase",
+                "nullable": true,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "terminal_failure",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "knowledge_graph",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "evidence_cards",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "object",
+                "name": "gap_analysis",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": false
+              }
+            ],
+            "node": "analysis",
+            "variants": [
+              {
+                "description": "Coverage below 0.55 requests bounded supplemental research.",
+                "name": "supplemental_research",
+                "required_fields": [
+                  "embeddings_ready",
+                  "embedding_model",
+                  "coverage",
+                  "coverage_score",
+                  "suggested_queries",
+                  "analysis_complete"
+                ],
+                "statuses": [
+                  "needs_more_research"
+                ]
+              },
+              {
+                "description": "Coverage and real evidence are sufficient for writing.",
+                "name": "success",
+                "required_fields": [
+                  "embeddings_ready",
+                  "embedding_model",
+                  "coverage",
+                  "coverage_score",
+                  "knowledge_graph",
+                  "evidence_cards",
+                  "gap_analysis",
+                  "analysis_complete"
+                ],
+                "statuses": [
+                  "running"
+                ]
+              },
+              {
+                "description": "Required analysis failed and entered bounded retry.",
+                "name": "phase_failure",
+                "required_fields": [
+                  "phase_attempts",
+                  "errors"
+                ],
+                "statuses": [
+                  "analysis_failed"
+                ]
+              }
+            ],
+            "version": "1.0.0"
+          },
+          "version": "1.0.0"
+        },
+        "input_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:analysis:input:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "errors": {
+              "type": "array"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "max_phase_attempts": {
+              "type": "integer"
+            },
+            "papers": {
+              "type": "array"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "project_id": {
+              "type": "string"
+            },
+            "target_papers": {
+              "type": "integer"
+            },
+            "topic": {
+              "type": "string"
+            },
+            "warnings": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "project_id",
+            "execution_id",
+            "topic",
+            "target_papers",
+            "papers",
+            "warnings",
+            "phase_attempts",
+            "max_phase_attempts",
+            "errors"
+          ],
+          "title": "academic-cluster.agent.analysis.input",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.analysis.input",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "input",
+          "x-node": "analysis"
+        },
+        "node": "analysis",
+        "output_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:analysis:output:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "needs_more_research"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "terminal_failure",
+                  "warnings",
+                  "embeddings_ready",
+                  "embedding_model",
+                  "coverage",
+                  "coverage_score",
+                  "suggested_queries",
+                  "analysis_complete"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "running"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "terminal_failure",
+                  "warnings",
+                  "embeddings_ready",
+                  "embedding_model",
+                  "coverage",
+                  "coverage_score",
+                  "knowledge_graph",
+                  "evidence_cards",
+                  "gap_analysis",
+                  "analysis_complete"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "analysis_failed"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "terminal_failure",
+                  "warnings",
+                  "phase_attempts",
+                  "errors"
+                ]
+              }
+            }
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "needs_more_research"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "embeddings_ready",
+                "embedding_model",
+                "coverage",
+                "coverage_score",
+                "suggested_queries",
+                "analysis_complete"
+              ],
+              "title": "supplemental_research"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "running"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "embeddings_ready",
+                "embedding_model",
+                "coverage",
+                "coverage_score",
+                "knowledge_graph",
+                "evidence_cards",
+                "gap_analysis",
+                "analysis_complete"
+              ],
+              "title": "success"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "analysis_failed"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "phase_attempts",
+                "errors"
+              ],
+              "title": "phase_failure"
+            }
+          ],
+          "properties": {
+            "analysis_complete": {
+              "type": "boolean"
+            },
+            "coverage": {
+              "type": "object"
+            },
+            "coverage_score": {
+              "type": "number"
+            },
+            "current_phase": {
+              "type": "string"
+            },
+            "embedding_model": {
+              "type": "string"
+            },
+            "embeddings_ready": {
+              "type": "boolean"
+            },
+            "errors": {
+              "type": "array"
+            },
+            "evidence_cards": {
+              "type": "array"
+            },
+            "failed_phase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "gap_analysis": {
+              "type": "object"
+            },
+            "knowledge_graph": {
+              "type": "object"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "status": {
+              "type": "string"
+            },
+            "suggested_queries": {
+              "type": "array"
+            },
+            "terminal_failure": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "current_phase",
+            "status",
+            "failed_phase",
+            "terminal_failure",
+            "warnings"
+          ],
+          "title": "academic-cluster.agent.analysis.output",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.analysis.output",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "output",
+          "x-node": "analysis"
+        }
+      },
+      {
+        "contract": {
+          "acceptance_criteria": [
+            {
+              "check": "input_version",
+              "criterion_id": "writing.input.version",
+              "description": "Input Artifact version matches the node contract.",
+              "expected": "1.0.0"
+            },
+            {
+              "check": "input_required",
+              "criterion_id": "writing.input.required",
+              "description": "Every AgentState field read by the node is present.",
+              "expected": [
+                "project_id",
+                "execution_id",
+                "topic",
+                "target_words",
+                "papers",
+                "evidence_cards",
+                "coverage",
+                "reference_map",
+                "needs_revision",
+                "outline",
+                "sections",
+                "final_references",
+                "revision_feedback",
+                "revision_attempt",
+                "quality_score",
+                "phase_attempts",
+                "max_phase_attempts",
+                "errors",
+                "warnings"
+              ]
+            },
+            {
+              "check": "input_types",
+              "criterion_id": "writing.input.types",
+              "description": "Projected values match their finite JSON runtime types.",
+              "expected": {
+                "coverage": "object",
+                "errors": "array",
+                "evidence_cards": "array",
+                "execution_id": "string",
+                "final_references": "array",
+                "max_phase_attempts": "integer",
+                "needs_revision": "boolean",
+                "outline": "object",
+                "papers": "array",
+                "phase_attempts": "object",
+                "project_id": "string",
+                "quality_score": "number",
+                "reference_map": "array",
+                "revision_attempt": "integer",
+                "revision_feedback": "string",
+                "sections": "array",
+                "target_words": "integer",
+                "topic": "string",
+                "warnings": "array"
+              }
+            },
+            {
+              "check": "output_variant",
+              "criterion_id": "writing.output.variant",
+              "description": "Output status selects one declared branch variant.",
+              "expected": [
+                "success",
+                "phase_failure"
+              ]
+            },
+            {
+              "check": "error_policy",
+              "criterion_id": "writing.error.policy",
+              "description": "Cancellation and exceptions follow the declared policy.",
+              "expected": {
+                "cancellation": "propagate",
+                "exception_policy": "phase_retry"
+              }
+            },
+            {
+              "check": "fallback_policy",
+              "criterion_id": "writing.fallback.policy",
+              "description": "At least one explicit fallback or degraded branch is declared.",
+              "expected": {
+                "minimum_rules": 1
+              }
+            }
+          ],
+          "context": {
+            "context_vars": [
+              "project_id",
+              "execution_id",
+              "agent_phase"
+            ],
+            "invocations": [
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "topic",
+                    "source_fields": [
+                      "topic"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "evidence_cards",
+                    "source_fields": [
+                      "evidence_cards"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "target_words",
+                    "source_fields": [
+                      "target_words"
+                    ]
+                  }
+                ],
+                "operation": "writing_team.run_writing",
+                "required": false,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "sections",
+                    "source_fields": [
+                      "outline"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "papers",
+                    "source_fields": [
+                      "papers",
+                      "reference_map"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "clusters",
+                    "source_fields": [
+                      "coverage"
+                    ]
+                  }
+                ],
+                "operation": "citation_planner.plan_review_citations",
+                "required": false,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "topic",
+                    "source_fields": [
+                      "topic"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "evidence_cards",
+                    "source_fields": [
+                      "evidence_cards"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "papers",
+                    "source_fields": [
+                      "papers"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "clusters",
+                    "source_fields": [
+                      "coverage"
+                    ]
+                  }
+                ],
+                "operation": "section_evidence_planner.plan_section_evidence",
+                "required": false,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "topic",
+                    "source_fields": [
+                      "topic"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "section_plan_json",
+                    "source_fields": [
+                      "outline"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "available_papers_json",
+                    "source_fields": [
+                      "papers",
+                      "reference_map",
+                      "evidence_cards"
+                    ]
+                  }
+                ],
+                "operation": "agent_tools.write_section",
+                "required": false,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "section_text",
+                    "source_fields": [
+                      "sections",
+                      "final_references"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "revision_instructions",
+                    "source_fields": [
+                      "revision_feedback"
+                    ]
+                  }
+                ],
+                "operation": "agent_tools.revise_section",
+                "required": false,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "review_title",
+                    "source_fields": [
+                      "outline",
+                      "topic"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "sections",
+                    "source_fields": [
+                      "outline"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "section_bodies",
+                    "source_fields": [
+                      "sections"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "paper_metadata_map",
+                    "source_fields": [
+                      "reference_map"
+                    ]
+                  },
+                  {
+                    "expression": "computed",
+                    "parameter": "abstract",
+                    "source_fields": [
+                      "sections"
+                    ]
+                  }
+                ],
+                "operation": "review_finalizer.finalize_review_markdown",
+                "required": true,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "project_id",
+                    "source_fields": [
+                      "project_id"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "outline",
+                    "source_fields": [
+                      "outline"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "revision_attempt",
+                    "source_fields": [
+                      "revision_attempt"
+                    ]
+                  }
+                ],
+                "operation": "database.save_outline",
+                "required": true,
+                "side_effect": true
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "sections",
+                    "source_fields": [
+                      "sections"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "revision_attempt",
+                    "source_fields": [
+                      "revision_attempt"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "quality_score",
+                    "source_fields": [
+                      "quality_score"
+                    ]
+                  }
+                ],
+                "operation": "database.save_written_section",
+                "required": true,
+                "side_effect": true
+              }
+            ],
+            "phase": "writing",
+            "side_effects": [
+              "outline and written section persistence"
+            ]
+          },
+          "errors": {
+            "cancellation": "propagate",
+            "declared_errors": [
+              {
+                "code": "contract_violation",
+                "condition": "Input or output Artifact violates its versioned schema.",
+                "exception_types": [
+                  "NodeContractValidationError"
+                ],
+                "handling": "fail_closed",
+                "result_status": "failed",
+                "retryable": false,
+                "terminal": true
+              },
+              {
+                "code": "cancelled",
+                "condition": "The asyncio task is cancelled by the runtime.",
+                "exception_types": [
+                  "asyncio.CancelledError"
+                ],
+                "handling": "propagate",
+                "result_status": "interrupted",
+                "retryable": false,
+                "terminal": false
+              },
+              {
+                "code": "phase_execution_error",
+                "condition": "writing raises before producing a valid success or fallback output.",
+                "exception_types": [
+                  "Exception"
+                ],
+                "handling": "phase_retry",
+                "result_status": "writing_failed",
+                "retryable": true,
+                "terminal": false
+              },
+              {
+                "code": "phase_retry_exhausted",
+                "condition": "phase_attempts reaches max_phase_attempts.",
+                "exception_types": [],
+                "handling": "phase_retry",
+                "result_status": "writing_failed",
+                "retryable": false,
+                "terminal": true
+              }
+            ],
+            "exception_policy": "phase_retry",
+            "failure_status": "writing_failed",
+            "fallbacks": [
+              {
+                "action": "revise existing sections and restore original citation numbers",
+                "resulting_status": "running",
+                "terminal": false,
+                "trigger": "needs_revision is true"
+              },
+              {
+                "action": "raise and enter bounded phase retry",
+                "resulting_status": "writing_failed",
+                "terminal": false,
+                "trigger": "citation, evidence-plan, or minimum-length validation fails"
+              }
+            ],
+            "retry_fields": [
+              "phase_attempts",
+              "max_phase_attempts"
+            ]
+          },
+          "input_artifact": {
+            "artifact_id": "academic-cluster.agent.writing.input",
+            "direction": "input",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "project_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "execution_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "topic",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "target_words",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "papers",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "evidence_cards",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "coverage",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "reference_map",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "needs_revision",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "outline",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "sections",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "final_references",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "revision_feedback",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "revision_attempt",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "number",
+                "name": "quality_score",
+                "nullable": true,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "max_phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": true
+              }
+            ],
+            "node": "writing",
+            "variants": [],
+            "version": "1.0.0"
+          },
+          "name": "writing",
+          "output_artifact": {
+            "artifact_id": "academic-cluster.agent.writing.output",
+            "direction": "output",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "current_phase",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "status",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "outline",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "sections",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "reference_map",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "cited_reference_numbers",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "final_references",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "abstract",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "final_review",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "writing_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "needs_revision",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "revision_feedback",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "peer_review_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "integer",
+                "name": "revision_attempt",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "failed_phase",
+                "nullable": true,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "terminal_failure",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": false
+              }
+            ],
+            "node": "writing",
+            "variants": [
+              {
+                "description": "Grounded sections and final markdown passed validation.",
+                "name": "success",
+                "required_fields": [
+                  "outline",
+                  "sections",
+                  "reference_map",
+                  "cited_reference_numbers",
+                  "final_references",
+                  "abstract",
+                  "final_review",
+                  "writing_complete",
+                  "needs_revision",
+                  "revision_feedback",
+                  "peer_review_complete",
+                  "revision_attempt"
+                ],
+                "statuses": [
+                  "running"
+                ]
+              },
+              {
+                "description": "Writing or artifact persistence entered bounded retry.",
+                "name": "phase_failure",
+                "required_fields": [
+                  "phase_attempts",
+                  "errors",
+                  "warnings"
+                ],
+                "statuses": [
+                  "writing_failed"
+                ]
+              }
+            ],
+            "version": "1.0.0"
+          },
+          "version": "1.0.0"
+        },
+        "input_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:writing:input:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "coverage": {
+              "type": "object"
+            },
+            "errors": {
+              "type": "array"
+            },
+            "evidence_cards": {
+              "type": "array"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "final_references": {
+              "type": "array"
+            },
+            "max_phase_attempts": {
+              "type": "integer"
+            },
+            "needs_revision": {
+              "type": "boolean"
+            },
+            "outline": {
+              "type": "object"
+            },
+            "papers": {
+              "type": "array"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "project_id": {
+              "type": "string"
+            },
+            "quality_score": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "reference_map": {
+              "type": "array"
+            },
+            "revision_attempt": {
+              "type": "integer"
+            },
+            "revision_feedback": {
+              "type": "string"
+            },
+            "sections": {
+              "type": "array"
+            },
+            "target_words": {
+              "type": "integer"
+            },
+            "topic": {
+              "type": "string"
+            },
+            "warnings": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "project_id",
+            "execution_id",
+            "topic",
+            "target_words",
+            "papers",
+            "evidence_cards",
+            "coverage",
+            "reference_map",
+            "needs_revision",
+            "outline",
+            "sections",
+            "final_references",
+            "revision_feedback",
+            "revision_attempt",
+            "quality_score",
+            "phase_attempts",
+            "max_phase_attempts",
+            "errors",
+            "warnings"
+          ],
+          "title": "academic-cluster.agent.writing.input",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.writing.input",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "input",
+          "x-node": "writing"
+        },
+        "node": "writing",
+        "output_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:writing:output:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "running"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "terminal_failure",
+                  "outline",
+                  "sections",
+                  "reference_map",
+                  "cited_reference_numbers",
+                  "final_references",
+                  "abstract",
+                  "final_review",
+                  "writing_complete",
+                  "needs_revision",
+                  "revision_feedback",
+                  "peer_review_complete",
+                  "revision_attempt"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "writing_failed"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "terminal_failure",
+                  "phase_attempts",
+                  "errors",
+                  "warnings"
+                ]
+              }
+            }
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "running"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "outline",
+                "sections",
+                "reference_map",
+                "cited_reference_numbers",
+                "final_references",
+                "abstract",
+                "final_review",
+                "writing_complete",
+                "needs_revision",
+                "revision_feedback",
+                "peer_review_complete",
+                "revision_attempt"
+              ],
+              "title": "success"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "writing_failed"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "phase_attempts",
+                "errors",
+                "warnings"
+              ],
+              "title": "phase_failure"
+            }
+          ],
+          "properties": {
+            "abstract": {
+              "type": "string"
+            },
+            "cited_reference_numbers": {
+              "type": "array"
+            },
+            "current_phase": {
+              "type": "string"
+            },
+            "errors": {
+              "type": "array"
+            },
+            "failed_phase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "final_references": {
+              "type": "array"
+            },
+            "final_review": {
+              "type": "string"
+            },
+            "needs_revision": {
+              "type": "boolean"
+            },
+            "outline": {
+              "type": "object"
+            },
+            "peer_review_complete": {
+              "type": "boolean"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "reference_map": {
+              "type": "array"
+            },
+            "revision_attempt": {
+              "type": "integer"
+            },
+            "revision_feedback": {
+              "type": "string"
+            },
+            "sections": {
+              "type": "array"
+            },
+            "status": {
+              "type": "string"
+            },
+            "terminal_failure": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array"
+            },
+            "writing_complete": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "current_phase",
+            "status",
+            "failed_phase",
+            "terminal_failure"
+          ],
+          "title": "academic-cluster.agent.writing.output",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.writing.output",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "output",
+          "x-node": "writing"
+        }
+      },
+      {
+        "contract": {
+          "acceptance_criteria": [
+            {
+              "check": "input_version",
+              "criterion_id": "peer_review.input.version",
+              "description": "Input Artifact version matches the node contract.",
+              "expected": "1.0.0"
+            },
+            {
+              "check": "input_required",
+              "criterion_id": "peer_review.input.required",
+              "description": "Every AgentState field read by the node is present.",
+              "expected": [
+                "project_id",
+                "execution_id",
+                "topic",
+                "final_review",
+                "quality_threshold",
+                "revision_attempt",
+                "max_revision_attempts",
+                "warnings",
+                "phase_attempts",
+                "max_phase_attempts",
+                "errors"
+              ]
+            },
+            {
+              "check": "input_types",
+              "criterion_id": "peer_review.input.types",
+              "description": "Projected values match their finite JSON runtime types.",
+              "expected": {
+                "errors": "array",
+                "execution_id": "string",
+                "final_review": "string",
+                "max_phase_attempts": "integer",
+                "max_revision_attempts": "integer",
+                "phase_attempts": "object",
+                "project_id": "string",
+                "quality_threshold": "number",
+                "revision_attempt": "integer",
+                "topic": "string",
+                "warnings": "array"
+              }
+            },
+            {
+              "check": "output_variant",
+              "criterion_id": "peer_review.output.variant",
+              "description": "Output status selects one declared branch variant.",
+              "expected": [
+                "revision_requested",
+                "threshold_warning",
+                "success",
+                "phase_failure"
+              ]
+            },
+            {
+              "check": "error_policy",
+              "criterion_id": "peer_review.error.policy",
+              "description": "Cancellation and exceptions follow the declared policy.",
+              "expected": {
+                "cancellation": "propagate",
+                "exception_policy": "phase_retry"
+              }
+            },
+            {
+              "check": "fallback_policy",
+              "criterion_id": "peer_review.fallback.policy",
+              "description": "At least one explicit fallback or degraded branch is declared.",
+              "expected": {
+                "minimum_rules": 1
+              }
+            }
+          ],
+          "context": {
+            "context_vars": [
+              "project_id",
+              "execution_id",
+              "agent_phase"
+            ],
+            "invocations": [
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "review_text",
+                    "source_fields": [
+                      "final_review"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "topic",
+                    "source_fields": [
+                      "topic"
+                    ]
+                  }
+                ],
+                "operation": "peer_review_team.run_peer_review",
+                "required": true,
+                "side_effect": false
+              },
+              {
+                "bindings": [
+                  {
+                    "expression": "run_peer_review result",
+                    "parameter": "report",
+                    "source_fields": []
+                  }
+                ],
+                "operation": "peer_review_team.validate_peer_review_report",
+                "required": true,
+                "side_effect": false
+              }
+            ],
+            "phase": "peer_review",
+            "side_effects": []
+          },
+          "errors": {
+            "cancellation": "propagate",
+            "declared_errors": [
+              {
+                "code": "contract_violation",
+                "condition": "Input or output Artifact violates its versioned schema.",
+                "exception_types": [
+                  "NodeContractValidationError"
+                ],
+                "handling": "fail_closed",
+                "result_status": "failed",
+                "retryable": false,
+                "terminal": true
+              },
+              {
+                "code": "cancelled",
+                "condition": "The asyncio task is cancelled by the runtime.",
+                "exception_types": [
+                  "asyncio.CancelledError"
+                ],
+                "handling": "propagate",
+                "result_status": "interrupted",
+                "retryable": false,
+                "terminal": false
+              },
+              {
+                "code": "phase_execution_error",
+                "condition": "peer_review raises before producing a valid success or fallback output.",
+                "exception_types": [
+                  "Exception"
+                ],
+                "handling": "phase_retry",
+                "result_status": "peer_review_failed",
+                "retryable": true,
+                "terminal": false
+              },
+              {
+                "code": "phase_retry_exhausted",
+                "condition": "phase_attempts reaches max_phase_attempts.",
+                "exception_types": [],
+                "handling": "phase_retry",
+                "result_status": "peer_review_failed",
+                "retryable": false,
+                "terminal": true
+              }
+            ],
+            "exception_policy": "phase_retry",
+            "failure_status": "peer_review_failed",
+            "fallbacks": [
+              {
+                "action": "store feedback and route back to writing",
+                "resulting_status": "needs_revision",
+                "terminal": false,
+                "trigger": "score below threshold with revisions remaining"
+              },
+              {
+                "action": "complete with warning and preserve review",
+                "resulting_status": "completed_with_warnings",
+                "terminal": true,
+                "trigger": "score below threshold after revision budget"
+              }
+            ],
+            "retry_fields": [
+              "phase_attempts",
+              "max_phase_attempts"
+            ]
+          },
+          "input_artifact": {
+            "artifact_id": "academic-cluster.agent.peer_review.input",
+            "direction": "input",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "project_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "execution_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "topic",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "final_review",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "number",
+                "name": "quality_threshold",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "revision_attempt",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "max_revision_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "integer",
+                "name": "max_phase_attempts",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": true
+              }
+            ],
+            "node": "peer_review",
+            "variants": [],
+            "version": "1.0.0"
+          },
+          "name": "peer_review",
+          "output_artifact": {
+            "artifact_id": "academic-cluster.agent.peer_review.output",
+            "direction": "output",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "current_phase",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "status",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "peer_review_report",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "number",
+                "name": "quality_score",
+                "nullable": true,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "peer_review_complete",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "boolean",
+                "name": "needs_revision",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "revision_feedback",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "string",
+                "name": "failed_phase",
+                "nullable": true,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "terminal_failure",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "object",
+                "name": "phase_attempts",
+                "nullable": false,
+                "required": false
+              },
+              {
+                "json_kind": "array",
+                "name": "errors",
+                "nullable": false,
+                "required": false
+              }
+            ],
+            "node": "peer_review",
+            "variants": [
+              {
+                "description": "Score is below threshold and revisions remain.",
+                "name": "revision_requested",
+                "required_fields": [
+                  "peer_review_report",
+                  "quality_score",
+                  "peer_review_complete",
+                  "needs_revision",
+                  "revision_feedback"
+                ],
+                "statuses": [
+                  "needs_revision"
+                ]
+              },
+              {
+                "description": "Score remains low after the revision budget.",
+                "name": "threshold_warning",
+                "required_fields": [
+                  "peer_review_report",
+                  "quality_score",
+                  "peer_review_complete",
+                  "needs_revision",
+                  "warnings"
+                ],
+                "statuses": [
+                  "completed_with_warnings"
+                ]
+              },
+              {
+                "description": "Validated score meets the quality threshold.",
+                "name": "success",
+                "required_fields": [
+                  "peer_review_report",
+                  "quality_score",
+                  "peer_review_complete",
+                  "needs_revision",
+                  "terminal_failure"
+                ],
+                "statuses": [
+                  "running"
+                ]
+              },
+              {
+                "description": "Missing text or invalid review entered bounded retry.",
+                "name": "phase_failure",
+                "required_fields": [
+                  "terminal_failure",
+                  "phase_attempts",
+                  "errors",
+                  "warnings"
+                ],
+                "statuses": [
+                  "peer_review_failed"
+                ]
+              }
+            ],
+            "version": "1.0.0"
+          },
+          "version": "1.0.0"
+        },
+        "input_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:peer_review:input:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "errors": {
+              "type": "array"
+            },
+            "execution_id": {
+              "type": "string"
+            },
+            "final_review": {
+              "type": "string"
+            },
+            "max_phase_attempts": {
+              "type": "integer"
+            },
+            "max_revision_attempts": {
+              "type": "integer"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "project_id": {
+              "type": "string"
+            },
+            "quality_threshold": {
+              "type": "number"
+            },
+            "revision_attempt": {
+              "type": "integer"
+            },
+            "topic": {
+              "type": "string"
+            },
+            "warnings": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "project_id",
+            "execution_id",
+            "topic",
+            "final_review",
+            "quality_threshold",
+            "revision_attempt",
+            "max_revision_attempts",
+            "warnings",
+            "phase_attempts",
+            "max_phase_attempts",
+            "errors"
+          ],
+          "title": "academic-cluster.agent.peer_review.input",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.peer_review.input",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "input",
+          "x-node": "peer_review"
+        },
+        "node": "peer_review",
+        "output_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:peer_review:output:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "needs_revision"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "peer_review_report",
+                  "quality_score",
+                  "peer_review_complete",
+                  "needs_revision",
+                  "revision_feedback"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "completed_with_warnings"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "peer_review_report",
+                  "quality_score",
+                  "peer_review_complete",
+                  "needs_revision",
+                  "warnings"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "running"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "peer_review_report",
+                  "quality_score",
+                  "peer_review_complete",
+                  "needs_revision",
+                  "terminal_failure"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "peer_review_failed"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status",
+                  "failed_phase",
+                  "terminal_failure",
+                  "phase_attempts",
+                  "errors",
+                  "warnings"
+                ]
+              }
+            }
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "needs_revision"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "peer_review_report",
+                "quality_score",
+                "peer_review_complete",
+                "needs_revision",
+                "revision_feedback"
+              ],
+              "title": "revision_requested"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "completed_with_warnings"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "peer_review_report",
+                "quality_score",
+                "peer_review_complete",
+                "needs_revision",
+                "warnings"
+              ],
+              "title": "threshold_warning"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "running"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "peer_review_report",
+                "quality_score",
+                "peer_review_complete",
+                "needs_revision",
+                "terminal_failure"
+              ],
+              "title": "success"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "peer_review_failed"
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "terminal_failure",
+                "phase_attempts",
+                "errors",
+                "warnings"
+              ],
+              "title": "phase_failure"
+            }
+          ],
+          "properties": {
+            "current_phase": {
+              "type": "string"
+            },
+            "errors": {
+              "type": "array"
+            },
+            "failed_phase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "needs_revision": {
+              "type": "boolean"
+            },
+            "peer_review_complete": {
+              "type": "boolean"
+            },
+            "peer_review_report": {
+              "type": "object"
+            },
+            "phase_attempts": {
+              "type": "object"
+            },
+            "quality_score": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "revision_feedback": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "terminal_failure": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "current_phase",
+            "status",
+            "failed_phase"
+          ],
+          "title": "academic-cluster.agent.peer_review.output",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.peer_review.output",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "output",
+          "x-node": "peer_review"
+        }
+      },
+      {
+        "contract": {
+          "acceptance_criteria": [
+            {
+              "check": "input_version",
+              "criterion_id": "finalize.input.version",
+              "description": "Input Artifact version matches the node contract.",
+              "expected": "1.0.0"
+            },
+            {
+              "check": "input_required",
+              "criterion_id": "finalize.input.required",
+              "description": "Every AgentState field read by the node is present.",
+              "expected": [
+                "project_id",
+                "terminal_failure",
+                "final_review",
+                "status",
+                "warnings",
+                "final_references",
+                "abstract",
+                "outline",
+                "peer_review_report",
+                "quality_score",
+                "coverage"
+              ]
+            },
+            {
+              "check": "input_types",
+              "criterion_id": "finalize.input.types",
+              "description": "Projected values match their finite JSON runtime types.",
+              "expected": {
+                "abstract": "string",
+                "coverage": "object",
+                "final_references": "array",
+                "final_review": "string",
+                "outline": "object",
+                "peer_review_report": "object",
+                "project_id": "string",
+                "quality_score": "number",
+                "status": "string",
+                "terminal_failure": "boolean",
+                "warnings": "array"
+              }
+            },
+            {
+              "check": "output_variant",
+              "criterion_id": "finalize.output.variant",
+              "description": "Output status selects one declared branch variant.",
+              "expected": [
+                "success",
+                "warning",
+                "failure"
+              ]
+            },
+            {
+              "check": "error_policy",
+              "criterion_id": "finalize.error.policy",
+              "description": "Cancellation and exceptions follow the declared policy.",
+              "expected": {
+                "cancellation": "propagate",
+                "exception_policy": "propagate"
+              }
+            },
+            {
+              "check": "fallback_policy",
+              "criterion_id": "finalize.fallback.policy",
+              "description": "At least one explicit fallback or degraded branch is declared.",
+              "expected": {
+                "minimum_rules": 1
+              }
+            }
+          ],
+          "context": {
+            "context_vars": [],
+            "invocations": [
+              {
+                "bindings": [
+                  {
+                    "expression": "direct",
+                    "parameter": "project_id",
+                    "source_fields": [
+                      "project_id"
+                    ]
+                  },
+                  {
+                    "expression": "direct",
+                    "parameter": "state_snapshot",
+                    "source_fields": [
+                      "final_review",
+                      "final_references",
+                      "abstract",
+                      "outline",
+                      "peer_review_report",
+                      "quality_score",
+                      "coverage",
+                      "warnings"
+                    ]
+                  },
+                  {
+                    "expression": "derived final status",
+                    "parameter": "status",
+                    "source_fields": [
+                      "terminal_failure",
+                      "final_review",
+                      "status",
+                      "warnings"
+                    ]
+                  }
+                ],
+                "operation": "database.save_pipeline_checkpoint",
+                "required": false,
+                "side_effect": true
+              }
+            ],
+            "phase": "finalize",
+            "side_effects": [
+              "final_review_artifact checkpoint persistence"
+            ]
+          },
+          "errors": {
+            "cancellation": "propagate",
+            "declared_errors": [
+              {
+                "code": "contract_violation",
+                "condition": "Input or output Artifact violates its versioned schema.",
+                "exception_types": [
+                  "NodeContractValidationError"
+                ],
+                "handling": "fail_closed",
+                "result_status": "failed",
+                "retryable": false,
+                "terminal": true
+              },
+              {
+                "code": "cancelled",
+                "condition": "The asyncio task is cancelled by the runtime.",
+                "exception_types": [
+                  "asyncio.CancelledError"
+                ],
+                "handling": "propagate",
+                "result_status": "interrupted",
+                "retryable": false,
+                "terminal": false
+              },
+              {
+                "code": "finalize_persistence_error",
+                "condition": "save_pipeline_checkpoint raises while final_review is present.",
+                "exception_types": [
+                  "Exception"
+                ],
+                "handling": "propagate",
+                "result_status": "failed",
+                "retryable": false,
+                "terminal": true
+              }
+            ],
+            "exception_policy": "propagate",
+            "failure_status": null,
+            "fallbacks": [
+              {
+                "action": "return failed and skip artifact persistence when text is empty",
+                "resulting_status": "failed",
+                "terminal": true,
+                "trigger": "terminal_failure is true or final_review is empty"
+              },
+              {
+                "action": "preserve warnings in the final artifact",
+                "resulting_status": "completed_with_warnings",
+                "terminal": true,
+                "trigger": "state has warnings or completed_with_warnings status"
+              }
+            ],
+            "retry_fields": []
+          },
+          "input_artifact": {
+            "artifact_id": "academic-cluster.agent.finalize.input",
+            "direction": "input",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "project_id",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "boolean",
+                "name": "terminal_failure",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "final_review",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "status",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "warnings",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "array",
+                "name": "final_references",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "abstract",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "outline",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "peer_review_report",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "number",
+                "name": "quality_score",
+                "nullable": true,
+                "required": true
+              },
+              {
+                "json_kind": "object",
+                "name": "coverage",
+                "nullable": false,
+                "required": true
+              }
+            ],
+            "node": "finalize",
+            "variants": [],
+            "version": "1.0.0"
+          },
+          "name": "finalize",
+          "output_artifact": {
+            "artifact_id": "academic-cluster.agent.finalize.output",
+            "direction": "output",
+            "fields": [
+              {
+                "json_kind": "string",
+                "name": "current_phase",
+                "nullable": false,
+                "required": true
+              },
+              {
+                "json_kind": "string",
+                "name": "status",
+                "nullable": false,
+                "required": true
+              }
+            ],
+            "node": "finalize",
+            "variants": [
+              {
+                "description": "Review completed without warnings.",
+                "name": "success",
+                "required_fields": [],
+                "statuses": [
+                  "completed"
+                ]
+              },
+              {
+                "description": "Review completed while preserving warnings.",
+                "name": "warning",
+                "required_fields": [],
+                "statuses": [
+                  "completed_with_warnings"
+                ]
+              },
+              {
+                "description": "Terminal failure or missing final review.",
+                "name": "failure",
+                "required_fields": [],
+                "statuses": [
+                  "failed"
+                ]
+              }
+            ],
+            "version": "1.0.0"
+          },
+          "version": "1.0.0"
+        },
+        "input_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:finalize:input:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "properties": {
+            "abstract": {
+              "type": "string"
+            },
+            "coverage": {
+              "type": "object"
+            },
+            "final_references": {
+              "type": "array"
+            },
+            "final_review": {
+              "type": "string"
+            },
+            "outline": {
+              "type": "object"
+            },
+            "peer_review_report": {
+              "type": "object"
+            },
+            "project_id": {
+              "type": "string"
+            },
+            "quality_score": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "status": {
+              "type": "string"
+            },
+            "terminal_failure": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "project_id",
+            "terminal_failure",
+            "final_review",
+            "status",
+            "warnings",
+            "final_references",
+            "abstract",
+            "outline",
+            "peer_review_report",
+            "quality_score",
+            "coverage"
+          ],
+          "title": "academic-cluster.agent.finalize.input",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.finalize.input",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "input",
+          "x-node": "finalize"
+        },
+        "node": "finalize",
+        "output_artifact_schema": {
+          "$id": "urn:academic-cluster:agent-artifact:finalize:output:1.0.0",
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "completed"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "completed_with_warnings"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "failed"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "current_phase",
+                  "status"
+                ]
+              }
+            }
+          ],
+          "oneOf": [
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "completed"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "title": "success"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "completed_with_warnings"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "title": "warning"
+            },
+            {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "failed"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "title": "failure"
+            }
+          ],
+          "properties": {
+            "current_phase": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "current_phase",
+            "status"
+          ],
+          "title": "academic-cluster.agent.finalize.output",
+          "type": "object",
+          "x-artifact-id": "academic-cluster.agent.finalize.output",
+          "x-artifact-version": "1.0.0",
+          "x-direction": "output",
+          "x-node": "finalize"
+        }
+      }
+    ]
+  },
+  "runtime_contract_schema": {
+    "$defs": {
+      "AcceptanceCriterion": {
+        "additionalProperties": false,
+        "description": "Machine-readable condition a contract consumer must demonstrate.",
+        "properties": {
+          "check": {
+            "enum": [
+              "input_version",
+              "input_required",
+              "input_types",
+              "output_variant",
+              "error_policy",
+              "fallback_policy"
+            ],
+            "title": "Check",
+            "type": "string"
+          },
+          "criterion_id": {
+            "minLength": 1,
+            "title": "Criterion Id",
+            "type": "string"
+          },
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "expected": {
+            "title": "Expected"
+          }
+        },
+        "required": [
+          "criterion_id",
+          "description",
+          "check",
+          "expected"
+        ],
+        "title": "AcceptanceCriterion",
+        "type": "object"
+      },
+      "ArtifactContract": {
+        "additionalProperties": false,
+        "description": "Versioned input or output artifact declaration.",
+        "properties": {
+          "artifact_id": {
+            "minLength": 1,
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "input",
+              "output"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/$defs/ArtifactField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "node": {
+            "enum": [
+              "supervisor",
+              "research",
+              "analysis",
+              "writing",
+              "peer_review",
+              "finalize"
+            ],
+            "title": "Node",
+            "type": "string"
+          },
+          "variants": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ArtifactVariant"
+            },
+            "title": "Variants",
+            "type": "array"
+          },
+          "version": {
+            "default": "1.0.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "node",
+          "direction",
+          "fields"
+        ],
+        "title": "ArtifactContract",
+        "type": "object"
+      },
+      "ArtifactField": {
+        "additionalProperties": false,
+        "description": "One JSON-compatible field in a projected node artifact.",
+        "properties": {
+          "json_kind": {
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "object",
+              "array"
+            ],
+            "title": "Json Kind",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "nullable": {
+            "default": false,
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "required": {
+            "default": false,
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "json_kind"
+        ],
+        "title": "ArtifactField",
+        "type": "object"
+      },
+      "ArtifactVariant": {
+        "additionalProperties": false,
+        "description": "Status-selected output requirements for one node branch.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "required_fields": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Fields",
+            "type": "array"
+          },
+          "statuses": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Statuses",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "statuses"
+        ],
+        "title": "ArtifactVariant",
+        "type": "object"
+      },
+      "DeclaredError": {
+        "additionalProperties": false,
+        "description": "Machine-readable failure condition and its runtime disposition.",
+        "properties": {
+          "code": {
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "condition": {
+            "minLength": 1,
+            "title": "Condition",
+            "type": "string"
+          },
+          "exception_types": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Exception Types",
+            "type": "array"
+          },
+          "handling": {
+            "enum": [
+              "propagate",
+              "phase_retry",
+              "fail_closed",
+              "best_effort"
+            ],
+            "title": "Handling",
+            "type": "string"
+          },
+          "result_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result Status"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "terminal": {
+            "title": "Terminal",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "condition",
+          "handling",
+          "retryable",
+          "terminal"
+        ],
+        "title": "DeclaredError",
+        "type": "object"
+      },
+      "DependencyManifest": {
+        "additionalProperties": false,
+        "description": "Static execution dependencies and external interactions for a node.",
+        "properties": {
+          "context_vars": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Context Vars",
+            "type": "array"
+          },
+          "invocations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/InvocationContract"
+            },
+            "title": "Invocations",
+            "type": "array"
+          },
+          "phase": {
+            "title": "Phase",
+            "type": "string"
+          },
+          "side_effects": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Side Effects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "phase"
+        ],
+        "title": "DependencyManifest",
+        "type": "object"
+      },
+      "ErrorSemantics": {
+        "additionalProperties": false,
+        "description": "Cancellation, exception, retry, and fallback behavior.",
+        "properties": {
+          "cancellation": {
+            "const": "propagate",
+            "default": "propagate",
+            "title": "Cancellation",
+            "type": "string"
+          },
+          "declared_errors": {
+            "items": {
+              "$ref": "#/$defs/DeclaredError"
+            },
+            "minItems": 1,
+            "title": "Declared Errors",
+            "type": "array"
+          },
+          "exception_policy": {
+            "enum": [
+              "phase_retry",
+              "propagate",
+              "best_effort_only"
+            ],
+            "title": "Exception Policy",
+            "type": "string"
+          },
+          "failure_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Failure Status"
+          },
+          "fallbacks": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/FallbackRule"
+            },
+            "title": "Fallbacks",
+            "type": "array"
+          },
+          "retry_fields": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Retry Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "exception_policy",
+          "declared_errors"
+        ],
+        "title": "ErrorSemantics",
+        "type": "object"
+      },
+      "FallbackRule": {
+        "additionalProperties": false,
+        "description": "A deterministic non-exception or degraded branch.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "resulting_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resulting Status"
+          },
+          "terminal": {
+            "default": false,
+            "title": "Terminal",
+            "type": "boolean"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger",
+          "action"
+        ],
+        "title": "FallbackRule",
+        "type": "object"
+      },
+      "InvocationContract": {
+        "additionalProperties": false,
+        "description": "One service, tool, or deterministic function called by a node.",
+        "properties": {
+          "bindings": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ParameterBinding"
+            },
+            "title": "Bindings",
+            "type": "array"
+          },
+          "operation": {
+            "minLength": 1,
+            "title": "Operation",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "side_effect": {
+            "default": false,
+            "title": "Side Effect",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "InvocationContract",
+        "type": "object"
+      },
+      "NodeContract": {
+        "additionalProperties": false,
+        "description": "Complete static contract for one production graph node.",
+        "properties": {
+          "acceptance_criteria": {
+            "items": {
+              "$ref": "#/$defs/AcceptanceCriterion"
+            },
+            "title": "Acceptance Criteria",
+            "type": "array"
+          },
+          "context": {
+            "$ref": "#/$defs/DependencyManifest"
+          },
+          "errors": {
+            "$ref": "#/$defs/ErrorSemantics"
+          },
+          "input_artifact": {
+            "$ref": "#/$defs/ArtifactContract"
+          },
+          "name": {
+            "enum": [
+              "supervisor",
+              "research",
+              "analysis",
+              "writing",
+              "peer_review",
+              "finalize"
+            ],
+            "title": "Name",
+            "type": "string"
+          },
+          "output_artifact": {
+            "$ref": "#/$defs/ArtifactContract"
+          },
+          "version": {
+            "default": "1.0.0",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "input_artifact",
+          "output_artifact",
+          "context",
+          "errors",
+          "acceptance_criteria"
+        ],
+        "title": "NodeContract",
+        "type": "object"
+      },
+      "NodeManifestEntry": {
+        "additionalProperties": false,
+        "description": "One contract plus its directly consumable Artifact JSON Schemas.",
+        "properties": {
+          "contract": {
+            "$ref": "#/$defs/NodeContract"
+          },
+          "input_artifact_schema": {
+            "additionalProperties": true,
+            "title": "Input Artifact Schema",
+            "type": "object"
+          },
+          "node": {
+            "enum": [
+              "supervisor",
+              "research",
+              "analysis",
+              "writing",
+              "peer_review",
+              "finalize"
+            ],
+            "title": "Node",
+            "type": "string"
+          },
+          "output_artifact_schema": {
+            "additionalProperties": true,
+            "title": "Output Artifact Schema",
+            "type": "object"
+          }
+        },
+        "required": [
+          "node",
+          "contract",
+          "input_artifact_schema",
+          "output_artifact_schema"
+        ],
+        "title": "NodeManifestEntry",
+        "type": "object"
+      },
+      "ParameterBinding": {
+        "additionalProperties": false,
+        "description": "Map AgentState fields to one concrete operation parameter.",
+        "properties": {
+          "expression": {
+            "default": "direct",
+            "title": "Expression",
+            "type": "string"
+          },
+          "parameter": {
+            "minLength": 1,
+            "title": "Parameter",
+            "type": "string"
+          },
+          "source_fields": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parameter"
+        ],
+        "title": "ParameterBinding",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "description": "Stable, JSON-serializable registry and Artifact schema manifest.",
+    "properties": {
+      "contract_version": {
+        "default": "1.0.0",
+        "title": "Contract Version",
+        "type": "string"
+      },
+      "manifest_version": {
+        "default": "1.0.0",
+        "title": "Manifest Version",
+        "type": "string"
+      },
+      "nodes": {
+        "items": {
+          "$ref": "#/$defs/NodeManifestEntry"
+        },
+        "title": "Nodes",
+        "type": "array"
+      }
+    },
+    "required": [
+      "nodes"
+    ],
+    "title": "NodeContractManifest",
+    "type": "object"
+  },
+  "schema": "academic-cluster.agent-node-acceptance-bundle/v1"
+}

@@ -1,0 +1,40 @@
+{
+  "fixture_version": "1.0.0",
+  "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json",
+  "node": "supervisor",
+  "contract_version": "1.0.0",
+  "expected_variant": "route",
+  "context": {
+    "expected_entry": "supervisor",
+    "required_state_fields": ["project_id", "execution_id", "topic"],
+    "before": {
+      "project_id": "contract-project",
+      "execution_id": "contract-execution",
+      "topic": "deterministic agent contracts"
+    }
+  },
+  "error": {
+    "mode": "fail_closed",
+    "state_patch": {
+      "current_phase": "finalize",
+      "status": "failed",
+      "terminal_failure": true
+    },
+    "expected_route": "finalize"
+  },
+  "fallback": {
+    "mode": "bounded_completion",
+    "state_patch": {
+      "current_phase": "finalize",
+      "status": "completed_with_warnings",
+      "needs_revision": false,
+      "revision_attempt": 2,
+      "max_revision_attempts": 2
+    },
+    "expected_route": "finalize"
+  },
+  "acceptance": {
+    "expected_accepted": true,
+    "expected_artifact_version": "1.0.0"
+  }
+}

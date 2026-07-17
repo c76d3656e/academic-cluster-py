@@ -1,0 +1,46 @@
+{
+  "fixture_version": "1.0.0",
+  "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json",
+  "node": "research",
+  "contract_version": "1.0.0",
+  "expected_variant": "success",
+  "context": {
+    "expected_entry": "research",
+    "required_state_fields": ["project_id", "execution_id", "topic", "target_papers"],
+    "before": {
+      "project_id": "contract-project",
+      "execution_id": "contract-execution",
+      "topic": "deterministic agent contracts",
+      "target_papers": 2
+    }
+  },
+  "error": {
+    "mode": "bounded_retry",
+    "state_patch": {
+      "current_phase": "research",
+      "status": "research_failed",
+      "failed_phase": "research",
+      "phase_attempts": { "research": 1 },
+      "max_phase_attempts": 2,
+      "terminal_failure": false
+    },
+    "expected_route": "research"
+  },
+  "fallback": {
+    "mode": "prohibit_empty_research",
+    "state_patch": {
+      "current_phase": "research",
+      "status": "research_failed",
+      "failed_phase": "research",
+      "phase_attempts": { "research": 2 },
+      "max_phase_attempts": 2,
+      "terminal_failure": true,
+      "errors": ["research: no project papers"]
+    },
+    "expected_route": "finalize"
+  },
+  "acceptance": {
+    "expected_accepted": true,
+    "expected_artifact_version": "1.0.0"
+  }
+}

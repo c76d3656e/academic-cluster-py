@@ -142,6 +142,38 @@ jobs:
       - name: Pip audit
         run: uv run pip-audit
 
+  node-contract-eval:
+    name: Node Contract & Promptfoo Evaluation
+    runs-on: ubuntu-latest
+    needs: python-lint
+    env:
+      PROMPTFOO_DISABLE_TELEMETRY: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Check generated node contracts
+        run: uv run python scripts/export_node_contracts.py --check
+
+      - name: Run deterministic Promptfoo acceptance
+        working-directory: promptfoo
+        run: uv run npx --yes promptfoo@0.121.19 eval --config promptfooconfig.yaml --no-cache
+
   frontend-lint:
     name: Frontend Lint & Type Check
     runs-on: ubuntu-latest

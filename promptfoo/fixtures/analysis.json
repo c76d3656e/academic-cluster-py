@@ -1,0 +1,61 @@
+{
+  "fixture_version": "1.0.0",
+  "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json",
+  "node": "analysis",
+  "contract_version": "1.0.0",
+  "expected_variant": "success",
+  "context": {
+    "expected_entry": "analysis",
+    "required_state_fields": [
+      "project_id",
+      "execution_id",
+      "topic",
+      "papers",
+      "research_complete"
+    ],
+    "before": {
+      "project_id": "contract-project",
+      "execution_id": "contract-execution",
+      "topic": "deterministic agent contracts",
+      "target_papers": 2,
+      "papers": [{ "id": "paper-1", "title": "Fixture" }],
+      "paper_ids": ["paper-1"],
+      "research_complete": true,
+      "research_round": 1
+    }
+  },
+  "error": {
+    "mode": "bounded_retry",
+    "state_patch": {
+      "current_phase": "analysis",
+      "status": "analysis_failed",
+      "failed_phase": "analysis",
+      "phase_attempts": { "analysis": 1 },
+      "max_phase_attempts": 2,
+      "terminal_failure": false
+    },
+    "expected_route": "analysis"
+  },
+  "fallback": {
+    "mode": "bounded_supplemental_research",
+    "state_patch": {
+      "current_phase": "analysis",
+      "status": "needs_more_research",
+      "embeddings_ready": true,
+      "embedding_model": "fixture-embedding-v1",
+      "coverage": { "coverage_score": 0.3 },
+      "coverage_score": 0.3,
+      "suggested_queries": ["missing subtopic"],
+      "analysis_complete": false,
+      "research_round": 1,
+      "max_research_rounds": 2,
+      "failed_phase": null,
+      "terminal_failure": false
+    },
+    "expected_route": "research"
+  },
+  "acceptance": {
+    "expected_accepted": true,
+    "expected_artifact_version": "1.0.0"
+  }
+}
