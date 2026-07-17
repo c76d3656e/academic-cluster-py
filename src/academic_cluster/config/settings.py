@@ -6,7 +6,7 @@ import json
 from functools import lru_cache
 from urllib.parse import quote, urlsplit
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     app_debug: bool = False
     cors_origins: str | None = None
     log_level: str = "INFO"
+
+    langfuse_enabled: bool = False
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+    langfuse_tracing_environment: str | None = None
+    langfuse_release: str | None = None
+    langfuse_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    langfuse_capture_node_io: bool = False
 
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o-mini"
@@ -182,6 +191,14 @@ class Settings(BaseSettings):
             self.embedding_api_key, minimum_length=8
         ):
             insecure.append("embedding_api_key")
+        if self.langfuse_enabled:
+            if _is_placeholder(self.langfuse_public_key, minimum_length=8):
+                insecure.append("langfuse_public_key")
+            if _is_placeholder(self.langfuse_secret_key, minimum_length=12):
+                insecure.append("langfuse_secret_key")
+            langfuse_url = urlsplit(self.langfuse_base_url)
+            if langfuse_url.scheme != "https" or not langfuse_url.netloc:
+                insecure.append("langfuse_base_url")
         if self._provider_json_is_insecure(self.llm_providers_json):
             insecure.append("llm_providers_json")
         if self._provider_json_is_insecure(self.embedding_providers_json):

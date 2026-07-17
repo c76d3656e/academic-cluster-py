@@ -29,6 +29,7 @@ def _valid_production_settings(**overrides: Any) -> Settings:
         "llm_providers_json": None,
         "embedding_api_key": None,
         "embedding_providers_json": None,
+        "langfuse_enabled": False,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
@@ -77,6 +78,42 @@ def test_production_rejects_placeholder_provider_json_key() -> None:
 
 def test_development_allows_provider_configuration_after_startup() -> None:
     Settings(_env_file=None, app_env="development").validate_security()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("langfuse_public_key", "your_langfuse_public_key"),
+        ("langfuse_secret_key", "your_langfuse_secret_key"),
+        ("langfuse_base_url", "http://langfuse.internal"),
+    ],
+)
+def test_enabled_production_langfuse_requires_secure_configuration(
+    field: str,
+    value: str,
+) -> None:
+    langfuse_settings = {
+        "langfuse_enabled": True,
+        "langfuse_public_key": "pk-lf-production-key",
+        "langfuse_secret_key": "sk-lf-production-secret",
+        "langfuse_base_url": "https://langfuse.example.test",
+        field: value,
+    }
+    settings = _valid_production_settings(**langfuse_settings)
+
+    with pytest.raises(RuntimeError, match=field):
+        settings.validate_security()
+
+
+def test_enabled_production_langfuse_accepts_explicit_secure_configuration() -> None:
+    settings = _valid_production_settings(
+        langfuse_enabled=True,
+        langfuse_public_key="pk-lf-production-key",
+        langfuse_secret_key="sk-lf-production-secret",  # noqa: S106 - fixture
+        langfuse_base_url="https://langfuse.example.test",
+    )
+
+    settings.validate_security()
 
 
 def test_redis_url_percent_encodes_password_delimiters() -> None:
