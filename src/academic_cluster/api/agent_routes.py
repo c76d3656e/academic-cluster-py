@@ -151,6 +151,38 @@ async def _start_managed_agent(
 # =============================================================================
 
 
+@router.get("/agent/contracts")
+async def get_agent_contracts(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return the versioned, machine-readable contract registry."""
+
+    del current_user  # Authentication is the access boundary; contracts are static.
+    from ..agents.node_contracts import export_contract_manifest
+
+    return export_contract_manifest()
+
+
+@router.get("/agent/contracts/{node_name}")
+async def get_agent_contract(
+    node_name: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return one node contract and its exact input/output Artifact schemas."""
+
+    del current_user
+    from ..agents.node_contracts import export_contract_manifest, get_node_contract
+
+    try:
+        get_node_contract(node_name)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail="Unknown Agent node") from error
+    manifest = export_contract_manifest()
+    return next(
+        entry for entry in manifest["nodes"] if entry["node"] == node_name
+    )
+
+
 @router.post("/agent/run", response_model=RunAgentResponse)
 async def run_agent(
     request: RunAgentRequest,

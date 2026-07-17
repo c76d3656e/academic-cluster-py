@@ -34,6 +34,8 @@ from ..services.observability import (
     push_current_execution,
     push_current_project,
 )
+from .node_contracts import NODE_NAMES
+from .node_runtime import enforce_node_contract, trace_agent_execution
 
 logger = structlog.get_logger()
 
@@ -272,6 +274,7 @@ async def _record_decision(
         )
 
 
+@enforce_node_contract("supervisor")
 async def _supervisor_node(state: AgentState) -> dict[str, Any]:
     decision = decide_next_phase(state)
     reason = "phase completion state"
@@ -343,6 +346,7 @@ def _route_from_supervisor(state: AgentState) -> str:
     return state.current_phase if state.current_phase in allowed else TERMINAL_PHASE
 
 
+@enforce_node_contract("research")
 async def _research_node(state: AgentState) -> dict[str, Any]:
     project_token = push_current_project(state.project_id)
     execution_token = push_current_execution(state.execution_id)
@@ -395,6 +399,7 @@ async def _research_node(state: AgentState) -> dict[str, Any]:
         )
 
 
+@enforce_node_contract("analysis")
 async def _analysis_node(state: AgentState) -> dict[str, Any]:
     project_token = push_current_project(state.project_id)
     execution_token = push_current_execution(state.execution_id)
@@ -908,6 +913,7 @@ async def _persist_writing_artifacts(
         )
 
 
+@enforce_node_contract("writing")
 async def _writing_node(state: AgentState) -> dict[str, Any]:
     project_token = push_current_project(state.project_id)
     execution_token = push_current_execution(state.execution_id)
@@ -1078,6 +1084,7 @@ async def _writing_node(state: AgentState) -> dict[str, Any]:
         pop_current_project(project_token)
 
 
+@enforce_node_contract("peer_review")
 async def _peer_review_node(state: AgentState) -> dict[str, Any]:
     project_token = push_current_project(state.project_id)
     execution_token = push_current_execution(state.execution_id)
@@ -1147,6 +1154,7 @@ async def _peer_review_node(state: AgentState) -> dict[str, Any]:
         pop_current_project(project_token)
 
 
+@enforce_node_contract("finalize")
 async def _finalize_node(state: AgentState) -> dict[str, Any]:
     from ..services.database import get_database
 
@@ -1183,12 +1191,20 @@ async def _finalize_node(state: AgentState) -> dict[str, Any]:
 
 def _create_agent_graph() -> StateGraph[AgentState]:
     workflow = StateGraph(AgentState)
-    workflow.add_node("supervisor", _supervisor_node)
-    workflow.add_node("research", _research_node)
-    workflow.add_node("analysis", _analysis_node)
-    workflow.add_node("writing", _writing_node)
-    workflow.add_node("peer_review", _peer_review_node)
-    workflow.add_node("finalize", _finalize_node)
+    # LangGraph's constrained add_node overload does not retain decorator
+    # signatures, so this is the single intentionally dynamic framework boundary.
+    node_handlers: dict[str, Any] = {
+        "supervisor": _supervisor_node,
+        "research": _research_node,
+        "analysis": _analysis_node,
+        "writing": _writing_node,
+        "peer_review": _peer_review_node,
+        "finalize": _finalize_node,
+    }
+    if tuple(node_handlers) != NODE_NAMES:
+        raise RuntimeError("Agent graph nodes and NodeContract registry have drifted")
+    for node_name, handler in node_handlers.items():
+        workflow.add_node(node_name, handler)
     workflow.set_entry_point("supervisor")
     workflow.add_conditional_edges(
         "supervisor",
@@ -1273,6 +1289,7 @@ def _thread_config(project_id: str, execution_id: str) -> RunnableConfig:
     }
 
 
+@trace_agent_execution
 async def run_agent_graph(
     *,
     topic: str,

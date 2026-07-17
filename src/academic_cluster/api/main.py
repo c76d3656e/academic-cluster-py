@@ -432,10 +432,12 @@ async def _shutdown_application_services() -> None:
     from ..agents.checkpoint import close_checkpointer
     from ..services import close_cache, close_database, close_vector_store
     from ..services.agent_runtime import close_agent_run_manager
+    from ..services.langfuse_observability import ashutdown_langfuse_observability
     from ..services.provider_pool import close_pools
 
     closers = (
         ("Agent runtime", close_agent_run_manager),
+        ("Langfuse observability", ashutdown_langfuse_observability),
         ("provider pools", close_pools),
         ("Agent checkpointer", close_checkpointer),
         ("database", close_database),
