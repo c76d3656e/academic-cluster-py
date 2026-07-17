@@ -56,11 +56,6 @@ export const authApi = {
     return response.data
   },
 
-  async updateMe(data: { full_name?: string; password?: string }): Promise<User> {
-    const response = await apiClient.put<User>('/auth/me', data)
-    return response.data
-  },
-
   async logout(refreshToken: string): Promise<void> {
     await apiClient.post('/auth/logout', { refresh_token: refreshToken })
   },

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { projectsApi, type Project } from '@/api/projects'
 import { consoleApi, type ConsoleLlmCall } from '@/api/console'
@@ -11,7 +11,7 @@ import { useI18n } from '@/i18n'
 import { useFeatures } from '@/composables/useFeatures'
 import { useProjectReview } from '@/composables/useProjectReview'
 import { useProjectProgress } from '@/composables/useProjectProgress'
-import { getStatusVariant, getStatusLabel } from '@/lib/utils'
+import { getStatusVariant } from '@/lib/utils'
 import ReviewArticle from '@/components/ReviewArticle.vue'
 import PipelineProgress from '@/components/PipelineProgress.vue'
 import LlmCallsTable from '@/components/LlmCallsTable.vue'
@@ -24,6 +24,7 @@ const projectId = route.params.id as string
 const project = ref<Project | null>(null)
 const isLoading = ref(true)
 const isStarting = ref(false)
+const isPausing = ref(false)
 const isResuming = ref(false)
 const errorMessage = ref<string | null>(null)
 
@@ -42,26 +43,28 @@ const {
 const {
   progressLogs, currentProgressNode, progressMessage,
   completedNodes,
-  connectSSE, startStatusPolling, startCallsPolling,
+  beginExecution,
+  connectSSE, disconnectSSE,
+  startStatusPolling, stopStatusPolling,
+  startCallsPolling, stopCallsPolling,
   loadHistoricalProgress,
 } = useProjectProgress(projectId, {
-  async onCompleted() {
-    // Fetch actual status instead of hardcoding 'completed'
-    try {
-      const s = await projectsApi.getProjectStatus(projectId)
-      if (project.value && s.status) project.value.status = s.status
-      errorMessage.value = s.error_message || null
-    } catch {
-      if (project.value) project.value.status = 'completed'
+  onStatusChange(status) {
+    if (project.value) {
+      project.value.status = status.status
+      project.value.current_phase = status.current_phase
     }
-    loadReview()
+    errorMessage.value = status.error_message || null
+  },
+  onTerminal() {
+    void loadReview()
   },
 })
 
-const isRunning = computed(() => {
-  const s = project.value?.status || ''
-  return s.startsWith('running') || s === 'running'
-})
+const isRunning = computed(() => project.value?.status === 'running')
+const canResume = computed(() => (
+  project.value?.status === 'failed' || project.value?.status === 'interrupted'
+))
 
 // LLM Calls
 const llmCalls = ref<ConsoleLlmCall[]>([])
@@ -89,10 +92,16 @@ function onLlmNodeFilterChange() {
 
 // Pipeline controls
 async function startPipeline() {
+  if (isStarting.value) return
   isStarting.value = true
   try {
-    await projectsApi.startPipeline(projectId)
-    if (project.value) project.value.status = 'running'
+    const response = await projectsApi.startPipeline(projectId)
+    beginExecution(response.execution_id)
+    if (project.value) {
+      project.value.status = 'running'
+      project.value.current_phase = 'supervisor'
+    }
+    errorMessage.value = null
     toast.success(t('pipeline.started'))
     connectSSE()
     startStatusPolling()
@@ -105,11 +114,33 @@ async function startPipeline() {
   }
 }
 
+async function pausePipeline() {
+  if (isPausing.value) return
+  isPausing.value = true
+  try {
+    await projectsApi.pausePipeline(projectId)
+    if (project.value) project.value.status = 'interrupted'
+    errorMessage.value = null
+    disconnectSSE()
+    stopStatusPolling()
+    stopCallsPolling()
+    toast.success(t('pipeline.paused'))
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { detail?: string } } }
+    toast.error(err.response?.data?.detail || t('project.pauseFailed'))
+  } finally {
+    isPausing.value = false
+  }
+}
+
 async function resumePipeline() {
+  if (isResuming.value) return
   isResuming.value = true
   try {
-    await projectsApi.resumePipeline(projectId)
+    const response = await projectsApi.resumePipeline(projectId)
+    beginExecution(response.execution_id)
     if (project.value) project.value.status = 'running'
+    errorMessage.value = null
     toast.success(t('pipeline.resumed'))
     connectSSE()
     startStatusPolling()
@@ -183,7 +214,7 @@ onMounted(async () => {
   document.addEventListener('click', onClickOutside)
   try {
     project.value = await projectsApi.getProject(projectId)
-    loadHistoricalProgress()
+    await loadHistoricalProgress()
     if (isRunning.value) {
       connectSSE()
       startStatusPolling()
@@ -213,6 +244,10 @@ onMounted(async () => {
     isLoading.value = false
   }
 })
+
+onUnmounted(() => {
+  document.removeEventListener('click', onClickOutside)
+})
 </script>
 
 <template>
@@ -227,11 +262,29 @@ onMounted(async () => {
         <Separator orientation="vertical" class="h-5" />
         <h1 class="text-sm font-medium text-foreground truncate">{{ project?.name || t('common.loading') }}</h1>
         <Badge v-if="project" :variant="getStatusVariant(project.status)" class="shrink-0 text-xs">
-          {{ getStatusLabel(project.status) }}
+          {{ t(`pipeline.statuses.${project.status}`) }}
         </Badge>
-        <!-- Download button -->
-        <div v-if="hasReview" class="ml-auto">
-          <div ref="downloadMenuRef" class="relative">
+        <div class="ml-auto flex items-center gap-2">
+          <Button
+            v-if="canResume"
+            variant="outline"
+            size="sm"
+            :disabled="isResuming"
+            @click="resumePipeline"
+          >
+            {{ isResuming ? t('pipeline.resuming') : t('project.resume') }}
+          </Button>
+          <Button
+            v-if="isRunning"
+            variant="outline"
+            size="sm"
+            :disabled="isPausing"
+            @click="pausePipeline"
+          >
+            {{ isPausing ? t('common.processing') : t('project.pause') }}
+          </Button>
+          <!-- Download button -->
+          <div v-if="hasReview" ref="downloadMenuRef" class="relative">
             <Button variant="outline" size="sm" class="gap-1.5 text-xs" @click="showDownloadMenu = !showDownloadMenu">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
               {{ t('article.download') }}
@@ -279,7 +332,7 @@ onMounted(async () => {
       />
 
       <!-- Not started yet -->
-      <div v-if="project.status === 'created'" class="my-12 text-center">
+      <div v-if="project.status === 'pending'" class="my-12 text-center">
         <p class="text-muted-foreground mb-4">{{ t('pipeline.ready') }}</p>
         <Button :disabled="isStarting" size="lg" @click="startPipeline">
           {{ isStarting ? t('pipeline.starting') : t('pipeline.startPipeline') }}
@@ -321,9 +374,6 @@ onMounted(async () => {
         <p v-if="errorMessage" class="text-sm text-destructive mt-2 max-w-lg mx-auto bg-destructive/5 border border-destructive/20 rounded-lg px-4 py-2.5 text-left">
           {{ errorMessage }}
         </p>
-        <Button size="sm" class="mt-4" :disabled="isResuming" @click="resumePipeline">
-          {{ isResuming ? t('pipeline.resuming') : t('pipeline.resumePipeline') }}
-        </Button>
       </div>
     </main>
   </div>

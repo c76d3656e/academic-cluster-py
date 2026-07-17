@@ -87,7 +87,7 @@ async function handleDelete(id: string, name: string) {
               <TableCell class="text-muted-foreground text-sm hidden md:table-cell">{{ p.user_name || p.user_email || '-' }}</TableCell>
               <TableCell>
                 <Badge :variant="getStatusVariant(p.status)" class="text-[0.65rem]">
-                  {{ p.status }}
+                  {{ t(`pipeline.statuses.${p.status}`) }}
                 </Badge>
               </TableCell>
               <TableCell class="text-muted-foreground hidden sm:table-cell">

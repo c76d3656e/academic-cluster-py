@@ -1,4 +1,5 @@
 import apiClient from './client'
+import { normalizePipelineStatus, type PipelineStatus } from '@/lib/pipeline'
 
 // --- Types ---
 
@@ -48,8 +49,6 @@ export interface ProviderInfo {
   health_status: string
   priority: number
   rpm_limit: number
-  weight: number
-  key_strategy: string
   auto_ban: boolean
   test_model: string | null
   input_price_per_m: number
@@ -57,7 +56,6 @@ export interface ProviderInfo {
   failure_count: number
   last_error: string | null
   last_health_check: string | null
-  extra_key_count: number
   created_by: string | null
   created_at: string | null
   updated_at: string | null
@@ -70,11 +68,8 @@ export interface ProviderCreateRequest {
   model?: string
   api_key?: string
   is_enabled?: boolean
-  extra_keys?: string[]
-  key_strategy?: string
   priority?: number
   rpm_limit?: number
-  weight?: number
   auto_ban?: boolean
   test_model?: string
   input_price_per_m?: number
@@ -164,21 +159,20 @@ export interface LlmCallRecord {
 
 export interface AuditLog {
   id: string
-  time: string
   user_id: string
-  user_email: string
   action: string
-  resource_type?: string
-  resource_id?: string
-  ip_address?: string
-  details?: Record<string, unknown>
+  resource_type: string | null
+  resource_id: string | null
+  ip_address: string | null
+  details: Record<string, unknown> | null
+  created_at: string | null
 }
 
 export interface ProjectAdmin {
   id: string
   name: string
   query: string
-  status: string
+  status: PipelineStatus
   user_id: string
   user_name: string
   user_email: string
@@ -239,24 +233,16 @@ export const adminApi = {
     return data
   },
 
-  // Users (admin)
-  async createUser(payload: { email: string; password: string; full_name?: string; role?: string }): Promise<void> {
-    await apiClient.post('/admin/users', payload)
-  },
-
-  async deleteUser(id: string): Promise<void> {
-    await apiClient.delete(`/admin/users/${id}`)
-  },
-
-  async getUserUsage(id: string): Promise<Record<string, unknown>> {
-    const { data } = await apiClient.get(`/admin/users/${id}/usage`)
-    return data
-  },
-
   // Projects (admin)
-  async listAllProjects(params?: { skip?: number; limit?: number; status?: string }): Promise<{ projects: ProjectAdmin[]; total: number }> {
+  async listAllProjects(params?: { skip?: number; limit?: number; status?: PipelineStatus }): Promise<{ projects: ProjectAdmin[]; total: number }> {
     const { data } = await apiClient.get('/admin/projects', { params })
-    return data
+    return {
+      ...data,
+      projects: data.projects.map((project: { status: unknown }) => ({
+        ...project,
+        status: normalizePipelineStatus(project.status),
+      })),
+    }
   },
 
   async deleteProject(id: string): Promise<void> {
@@ -280,7 +266,7 @@ export const adminApi = {
   },
 
   // Audit
-  async getAuditLogs(params?: { action?: string; user_id?: string; days?: number; skip?: number; limit?: number }): Promise<{ logs: AuditLog[]; total: number }> {
+  async getAuditLogs(params?: { action?: string; user_id?: string; skip?: number; limit?: number }): Promise<{ logs: AuditLog[]; total: number }> {
     const { data } = await apiClient.get('/admin/audit/logs', { params })
     return data
   },

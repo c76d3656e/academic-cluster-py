@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 
 const { t } = useI18n()
 
-type ProviderTab = 'llm' | 'embedding' | 'rerank'
+type ProviderTab = 'llm' | 'embedding'
 type AdminTab = ProviderTab | 'source'
 
 const activeTab = shallowRef<AdminTab>('llm')
@@ -56,7 +56,6 @@ const filteredProviders = computed(() =>
 function providerTabLabel(tab: AdminTab): string {
   if (tab === 'llm') return 'LLM'
   if (tab === 'embedding') return 'Embedding'
-  if (tab === 'rerank') return 'Rerank'
   return 'Source'
 }
 
@@ -269,9 +268,9 @@ function sourceBadgeVariant(source: SourceConfigItem): 'default' | 'destructive'
 }
 
 function sourceStatus(source: SourceConfigItem): string {
-  if (source.is_set) return source.value_source === 'db' ? 'DB override' : '.env fallback'
-  if (!source.is_enabled && source.value_source === 'db') return 'Cleared'
-  return 'Unset'
+  if (source.is_set) return source.value_source === 'db' ? t('admin.dbOverride') : t('admin.envFallback')
+  if (!source.is_enabled && source.value_source === 'db') return t('admin.cleared')
+  return t('common.unset')
 }
 
 function sourceDialogTitle(): string {
@@ -307,7 +306,7 @@ onMounted(loadData)
 
     <div class="flex gap-1 mb-6 border-b border-border overflow-x-auto">
       <button
-        v-for="tab in (['llm', 'embedding', 'rerank', 'source'] as const)"
+        v-for="tab in (['llm', 'embedding', 'source'] as const)"
         :key="tab"
         class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px shrink-0"
         :class="activeTab === tab
@@ -478,6 +477,7 @@ onMounted(loadData)
             <div>
               <Label class="text-sm">{{ t('admin.priority') }}</Label>
               <Input v-model.number="form.priority" type="number" class="mt-1" />
+              <p class="text-[0.65rem] text-muted-foreground mt-1">{{ t('admin.priorityHint') }}</p>
             </div>
             <div>
               <Label class="text-sm">{{ t('admin.rpmLimit') }}</Label>

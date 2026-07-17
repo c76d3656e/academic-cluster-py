@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from '@/i18n'
 import { getStatusVariant } from '@/lib/utils'
 import { projectsApi, type Project } from '@/api/projects'
-import { consoleApi } from '@/api/console'
+import type { PipelineStatus } from '@/lib/pipeline'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -42,18 +42,20 @@ async function loadProjects() {
   }
 }
 
-function isRunning(status: string): boolean {
-  return status.startsWith('running')
+function isRunning(status: PipelineStatus): boolean {
+  return status === 'running'
 }
 
-function showResume(status: string): boolean {
+function showResume(status: PipelineStatus): boolean {
   return status === 'interrupted' || status === 'failed'
 }
 
 async function handlePause(projectId: string) {
   actionLoading.value = projectId
   try {
-    await consoleApi.controlPipeline(projectId, 'pause')
+    await projectsApi.pausePipeline(projectId)
+    const project = projects.value.find(item => item.id === projectId)
+    if (project) project.status = 'interrupted'
     await loadProjects()
   } catch {
     alert(t('project.pauseFailed'))
@@ -65,7 +67,9 @@ async function handlePause(projectId: string) {
 async function handleResume(projectId: string) {
   actionLoading.value = projectId
   try {
-    await consoleApi.controlPipeline(projectId, 'resume')
+    await projectsApi.resumePipeline(projectId)
+    const project = projects.value.find(item => item.id === projectId)
+    if (project) project.status = 'running'
     await loadProjects()
   } catch {
     alert(t('project.resumeFailed'))
@@ -128,7 +132,7 @@ async function handleDelete(projectId: string, name: string) {
               <TableCell class="text-muted-foreground max-w-[200px] truncate hidden md:table-cell">{{ p.query }}</TableCell>
               <TableCell>
                 <Badge :variant="getStatusVariant(p.status)" class="text-[0.65rem]">
-                  {{ p.status }}
+                  {{ t(`pipeline.statuses.${p.status}`) }}
                 </Badge>
               </TableCell>
               <TableCell class="text-muted-foreground text-sm hidden sm:table-cell">

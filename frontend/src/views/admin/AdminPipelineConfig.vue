@@ -25,31 +25,8 @@ const groupedConfigs = computed(() => {
   return groups
 })
 
-const groupLabels: Record<string, string> = {
-  '搜索': 'admin.groupSearch',
-  '过滤': 'admin.groupFilter',
-  '嵌入': 'admin.groupEmbedding',
-  '重排序': 'admin.groupRerank',
-  '聚类': 'admin.groupCluster',
-  '写作': 'admin.groupWriting',
-  'KG 抽取': 'admin.groupKgExtraction',
-  '证据卡片': 'admin.groupEvidenceCards',
-  '社区记忆': 'admin.groupCommunityMemory',
-  '系统': 'admin.groupSystem',
-}
-
-const groupIcons: Record<string, string> = {
-  '搜索': '🔍',
-  '过滤': '🔽',
-  '嵌入': '📐',
-  '重排序': '📊',
-  '聚类': '🧩',
-  '写作': '✍️',
-}
-
 function getGroupLabel(group: string): string {
-  const key = groupLabels[group]
-  return key ? t(key) : group
+  return group === '系统' ? t('admin.groupSystem') : group
 }
 
 async function loadConfigs() {
@@ -144,7 +121,7 @@ onMounted(loadConfigs)
       >
         <CardContent class="p-6">
           <h3 class="text-base font-medium mb-4">
-            {{ groupIcons[group] || '' }} {{ getGroupLabel(group) }}
+            {{ getGroupLabel(group) }}
           </h3>
 
           <div class="space-y-3">

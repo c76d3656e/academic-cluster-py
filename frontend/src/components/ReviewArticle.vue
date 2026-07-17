@@ -174,10 +174,13 @@ function scrollToReferences() {
               {{ getSectionTitle(section, idx) }}
             </a>
           </h2>
+          <!-- renderSection sanitizes with DOMPurify before v-html. -->
+          <!-- eslint-disable vue/no-v-html -->
           <div
             class="nature-prose"
             v-html="renderSection(section.content)"
           />
+          <!-- eslint-enable vue/no-v-html -->
         </section>
       </div>
 
@@ -187,35 +190,35 @@ function scrollToReferences() {
         <h2 class="text-lg font-semibold text-foreground tracking-tight mb-6">{{ t('article.references') }}</h2>
         <ol class="space-y-4">
           <li
-            v-for="(ref, idx) in references"
-            :id="`ref-${idx + 1}`"
-            :key="`${ref.paper_id || idx}-${ref.new_number || idx}`"
+            v-for="(reference, idx) in references"
+            :id="`ref-${reference.new_number || idx + 1}`"
+            :key="`${reference.paper_id || idx}-${reference.new_number || idx}`"
             class="ref-card scroll-mt-20"
           >
             <div class="flex gap-3">
-              <span class="ref-num">{{ idx + 1 }}</span>
+              <span class="ref-num">{{ reference.new_number || idx + 1 }}</span>
               <div class="flex-1 min-w-0 space-y-1.5">
-                <p v-if="ref.title" class="text-[0.8125rem] font-medium text-foreground leading-relaxed">
-                  {{ ref.title }}
+                <p v-if="reference.title" class="text-[0.8125rem] font-medium text-foreground leading-relaxed">
+                  {{ reference.title }}
                 </p>
                 <div class="flex flex-wrap gap-x-3 gap-y-1 text-[0.6875rem] text-muted-foreground">
-                  <span v-if="ref.authors"><b class="text-foreground/40">{{ t('article.authors') }}:</b> {{ ref.authors }}</span>
-                  <span v-if="ref.venue"><b class="text-foreground/40">{{ t('article.venue') }}:</b> {{ ref.venue }}</span>
-                  <span v-if="ref.year"><b class="text-foreground/40">{{ t('article.year') }}:</b> {{ ref.year }}</span>
-                  <span v-if="ref.doi"><b class="text-foreground/40">{{ t('article.doi') }}:</b> {{ ref.doi }}</span>
+                  <span v-if="reference.authors"><b class="text-foreground/40">{{ t('article.authors') }}:</b> {{ reference.authors }}</span>
+                  <span v-if="reference.venue"><b class="text-foreground/40">{{ t('article.venue') }}:</b> {{ reference.venue }}</span>
+                  <span v-if="reference.year"><b class="text-foreground/40">{{ t('article.year') }}:</b> {{ reference.year }}</span>
+                  <span v-if="reference.doi"><b class="text-foreground/40">{{ t('article.doi') }}:</b> {{ reference.doi }}</span>
                 </div>
-                <div v-if="evidenceCardByPaperId[ref.paper_id]" class="mt-2 pl-3 border-l-2 border-border/50 space-y-1">
+                <div v-if="evidenceCardByPaperId[reference.paper_id]" class="mt-2 pl-3 border-l-2 border-border/50 space-y-1">
                   <p class="text-[0.6875rem] text-foreground/80 leading-relaxed">
-                    <b class="text-foreground/40">{{ t('article.claim') }}:</b> {{ evidenceCardByPaperId[ref.paper_id].claim }}
+                    <b class="text-foreground/40">{{ t('article.claim') }}:</b> {{ evidenceCardByPaperId[reference.paper_id].claim }}
                   </p>
-                  <p v-if="evidenceCardByPaperId[ref.paper_id].method" class="text-[0.6875rem] text-muted-foreground">
-                    <b class="text-foreground/40">{{ t('article.method') }}:</b> {{ evidenceCardByPaperId[ref.paper_id].method }}
+                  <p v-if="evidenceCardByPaperId[reference.paper_id].method" class="text-[0.6875rem] text-muted-foreground">
+                    <b class="text-foreground/40">{{ t('article.method') }}:</b> {{ evidenceCardByPaperId[reference.paper_id].method }}
                   </p>
-                  <p v-if="evidenceCardByPaperId[ref.paper_id].metric" class="text-[0.6875rem] text-muted-foreground">
-                    <b class="text-foreground/40">{{ t('article.metric') }}:</b> {{ evidenceCardByPaperId[ref.paper_id].metric }}
+                  <p v-if="evidenceCardByPaperId[reference.paper_id].metric" class="text-[0.6875rem] text-muted-foreground">
+                    <b class="text-foreground/40">{{ t('article.metric') }}:</b> {{ evidenceCardByPaperId[reference.paper_id].metric }}
                   </p>
-                  <p v-if="evidenceCardByPaperId[ref.paper_id].limitation" class="text-[0.6875rem] text-muted-foreground">
-                    <b class="text-foreground/40">{{ t('article.limitation') }}:</b> {{ evidenceCardByPaperId[ref.paper_id].limitation }}
+                  <p v-if="evidenceCardByPaperId[reference.paper_id].limitation" class="text-[0.6875rem] text-muted-foreground">
+                    <b class="text-foreground/40">{{ t('article.limitation') }}:</b> {{ evidenceCardByPaperId[reference.paper_id].limitation }}
                   </p>
                 </div>
               </div>

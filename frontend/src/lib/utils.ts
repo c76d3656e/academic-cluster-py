@@ -1,6 +1,7 @@
 import type { ClassValue } from "clsx"
 import { clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
+import type { PipelineStatus } from '@/lib/pipeline'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -9,50 +10,14 @@ export function cn(...inputs: ClassValue[]) {
 // ─── Shared status helpers ──────────────────────────────────────────────
 
 /** Badge variant for project/task status */
-export function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
+export function getStatusVariant(status: PipelineStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (status) {
     case 'completed': return 'default'
     case 'running': return 'secondary'
     case 'failed': return 'destructive'
-    default: return 'outline'
+    case 'interrupted': return 'outline'
+    case 'pending': return 'outline'
   }
-}
-
-/** Human-readable label for a status string (handles "running:NODE" prefix) */
-export function getStatusLabel(status: string): string {
-  if (status === 'completed') return 'Completed'
-  if (status === 'failed') return 'Failed'
-  if (status === 'interrupted') return 'Interrupted'
-  if (status === 'created') return 'Ready'
-  if (status.startsWith('running:')) {
-    const node = status.replace('running:', '')
-    const nodeNames: Record<string, string> = {
-      search: 'Searching',
-      deduplicate: 'Deduplicating',
-      filter: 'Filtering',
-      bm25: 'Building index',
-      embedding: 'Vectorizing',
-      pgvector_knn: 'Building KNN',
-      rerank: 'Reranking',
-      kg_extraction: 'Extracting KG',
-      community_memory: 'Synthesizing memory',
-      community_detection: 'Detecting communities',
-      visualize_community: 'Generating visualization',
-      evidence_cards: 'Generating evidence cards',
-      gap_analysis: 'Analyzing gaps',
-      targeted_refine: 'Supplementary search',
-      outline_generation: 'Generating outline',
-      user_confirm: 'Awaiting confirmation',
-      write_review: 'Writing review',
-      coverage_audit: 'Auditing coverage',
-      section_revision: 'Revising sections',
-      artifact_registration: 'Registering artifacts',
-      finalize: 'Finalizing',
-    }
-    return nodeNames[node] || `Running: ${node}`
-  }
-  if (status === 'running') return 'Running'
-  return status
 }
 
 // ─── Number / token formatting ──────────────────────────────────────────

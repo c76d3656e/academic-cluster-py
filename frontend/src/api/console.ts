@@ -1,4 +1,5 @@
 import apiClient from './client'
+import { normalizePipelineStatus, type PipelineStatus } from '@/lib/pipeline'
 
 // --- Types ---
 
@@ -16,7 +17,7 @@ export interface ConsoleOverview {
   recent_projects: Array<{
     id: string
     name: string
-    status: string
+    status: PipelineStatus
     created_at: string | null
   }>
 }
@@ -70,7 +71,13 @@ export interface ConsoleLlmCall {
 export const consoleApi = {
   async getOverview(): Promise<ConsoleOverview> {
     const { data } = await apiClient.get('/console/overview')
-    return data
+    return {
+      ...data,
+      recent_projects: data.recent_projects.map((project: { status: unknown }) => ({
+        ...project,
+        status: normalizePipelineStatus(project.status),
+      })),
+    }
   },
 
   async getUsageTrend(days?: number, granularity?: string): Promise<ConsoleUsageTrend[]> {
@@ -83,11 +90,6 @@ export const consoleApi = {
     return data.calls ?? data
   },
 
-  async getProfile(): Promise<{ email: string; full_name: string; role: string; created_at: string }> {
-    const { data } = await apiClient.get('/console/profile')
-    return data
-  },
-
   async updateProfile(payload: { full_name?: string }): Promise<void> {
     await apiClient.patch('/console/profile', payload)
   },
@@ -96,7 +98,4 @@ export const consoleApi = {
     await apiClient.post('/console/profile/password', payload)
   },
 
-  async controlPipeline(projectId: string, action: 'pause' | 'resume'): Promise<void> {
-    await apiClient.post(`/pipeline/${projectId}/${action}`)
-  },
 }

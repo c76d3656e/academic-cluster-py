@@ -1,20 +1,25 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from '@/i18n'
 import type { ProgressLog } from '@/composables/useProjectProgress'
 import { PIPELINE_STAGES } from '@/composables/useProjectProgress'
+import type { PipelinePhase, PipelineStatus } from '@/lib/pipeline'
 
 const { t } = useI18n()
 
-defineProps<{
+const props = defineProps<{
   isRunning: boolean
-  completedNodes: Set<string>
+  completedNodes: Set<PipelinePhase>
   progressLogs: ProgressLog[]
-  currentProgressNode: string
+  currentProgressNode: PipelinePhase | ''
   progressMessage: string
-  projectStatus: string
+  projectStatus: PipelineStatus
 }>()
 
 const pipelineStages = PIPELINE_STAGES
+const currentStage = computed(() => (
+  pipelineStages.find(stage => stage.key === props.currentProgressNode)
+))
 </script>
 
 <template>
@@ -28,7 +33,7 @@ const pipelineStages = PIPELINE_STAGES
             <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
           </span>
           <span class="text-sm font-medium">
-            {{ isRunning ? t('pipeline.executing') : projectStatus === 'completed' ? t('pipeline.done') : t('pipeline.stopped') }}
+            {{ isRunning ? t('pipeline.executing') : t(`pipeline.statuses.${projectStatus}`) }}
           </span>
         </div>
         <span class="text-xs text-muted-foreground tabular-nums">
@@ -49,8 +54,8 @@ const pipelineStages = PIPELINE_STAGES
       <div class="flex items-center justify-between mt-3">
         <div class="flex items-center gap-2 text-sm">
           <template v-if="currentProgressNode">
-            <span>{{ pipelineStages.find(s => s.key === currentProgressNode)?.icon }}</span>
-            <span class="font-medium">{{ pipelineStages.find(s => s.key === currentProgressNode)?.label }}</span>
+            <span>{{ currentStage?.icon }}</span>
+            <span class="font-medium">{{ currentStage ? t(currentStage.labelKey) : currentProgressNode }}</span>
           </template>
           <template v-else-if="projectStatus === 'completed'">
             <span>✅</span>

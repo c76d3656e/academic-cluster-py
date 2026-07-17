@@ -102,7 +102,7 @@ onMounted(async () => {
           </div>
           <div class="flex items-center gap-3 shrink-0">
             <Badge :variant="getStatusVariant(project.status)" class="text-[0.65rem] shrink-0">
-              {{ project.status }}
+              {{ t(`pipeline.statuses.${project.status}`) }}
             </Badge>
             <span class="text-caption text-muted-foreground shrink-0">
               {{ project.created_at ? new Date(project.created_at).toLocaleDateString() : '' }}

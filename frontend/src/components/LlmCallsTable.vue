@@ -49,7 +49,7 @@ function onFilterChange(e: Event) {
         >
           <option value="">{{ t('admin.recentCallsTitle') }}</option>
           <option v-for="stage in pipelineStages" :key="stage.key" :value="stage.key">
-            {{ stage.label }} / {{ stage.key }}
+            {{ t(stage.labelKey) }} / {{ stage.key }}
           </option>
         </select>
         <span class="text-muted-foreground">

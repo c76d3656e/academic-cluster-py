@@ -5,6 +5,14 @@ import { useAuth } from '@/composables/useAuth'
 import { useI18n } from '@/i18n'
 import { formatTime } from '@/lib/utils'
 import { projectsApi, type Project } from '@/api/projects'
+import { useSSE } from '@/composables/useSSE'
+import { usePolling } from '@/composables/usePolling'
+import {
+  isTerminalPipelineStatus,
+  normalizePipelinePhase,
+  PIPELINE_STAGES,
+  type PipelineStatus,
+} from '@/lib/pipeline'
 import { Button } from '@/components/ui/button'
 
 const router = useRouter()
@@ -24,9 +32,10 @@ const messages = ref<ChatMessage[]>([])
 const input = ref('')
 const isProcessing = ref(false)
 const currentProjectId = ref<string | null>(null)
-const progressNode = ref('')
-const progressMessage = ref('')
-let eventSource: EventSource | null = null
+const streamProjectId = ref<string | null>(null)
+let chatSessionGeneration = 0
+let streamSessionGeneration = 0
+let statusRequestGeneration = 0
 
 const messagesContainer = ref<HTMLElement | null>(null)
 
@@ -35,32 +44,10 @@ const projects = ref<Project[]>([])
 const isLoadingProjects = ref(false)
 const sidebarOpen = ref(true)
 
-const nodeKeyMap: Record<string, string> = {
-  search: 'nodes.searchFull',
-  deduplicate: 'nodes.deduplicateFull',
-  filter: 'nodes.filterFull',
-  bm25: 'nodes.bm25Full',
-  embedding: 'nodes.embeddingFull',
-  pgvector_knn: 'nodes.pgvectorKnnFull',
-  rerank: 'nodes.rerankFull',
-  kg_extraction: 'nodes.kgExtractionFull',
-  community_detection: 'nodes.communityDetectionFull',
-  visualize_community: 'nodes.visualizeCommunityFull',
-  evidence_cards: 'nodes.evidenceCardsFull',
-  gap_analysis: 'nodes.gapAnalysisFull',
-  targeted_refine: 'nodes.targetedRefineFull',
-  outline_generation: 'nodes.outlineGenerationFull',
-  user_confirm: 'nodes.userConfirmFull',
-  write_review: 'nodes.writeReviewFull',
-  coverage_audit: 'nodes.coverageAuditFull',
-  section_revision: 'nodes.sectionRevisionFull',
-  artifact_registration: 'nodes.artifactRegistrationFull',
-  finalize: 'nodes.finalizeFull',
-}
-
-function getNodeLabel(node: string): string {
-  const key = nodeKeyMap[node]
-  return key ? t(key) : node
+function getPhaseLabel(node: string): string {
+  const phase = normalizePipelinePhase(node)
+  const stage = PIPELINE_STAGES.find(item => item.key === phase)
+  return stage ? t(stage.labelKey) : node
 }
 
 function addMessage(role: ChatMessage['role'], content: string, extra?: Partial<ChatMessage>) {
@@ -91,10 +78,13 @@ async function loadProjects() {
 }
 
 function startNewChat() {
+  chatSessionGeneration += 1
   messages.value = []
   currentProjectId.value = null
+  streamProjectId.value = null
   isProcessing.value = false
   disconnectSSE()
+  stopStatusPolling()
 }
 
 function loadProjectChat(project: Project) {
@@ -102,17 +92,19 @@ function loadProjectChat(project: Project) {
   router.push(`/projects/${project.id}`)
 }
 
-function getStatusColor(status: string): string {
+function getStatusColor(status: PipelineStatus): string {
   if (status === 'completed') return 'text-green-600'
   if (status === 'failed') return 'text-red-600'
-  if (status.startsWith('running')) return 'text-blue-600'
+  if (status === 'interrupted') return 'text-amber-600'
+  if (status === 'running') return 'text-blue-600'
   return 'text-muted-foreground'
 }
 
-function getStatusLabel(status: string): string {
+function getStatusIcon(status: PipelineStatus): string {
   if (status === 'completed') return '✓'
   if (status === 'failed') return '✗'
-  if (status.startsWith('running')) return '●'
+  if (status === 'interrupted') return '‖'
+  if (status === 'running') return '●'
   return '○'
 }
 
@@ -120,94 +112,184 @@ async function handleSubmit() {
   const query = input.value.trim()
   if (!query || isProcessing.value) return
 
+  const sessionGeneration = ++chatSessionGeneration
+  stopStatusPolling()
+  disconnectSSE()
   input.value = ''
   addMessage('user', query)
   isProcessing.value = true
 
+  let project: Project
   try {
-    const project = await projectsApi.createProject({
+    project = await projectsApi.createProject({
       name: query.slice(0, 100),
       query,
     })
+  } catch (error: unknown) {
+    if (sessionGeneration !== chatSessionGeneration) return
+    const err = error as { response?: { data?: { detail?: string } }; message?: string }
+    const detail = err.response?.data?.detail || err.message || ''
+    addMessage('system', t('pipeline.createFailed', { error: detail }))
+    isProcessing.value = false
+    return
+  }
 
-    currentProjectId.value = project.id
-    addMessage('system', t('pipeline.projectCreated'))
+  if (sessionGeneration !== chatSessionGeneration) {
+    void loadProjects()
+    return
+  }
 
-    // 刷新项目列表
-    loadProjects()
+  currentProjectId.value = project.id
+  addMessage('system', t('pipeline.projectCreated'))
+  void loadProjects()
 
+  try {
     await projectsApi.startPipeline(project.id)
-
-    connectSSE(project.id)
-  } catch (err: any) {
-    const error = err.response?.data?.detail || err.message || ''
-    addMessage('system', t('pipeline.createFailed', { error }))
+    if (sessionGeneration !== chatSessionGeneration) return
+    connectSSE(project.id, sessionGeneration)
+  } catch (error: unknown) {
+    if (sessionGeneration !== chatSessionGeneration) return
+    const err = error as { response?: { data?: { detail?: string } }; message?: string }
+    const detail = err.response?.data?.detail || err.message
+    addMessage('system', detail ? `${t('pipeline.startFailed')}: ${detail}` : t('pipeline.startFailed'))
     isProcessing.value = false
   }
 }
 
-function connectSSE(projectId: string) {
-  if (eventSource) eventSource.close()
+let notifiedTerminalKey: string | null = null
+let streamDisconnectNotified = false
 
-  const baseUrl = import.meta.env.VITE_API_URL || '/api'
-  const token = localStorage.getItem('access_token')
-  const url = `${baseUrl}/stream/${projectId}?token=${token}`
-  eventSource = new EventSource(url)
+function updateListedProjectStatus(projectId: string, status: PipelineStatus) {
+  const project = projects.value.find(item => item.id === projectId)
+  if (project) project.status = status
+}
 
-  let retryCount = 0
-  const maxRetries = 3
+async function refreshCurrentStatus(
+  expectedSession = chatSessionGeneration,
+  isPollingCurrent: () => boolean = () => true,
+) {
+  const projectId = currentProjectId.value
+  if (!projectId) return
+  const requestGeneration = ++statusRequestGeneration
 
-  eventSource.addEventListener('connected', () => {
-    retryCount = 0
-    addMessage('progress', t('pipeline.connected'), { node: 'system' })
-  })
-
-  eventSource.addEventListener('progress', (e) => {
-    const data = JSON.parse(e.data)
-    progressNode.value = data.node || ''
-    progressMessage.value = data.message || ''
-
-    const existingIdx = messages.value.findIndex(
-      m => m.role === 'progress' && m.node === data.node
-    )
-    if (existingIdx >= 0) {
-      messages.value[existingIdx].content = data.message || getNodeLabel(data.node || '')
-      messages.value[existingIdx].time = formatTime()
-    } else {
-      const label = getNodeLabel(data.node || '')
-      addMessage('progress', data.message || label, { node: data.node, status: data.status })
+  try {
+    const status = await projectsApi.getProjectStatus(projectId)
+    if (
+      expectedSession !== chatSessionGeneration
+      || projectId !== currentProjectId.value
+      || requestGeneration !== statusRequestGeneration
+      || !isPollingCurrent()
+    ) return
+    updateListedProjectStatus(projectId, status.status)
+    if (!isTerminalPipelineStatus(status.status)) {
+      notifiedTerminalKey = null
+      return
     }
 
-    nextTick(() => {
-      if (messagesContainer.value) {
-        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
-      }
-    })
-  })
-
-  eventSource.addEventListener('complete', () => {
-    addMessage('result', t('pipeline.pipelineCompleted'))
+    isProcessing.value = false
     disconnectSSE()
-    isProcessing.value = false
-    // 刷新项目列表更新状态
-    loadProjects()
-  })
+    stopStatusPolling()
+    const terminalKey = `${status.execution_id ?? projectId}:${status.status}`
+    if (notifiedTerminalKey === terminalKey) return
+    notifiedTerminalKey = terminalKey
 
-  eventSource.onerror = () => {
-    retryCount++
-    if (retryCount >= maxRetries) {
-      addMessage('system', t('pipeline.disconnected'))
-      disconnectSSE()
-      isProcessing.value = false
+    if (status.status === 'completed') {
+      addMessage('result', t('pipeline.pipelineCompleted'))
+    } else if (status.status === 'failed') {
+      const detail = status.error_message ? `: ${status.error_message}` : ''
+      addMessage('system', `${t('pipeline.taskFailed')}${detail}`)
+    } else {
+      addMessage('system', t('pipeline.taskInterrupted'))
     }
+    void loadProjects()
+  } catch {
+    // Polling will retry; a transient status request failure must not finish the task in the UI.
   }
 }
 
-function disconnectSSE() {
-  if (eventSource) {
-    eventSource.close()
-    eventSource = null
-  }
+const statusPolling = usePolling(async ({ isCurrent }) => {
+  const sessionGeneration = chatSessionGeneration
+  await refreshCurrentStatus(sessionGeneration, isCurrent)
+}, 5000)
+
+function startStatusPolling() {
+  statusPolling.start()
+}
+
+function stopStatusPolling() {
+  statusRequestGeneration += 1
+  statusPolling.stop()
+}
+
+function isCurrentStream(): boolean {
+  return streamSessionGeneration === chatSessionGeneration
+    && streamProjectId.value !== null
+    && streamProjectId.value === currentProjectId.value
+}
+
+const baseUrl = import.meta.env.VITE_API_URL || '/api'
+const { connect: openSSE, disconnect: disconnectSSE } = useSSE({
+  url: () => `${baseUrl}/stream/${streamProjectId.value ?? ''}`,
+  token: () => localStorage.getItem('access_token') ?? undefined,
+  onConnected() {
+    if (!isCurrentStream()) return
+    streamDisconnectNotified = false
+    addMessage('progress', t('pipeline.connected'), { node: 'system' })
+  },
+  onProgress(data) {
+    if (!isCurrentStream()) return
+    const phase = normalizePipelinePhase(data.phase ?? data.node)
+    if (!phase) return
+
+    const message = typeof data.message === 'string' && data.message
+      ? data.message
+      : getPhaseLabel(phase)
+    const existing = messages.value.find(item => item.role === 'progress' && item.node === phase)
+    if (existing) {
+      existing.content = message
+      existing.status = typeof data.status === 'string' ? data.status : undefined
+      existing.time = formatTime()
+    } else {
+      addMessage('progress', message, {
+        node: phase,
+        status: typeof data.status === 'string' ? data.status : undefined,
+      })
+    }
+  },
+  onComplete() {
+    if (!isCurrentStream()) return
+    const sessionGeneration = streamSessionGeneration
+    disconnectSSE()
+    void refreshCurrentStatus(sessionGeneration)
+  },
+  onError(data) {
+    if (!isCurrentStream()) return
+    const sessionGeneration = streamSessionGeneration
+    disconnectSSE()
+    const message = typeof data.message === 'string'
+      ? data.message
+      : t('pipeline.taskFailed')
+    addMessage('system', message)
+    void refreshCurrentStatus(sessionGeneration)
+  },
+  onTransportError() {
+    if (!isCurrentStream()) return
+    if (!streamDisconnectNotified) {
+      streamDisconnectNotified = true
+      addMessage('system', t('pipeline.disconnected'))
+    }
+  },
+})
+
+function connectSSE(projectId: string, sessionGeneration = chatSessionGeneration) {
+  if (sessionGeneration !== chatSessionGeneration) return
+  disconnectSSE()
+  streamProjectId.value = projectId
+  streamSessionGeneration = sessionGeneration
+  notifiedTerminalKey = null
+  streamDisconnectNotified = false
+  openSSE()
+  startStatusPolling()
 }
 
 function viewResult() {
@@ -232,7 +314,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  chatSessionGeneration += 1
   disconnectSSE()
+  stopStatusPolling()
 })
 </script>
 
@@ -267,8 +351,13 @@ onUnmounted(() => {
           @click="loadProjectChat(project)"
         >
           <div class="flex items-start gap-2">
-            <span class="mt-0.5 shrink-0" :class="getStatusColor(project.status)">
-              {{ getStatusLabel(project.status) }}
+            <span
+              class="mt-0.5 shrink-0"
+              :class="getStatusColor(project.status)"
+              :title="t(`pipeline.statuses.${project.status}`)"
+              :aria-label="t(`pipeline.statuses.${project.status}`)"
+            >
+              {{ getStatusIcon(project.status) }}
             </span>
             <div class="min-w-0 flex-1">
               <p class="font-medium truncate text-foreground">{{ project.name }}</p>
@@ -309,7 +398,7 @@ onUnmounted(() => {
             class="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
           >
             <svg viewBox="0 0 24 24" class="size-5" fill="currentColor">
-              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
             </svg>
             <span class="text-xs font-medium hidden sm:inline">GitHub</span>
           </a>
@@ -375,7 +464,7 @@ onUnmounted(() => {
                   <div class="size-2 rounded-full bg-blue-500 mt-1.5 shrink-0 animate-pulse" />
                   <div>
                     <p class="text-[0.65rem] font-medium text-blue-600 dark:text-blue-400 mb-0.5">
-                      {{ getNodeLabel(msg.node || '') || msg.node || t('common.processing') }}
+                      {{ getPhaseLabel(msg.node || '') || msg.node || t('common.processing') }}
                     </p>
                     <p class="text-sm text-foreground">{{ msg.content }}</p>
                   </div>

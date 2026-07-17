@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint src/ --ext .ts,.vue",
     "lint:fix": "eslint src/ --ext .ts,.vue --fix",
-    "type-check": "vue-tsc --noEmit -p tsconfig.app.json"
+    "type-check": "vue-tsc --noEmit -p tsconfig.app.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@lucide/vue": "^1.17.0",
@@ -48,6 +49,7 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.0.0",
     "vite": "^8.0.12",
+    "vitest": "^4.1.10",
     "vue-tsc": "^3.2.8"
   }
 }

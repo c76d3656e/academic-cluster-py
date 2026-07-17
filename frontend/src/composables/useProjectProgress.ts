@@ -1,8 +1,19 @@
-import { ref, onUnmounted } from 'vue'
-import { projectsApi } from '@/api/projects'
+import { onUnmounted, ref } from 'vue'
+import {
+  projectsApi,
+  type PipelineStatusResponse,
+} from '@/api/projects'
 import { useSSE } from '@/composables/useSSE'
 import { usePolling } from '@/composables/usePolling'
 import { formatTime } from '@/lib/utils'
+import {
+  isTerminalPipelineStatus,
+  normalizePipelinePhase,
+  PIPELINE_STAGES,
+  type PipelinePhase,
+} from '@/lib/pipeline'
+
+export { PIPELINE_STAGES } from '@/lib/pipeline'
 
 export interface ProgressLog {
   time: string
@@ -10,127 +21,237 @@ export interface ProgressLog {
   message: string
 }
 
-export const PIPELINE_STAGES = [
-  { key: 'search', label: '搜索', icon: '🔍' },
-  { key: 'deduplicate', label: '去重', icon: '🔄' },
-  { key: 'filter', label: '过滤', icon: '🔽' },
-  { key: 'bm25', label: 'BM25', icon: '📊' },
-  { key: 'embedding', label: '嵌入', icon: '📐' },
-  { key: 'pgvector_knn', label: 'KNN', icon: '🕸️' },
-  { key: 'rerank', label: '重排序', icon: '📈' },
-  { key: 'kg_extraction', label: '实体抽取', icon: '🏷️' },
-  { key: 'community_memory', label: '社区记忆', icon: '🧠' },
-  { key: 'community_detection', label: '聚类', icon: '🧩' },
-  { key: 'visualize_community', label: '可视化', icon: '🎨' },
-  { key: 'evidence_cards', label: '证据卡片', icon: '📋' },
-  { key: 'outline_generation', label: '大纲', icon: '📝' },
-  { key: 'gap_analysis', label: '缺口分析', icon: '🔎' },
-  { key: 'write_review', label: '写作', icon: '✍️' },
-  { key: 'finalize', label: '完成', icon: '✅' },
-]
+export interface ProjectProgressOptions {
+  onStatusChange?: (status: PipelineStatusResponse) => void
+  onTerminal?: (status: PipelineStatusResponse) => void
+}
 
-const STAGE_LABEL_MAP: Record<string, string> = Object.fromEntries(
-  PIPELINE_STAGES.map(s => [s.key, s.label])
-)
+function eventMessage(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
 
-export function useProjectProgress(projectId: string, opts?: {
-  onCompleted?: () => void
-}) {
+function eventFailed(value: unknown): boolean {
+  return typeof value === 'string' && (value === 'failed' || value.endsWith('_failed'))
+}
+
+function nodeTime(value: string | null): string {
+  if (!value) return formatTime()
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? formatTime() : date.toLocaleTimeString()
+}
+
+export function useProjectProgress(projectId: string, options?: ProjectProgressOptions) {
   const progressLogs = ref<ProgressLog[]>([])
-  const currentProgressNode = ref('')
+  const currentProgressNode = ref<PipelinePhase | ''>('')
   const progressMessage = ref('')
-  const completedNodes = ref<Set<string>>(new Set())
-  const failedNodes = ref<Set<string>>(new Set())
+  const completedNodes = ref<Set<PipelinePhase>>(new Set())
+  const failedNodes = ref<Set<PipelinePhase>>(new Set())
+  const executionId = ref<string | null>(null)
+  let historicalProgressLoaded = false
+  let historyRequestGeneration = 0
+  let statusRequestGeneration = 0
+  let notifiedTerminalKey: string | null = null
 
-  // ── SSE ──
+  function addLog(node: string, message: string) {
+    progressLogs.value.push({ time: formatTime(), node, message })
+  }
+
+  function activatePhase(phase: PipelinePhase) {
+    const previous = currentProgressNode.value
+    if (previous && previous !== phase && !failedNodes.value.has(previous)) {
+      completedNodes.value.add(previous)
+    }
+    currentProgressNode.value = phase
+  }
+
+  function resetProgress() {
+    progressLogs.value = []
+    currentProgressNode.value = ''
+    progressMessage.value = ''
+    completedNodes.value = new Set()
+    failedNodes.value = new Set()
+    historicalProgressLoaded = false
+  }
+
+  function normalizedExecutionId(value: string | null | undefined): string | null {
+    const normalized = value?.trim()
+    return normalized || null
+  }
+
+  function adoptExecution(nextExecutionId: string | null | undefined): boolean {
+    const next = normalizedExecutionId(nextExecutionId)
+    if (!next || executionId.value === next) return false
+
+    const changedExecution = executionId.value !== null
+    if (changedExecution) resetProgress()
+    executionId.value = next
+    notifiedTerminalKey = null
+    historyRequestGeneration += 1
+    return changedExecution
+  }
+
+  /** Start tracking an accepted execution while preserving same-checkpoint resumes. */
+  function beginExecution(nextExecutionId: string) {
+    statusRequestGeneration += 1
+    notifiedTerminalKey = null
+    adoptExecution(nextExecutionId)
+  }
+
   const baseUrl = import.meta.env.VITE_API_URL || '/api'
-
-  const { isConnected, connect: sseConnect, disconnect: sseDisconnect } = useSSE({
+  const {
+    connect: connectSSE,
+    disconnect: disconnectSSE,
+  } = useSSE({
     url: `${baseUrl}/stream/${projectId}`,
-    token: localStorage.getItem('access_token') ?? undefined,
+    token: () => localStorage.getItem('access_token') ?? undefined,
     onConnected() {
-      progressLogs.value.push({ time: formatTime(), node: 'system', message: 'Connected to progress stream' })
+      addLog('system', 'Connected to progress stream')
     },
     onProgress(data) {
-      currentProgressNode.value = (data.node as string) || ''
-      progressMessage.value = (data.message as string) || ''
-      if (data.message) {
-        progressLogs.value.push({ time: formatTime(), node: (data.node as string) || '', message: data.message as string })
+      const phase = normalizePipelinePhase(data.phase ?? data.node)
+      const message = eventMessage(data.message)
+
+      if (phase) {
+        activatePhase(phase)
+        if (eventFailed(data.status)) {
+          failedNodes.value.add(phase)
+          completedNodes.value.delete(phase)
+        } else {
+          failedNodes.value.delete(phase)
+        }
       }
-    },
-    onNodeFinished(data) {
-      const node = data.node as string
-      if (!node) return
-      if (data.status === 'succeeded') {
-        completedNodes.value.add(node)
-        failedNodes.value.delete(node)
-      } else if (data.status === 'failed') {
-        failedNodes.value.add(node)
-      }
+      progressMessage.value = message
+      if (message) addLog(phase ?? eventMessage(data.node), message)
     },
     onComplete() {
-      progressLogs.value.push({ time: formatTime(), node: 'system', message: 'Pipeline completed!' })
-      sseDisconnect()
-      opts?.onCompleted?.()
+      disconnectSSE()
+      addLog('system', 'Pipeline execution finished')
+      void refreshStatus()
     },
     onError(data) {
-      progressLogs.value.push({ time: formatTime(), node: 'error', message: `Error: ${data.message}` })
+      disconnectSSE()
+      addLog('error', eventMessage(data.message) || 'Pipeline execution failed')
+      void refreshStatus()
+    },
+    onTransportError() {
+      addLog('system', 'Progress stream disconnected; status polling is still active')
     },
   })
 
-  // ── Status polling ──
-  const { start: startStatusPolling, stop: stopStatusPolling } = usePolling(async () => {
+  async function refreshStatus(): Promise<PipelineStatusResponse | null> {
+    const requestGeneration = ++statusRequestGeneration
     try {
       const status = await projectsApi.getProjectStatus(projectId)
-      if (status.status?.startsWith('running:')) {
-        currentProgressNode.value = status.status.replace('running:', '')
-      }
-      if (status.status === 'completed' || status.status === 'failed') {
+      if (requestGeneration !== statusRequestGeneration) return null
+      adoptExecution(status.execution_id)
+      if (status.current_phase) activatePhase(status.current_phase)
+      options?.onStatusChange?.(status)
+
+      if (isTerminalPipelineStatus(status.status)) {
+        if (status.status === 'completed') {
+          for (const stage of PIPELINE_STAGES) completedNodes.value.add(stage.key)
+          failedNodes.value.clear()
+          currentProgressNode.value = ''
+        } else if (currentProgressNode.value) {
+          failedNodes.value.add(currentProgressNode.value)
+          completedNodes.value.delete(currentProgressNode.value)
+        }
         stopStatusPolling()
         stopCallsPolling()
-        opts?.onCompleted?.()
-      } else if (status.status === 'interrupted') {
-        stopStatusPolling()
+        disconnectSSE()
+        const terminalKey = `${status.execution_id ?? executionId.value ?? 'none'}:${status.status}`
+        if (notifiedTerminalKey !== terminalKey) {
+          notifiedTerminalKey = terminalKey
+          options?.onTerminal?.(status)
+        }
+      } else {
+        notifiedTerminalKey = null
       }
-    } catch { /* ignore */ }
+      return status
+    } catch {
+      return null
+    }
+  }
+
+  const statusPolling = usePolling(async () => {
+    await refreshStatus()
   }, 5000)
 
-  // ── Calls polling (stub – the view passes its own loadLlmCalls) ──
-  let callsPollTimer: ReturnType<typeof setInterval> | null = null
+  function startStatusPolling() {
+    statusPolling.start()
+  }
 
-  function startCallsPolling(loadCalls: () => void) {
-    if (callsPollTimer) return
-    loadCalls()
-    callsPollTimer = setInterval(loadCalls, 5000)
+  function stopStatusPolling() {
+    statusRequestGeneration += 1
+    statusPolling.stop()
+  }
+
+  let loadCallsCallback: (() => void | Promise<void>) | null = null
+  const callsPolling = usePolling(async () => {
+    await loadCallsCallback?.()
+  }, 5000)
+
+  function startCallsPolling(loadCalls: () => void | Promise<void>) {
+    loadCallsCallback = loadCalls
+    callsPolling.start()
   }
 
   function stopCallsPolling() {
-    if (callsPollTimer) { clearInterval(callsPollTimer); callsPollTimer = null }
+    callsPolling.stop()
+    loadCallsCallback = null
   }
 
-  // ── Historical progress ──
   async function loadHistoricalProgress() {
+    if (historicalProgressLoaded) return
+    historicalProgressLoaded = true
+    const requestGeneration = ++historyRequestGeneration
+    const expectedExecutionId = executionId.value
     try {
-      const res = await projectsApi.getProjectProgress(projectId)
-      for (const node of res.nodes) {
-        const label = STAGE_LABEL_MAP[node.node_name] || node.node_name
-        const time = node.finished_at
-          ? new Date(node.finished_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-          : new Date(node.started_at || '').toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        if (node.status === 'succeeded') {
-          progressLogs.value.push({ time, node: node.node_name, message: `${label} 完成` })
-          completedNodes.value.add(node.node_name)
+      const response = await projectsApi.getProjectProgress(projectId)
+      if (requestGeneration !== historyRequestGeneration) {
+        historicalProgressLoaded = false
+        return
+      }
+      const responseExecutionId = normalizedExecutionId(response.execution_id)
+      if (
+        expectedExecutionId
+        && responseExecutionId
+        && expectedExecutionId !== responseExecutionId
+      ) {
+        historicalProgressLoaded = false
+        return
+      }
+      if (!expectedExecutionId && responseExecutionId) {
+        executionId.value = responseExecutionId
+      }
+      for (const node of response.nodes) {
+        const phase = normalizePipelinePhase(node.node_name)
+        if (!phase) continue
+
+        const time = nodeTime(node.finished_at ?? node.started_at)
+        if (node.status === 'succeeded' || node.status === 'completed') {
+          progressLogs.value.push({ time, node: phase, message: `${phase} completed` })
+          completedNodes.value.add(phase)
+          failedNodes.value.delete(phase)
         } else if (node.status === 'failed') {
-          const err = node.error_message ? `: ${node.error_message}` : ''
-          progressLogs.value.push({ time, node: node.node_name, message: `${label} 失败${err}` })
-          failedNodes.value.add(node.node_name)
+          const detail = node.error_message ? `: ${node.error_message}` : ''
+          progressLogs.value.push({ time, node: phase, message: `${phase} failed${detail}` })
+          failedNodes.value.add(phase)
+          completedNodes.value.delete(phase)
+          currentProgressNode.value = phase
+        } else if (node.status === 'running') {
+          activatePhase(phase)
+        } else if (node.status === 'interrupted') {
+          progressLogs.value.push({ time, node: phase, message: `${phase} interrupted` })
+          failedNodes.value.add(phase)
+          completedNodes.value.delete(phase)
+          currentProgressNode.value = phase
         }
       }
-    } catch { /* ignore */ }
+    } catch {
+      if (requestGeneration === historyRequestGeneration) historicalProgressLoaded = false
+    }
   }
-
-  function connectSSE() { sseConnect() }
-  function disconnectSSE() { sseDisconnect() }
 
   onUnmounted(() => {
     disconnectSSE()
@@ -139,12 +260,18 @@ export function useProjectProgress(projectId: string, opts?: {
   })
 
   return {
-    progressLogs, currentProgressNode, progressMessage,
-    completedNodes, failedNodes, isConnected,
-    connectSSE, disconnectSSE,
-    startStatusPolling, stopStatusPolling,
-    startCallsPolling, stopCallsPolling,
+    progressLogs,
+    currentProgressNode,
+    progressMessage,
+    completedNodes,
+    executionId,
+    beginExecution,
+    connectSSE,
+    disconnectSSE,
+    startStatusPolling,
+    stopStatusPolling,
+    startCallsPolling,
+    stopCallsPolling,
     loadHistoricalProgress,
-    pipelineStages: PIPELINE_STAGES,
   }
 }
