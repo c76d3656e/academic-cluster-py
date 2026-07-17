@@ -178,9 +178,7 @@ async def get_agent_contract(
     except ValueError as error:
         raise HTTPException(status_code=404, detail="Unknown Agent node") from error
     manifest = export_contract_manifest()
-    return next(
-        entry for entry in manifest["nodes"] if entry["node"] == node_name
-    )
+    return next(entry for entry in manifest["nodes"] if entry["node"] == node_name)
 
 
 @router.post("/agent/run", response_model=RunAgentResponse)

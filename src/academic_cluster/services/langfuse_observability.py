@@ -644,8 +644,11 @@ def _resolve_runtime_ids(
 
         project_id = project_id or get_current_project()
         execution_id = execution_id or get_current_execution()
-    except Exception:
-        pass
+    except Exception as error:
+        logger.debug(
+            "Langfuse runtime context lookup failed open",
+            error_type=type(error).__name__,
+        )
     return project_id, execution_id
 
 
@@ -683,8 +686,11 @@ def _create_execution_trace_id(client: Any, execution_id: str | None) -> str:
         trace_id = client.create_trace_id(seed=seed)
         if isinstance(trace_id, str) and re.fullmatch(r"[0-9a-f]{32}", trace_id):
             return trace_id
-    except Exception:
-        pass
+    except Exception as error:
+        logger.debug(
+            "Langfuse trace ID generation failed open",
+            error_type=type(error).__name__,
+        )
     return sha256(seed.encode("utf-8")).hexdigest()[:32]
 
 

@@ -49,12 +49,10 @@ def enforce_node_contract(
 
     contract = get_node_contract(node_name)
     input_ref = (
-        f"{contract.input_artifact.artifact_id}@"
-        f"{contract.input_artifact.version}"
+        f"{contract.input_artifact.artifact_id}@{contract.input_artifact.version}"
     )
     output_ref = (
-        f"{contract.output_artifact.artifact_id}@"
-        f"{contract.output_artifact.version}"
+        f"{contract.output_artifact.artifact_id}@{contract.output_artifact.version}"
     )
 
     def decorate(function: _NodeHandler[_StateT]) -> _NodeHandler[_StateT]:
