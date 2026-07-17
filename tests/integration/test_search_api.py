@@ -12,6 +12,8 @@ from academic_cluster.tools.academic_search import (
     search_semantic_scholar,
 )
 
+pytestmark = [pytest.mark.integration, pytest.mark.live]
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio

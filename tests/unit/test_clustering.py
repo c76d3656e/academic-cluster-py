@@ -4,13 +4,9 @@
 
 import networkx as nx
 
-from academic_cluster.graphs.nodes.community_detection import (
-    select_community_balanced_papers,
-)
 from academic_cluster.tools.clustering import (
     build_hybrid_graph,
     community_detection,
-    generate_community_visualization,
 )
 
 
@@ -148,94 +144,3 @@ class TestCommunityDetection:
         G = nx.Graph()
         clusters = community_detection(G, algorithm="leiden")
         assert clusters == []
-
-
-class TestVisualization:
-    """可视化测试"""
-
-    def test_generate_visualization(self):
-        """测试可视化生成"""
-        G = nx.Graph()
-        G.add_edges_from(
-            [
-                ("p1", "p2", {"weight": 0.8}),
-                ("p2", "p3", {"weight": 0.6}),
-            ]
-        )
-
-        clusters = [
-            {"id": "cluster_0", "paper_ids": ["p1", "p2"], "size": 2},
-            {"id": "cluster_1", "paper_ids": ["p3"], "size": 1},
-        ]
-
-        papers = [
-            {"id": "p1", "title": "Paper 1", "citation_count": 10},
-            {"id": "p2", "title": "Paper 2", "citation_count": 5},
-            {"id": "p3", "title": "Paper 3", "citation_count": 3},
-        ]
-
-        viz = generate_community_visualization(G, clusters, papers)
-
-        assert "nodes" in viz
-        assert "edges" in viz
-        assert "clusters" in viz
-        assert len(viz["nodes"]) == 3
-        assert len(viz["clusters"]) == 2
-
-
-def test_select_community_balanced_papers_exact_160_and_covers_clusters():
-    papers = [
-        {
-            "id": f"p{i}",
-            "title": f"Paper {i}",
-            "abstract": "abstract",
-            "citation_count": 240 - i,
-            "publication_date": "2024-01-01",
-        }
-        for i in range(240)
-    ]
-    clusters = [
-        {"id": "c1", "paper_ids": [f"p{i}" for i in range(120)]},
-        {"id": "c2", "paper_ids": [f"p{i}" for i in range(120, 180)]},
-        {"id": "c3", "paper_ids": [f"p{i}" for i in range(180, 240)]},
-    ]
-
-    core, auxiliary = select_community_balanced_papers(
-        clusters=clusters,
-        reranked_papers=papers,
-        core_count=160,
-        auxiliary_count=40,
-    )
-
-    assert len(core) == 160
-    assert len(set(core)) == 160
-    assert len(auxiliary) == 40
-    for cluster in clusters:
-        assert set(core) & set(cluster["paper_ids"])
-
-
-def test_generate_visualization_uses_checkpoint_safe_scalar_types():
-    import numpy as np
-
-    G = nx.Graph()
-    G.add_edge("p1", "p2", weight=np.float64(0.8))
-    clusters = [{"id": "cluster_1", "paper_ids": ["p1", "p2"], "size": np.int64(2)}]
-    papers = [
-        {"id": "p1", "title": "Paper 1", "citation_count": np.int64(4)},
-        {"id": "p2", "title": "Paper 2", "citation_count": np.int64(1)},
-    ]
-
-    visualization = generate_community_visualization(G, clusters, papers)
-
-    def assert_plain_scalars(value):
-        if isinstance(value, dict):
-            for nested in value.values():
-                assert_plain_scalars(nested)
-        elif isinstance(value, list):
-            for nested in value:
-                assert_plain_scalars(nested)
-        else:
-            assert not isinstance(value, np.generic)
-            assert not isinstance(value, np.ndarray)
-
-    assert_plain_scalars(visualization)

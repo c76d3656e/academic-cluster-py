@@ -1,9 +1,4 @@
-"""
-Pipeline 配置管理 API
-
-提供 pipeline 各阶段的可调参数管理，支持热重载。
-参数存储在数据库中，pipeline 运行时实时读取。
-"""
+"""Administration API for runtime feature flags that are actually consumed."""
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -13,523 +8,69 @@ from ...services.database import get_database
 
 router = APIRouter(prefix="/pipeline-config")
 
-# =============================================================================
-# 默认配置（与 .env / settings.py 对齐）
-# =============================================================================
-
-DEFAULT_CONFIG = {
-    # 搜索阶段
-    "search.limit_per_source": {
-        "value": "200",
-        "label": "每源最大搜索数",
-        "description": "每个数据源（Semantic Scholar, OpenAlex, Crossref, arXiv, PubMed）的最大搜索结果数",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.max_rounds": {
-        "value": "3",
-        "label": "最大搜索轮次",
-        "description": "多轮搜索的最大轮数，每轮根据覆盖度评估决定是否补充搜索",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.initial_query_limit": {
-        "value": "12",
-        "label": "初始搜索词上限",
-        "description": "LLM 生成的初始搜索 query 最大数量",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.refine_query_limit": {
-        "value": "8",
-        "label": "补充搜索词上限",
-        "description": "每轮补充搜索时 LLM 生成的新 query 最大数量",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.target_relevant": {
-        "value": "50",
-        "label": "目标相关论文数",
-        "description": "覆盖度评估认为充分的最低相关论文数",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.min_relevant": {
-        "value": "20",
-        "label": "最少相关论文数",
-        "description": "低于此数量则搜索失败警告",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.sources": {
-        "value": "semantic_scholar,openalex,crossref,arxiv,pubmed",
-        "label": "数据源列表",
-        "description": "要搜索的学术数据源，逗号分隔",
-        "group": "搜索",
-        "type": "string",
-    },
-    "search.source_limit.semantic_scholar": {
-        "value": "200",
-        "label": "Semantic Scholar 每源限制",
-        "description": "每轮搜索 Semantic Scholar 的最大结果数",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.source_limit.openalex": {
-        "value": "200",
-        "label": "OpenAlex 每源限制",
-        "description": "每轮搜索 OpenAlex 的最大结果数",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.source_limit.crossref": {
-        "value": "200",
-        "label": "Crossref 每源限制",
-        "description": "每轮搜索 Crossref 的最大结果数",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.source_limit.arxiv": {
-        "value": "200",
-        "label": "arXiv 每源限制",
-        "description": "每轮搜索 arXiv 的最大结果数",
-        "group": "搜索",
-        "type": "int",
-    },
-    "search.source_limit.pubmed": {
-        "value": "200",
-        "label": "PubMed 每源限制",
-        "description": "每轮搜索 PubMed 的最大结果数",
-        "group": "搜索",
-        "type": "int",
-    },
-    # 过滤阶段
-    "filter.min_citation_count": {
-        "value": "0",
-        "label": "最小引用数",
-        "description": "过滤掉引用数低于此值的论文",
-        "group": "过滤",
-        "type": "int",
-    },
-    "filter.require_abstract": {
-        "value": "true",
-        "label": "要求有摘要",
-        "description": "是否过滤掉没有摘要的论文",
-        "group": "过滤",
-        "type": "bool",
-    },
-    # BM25 阶段
-    "bm25.min_score": {
-        "value": "0.5",
-        "label": "BM25 最低分数",
-        "description": "BM25 评分低于此阈值的论文将被过滤，分数范围取决于语料库大小",
-        "group": "过滤",
-        "type": "float",
-    },
-    "bm25.max_papers": {
-        "value": "2000",
-        "label": "BM25 最大论文数",
-        "description": "BM25 筛选后进入 embedding 的最大论文数上限",
-        "group": "过滤",
-        "type": "int",
-    },
-    # 嵌入阶段
-    "embedding.max_papers": {
-        "value": "1000",
-        "label": "最大嵌入论文数",
-        "description": "进入 embedding 的最大论文数上限，从 BM25 结果中选取",
-        "group": "嵌入",
-        "type": "int",
-    },
-    # 重排序阶段
-    "rerank.max_papers": {
-        "value": "500",
-        "label": "重排序最大论文数",
-        "description": "rerank 后保留的高质量论文数，进入 KG 抽取和聚类",
-        "group": "重排序",
-        "type": "int",
-    },
-    "rerank.core_count": {
-        "value": "160",
-        "label": "核心参考文献数",
-        "description": "聚类后选取的核心论文数量（用于 evidence cards）",
-        "group": "重排序",
-        "type": "int",
-    },
-    "rerank.auxiliary_count": {
-        "value": "160",
-        "label": "辅助参考文献数",
-        "description": "聚类后选取的辅助论文数量（用于 review 写作）",
-        "group": "重排序",
-        "type": "int",
-    },
-    # 聚类阶段
-    "kg.concurrency": {
-        "value": "-1",
-        "label": "\u004b\u0047 \u5e76\u53d1\u5ea6",
-        "description": "\u002d\u0031 \u8868\u793a\u81ea\u52a8\uff1a\u6309\u5df2\u542f\u7528 \u004c\u004c\u004d \u0070\u0072\u006f\u0076\u0069\u0064\u0065\u0072 \u7684 \u0072\u0070\u006d\u005f\u006c\u0069\u006d\u0069\u0074 \u603b\u548c\u8bbe\u7f6e\u5e76\u53d1\uff1b\u6b63\u6574\u6570\u8868\u793a\u624b\u52a8\u4e0a\u9650\u3002",
-        "group": "\u004b\u0047 \u62bd\u53d6",
-        "type": "int",
-    },
-    "evidence.concurrency": {
-        "value": "-1",
-        "label": "证据卡片并发度",
-        "description": "-1 表示自动：按已启用 LLM provider 的 rpm_limit 总和设置并发；正整数表示手动上限。",
-        "group": "证据卡片",
-        "type": "int",
-    },
-    "community_memory.concurrency": {
-        "value": "-1",
-        "label": "\u793e\u533a\u8bb0\u5fc6\u5e76\u53d1\u5ea6",
-        "description": "-1 \u8868\u793a\u81ea\u52a8\uff1a\u6309 provider slot \u4e0e\u5b89\u5168\u4e0a\u9650\u5171\u540c\u51b3\u5b9a\uff1b\u6b63\u6574\u6570\u8868\u793a\u624b\u52a8\u4e0a\u9650\u3002",
-        "group": "\u793e\u533a\u8bb0\u5fc6",
-        "type": "int",
-    },
-    "evidence.timeout_s": {
-        "value": "300",
-        "label": "证据卡片超时",
-        "description": "单篇证据卡片 LLM 调用的最长等待秒数，超时后使用确定性 fallback 卡片以保证批次完成",
-        "group": "证据卡片",
-        "type": "int",
-    },
-    "community_memory.timeout_s": {
-        "value": "180",
-        "label": "\u793e\u533a\u8bb0\u5fc6\u5355\u9879\u8d85\u65f6",
-        "description": "\u5355\u4e2a\u793e\u533a LLM \u589e\u5f3a\u7684\u6700\u957f\u7b49\u5f85\u79d2\u6570\uff0c\u8d85\u65f6\u540e\u4f7f\u7528 deterministic fallback\u3002",
-        "group": "\u793e\u533a\u8bb0\u5fc6",
-        "type": "int",
-    },
-    "community_memory.llm_limit": {
-        "value": "16",
-        "label": "\u793e\u533a\u8bb0\u5fc6 LLM \u589e\u5f3a\u4e0a\u9650",
-        "description": "\u53ea\u5bf9\u8bba\u6587\u6570\u6700\u591a\u7684\u524d N \u4e2a\u793e\u533a\u505a LLM \u589e\u5f3a\uff0c\u5176\u4f59\u4f7f\u7528 deterministic memory\u3002",
-        "group": "\u793e\u533a\u8bb0\u5fc6",
-        "type": "int",
-    },
-    "gap_analysis.timeout_s": {
-        "value": "180",
-        "label": "缺口分析超时",
-        "description": "缺口分析 LLM judge 的最长等待秒数，超时后使用确定性 gap 判定继续流程",
-        "group": "缺口分析",
-        "type": "int",
-    },
-    "clustering.algorithm": {
-        "value": "leiden",
-        "label": "社区检测算法",
-        "description": "可选 leiden（默认，modularity 优化）或 walktrap（随机游走）",
-        "group": "聚类",
-        "type": "string",
-    },
-    "clustering.resolution": {
-        "value": "1.0",
-        "label": "Leiden 分辨率",
-        "description": "Leiden 社区检测的 resolution 参数，越大聚类越多越细",
-        "group": "聚类",
-        "type": "float",
-    },
-    "clustering.weight_knn": {
-        "value": "0.45",
-        "label": "KNN 边权重",
-        "description": "向量相似度边在混合图中的权重",
-        "group": "聚类",
-        "type": "float",
-    },
-    "clustering.weight_kg_relation": {
-        "value": "0.25",
-        "label": "KG 关系边权重",
-        "description": "知识图谱关系边在混合图中的权重",
-        "group": "聚类",
-        "type": "float",
-    },
-    "clustering.weight_shared_entity": {
-        "value": "0.15",
-        "label": "共享实体边权重",
-        "description": "共享 KG 实体边在混合图中的权重",
-        "group": "聚类",
-        "type": "float",
-    },
-    "clustering.weight_evidence": {
-        "value": "0.10",
-        "label": "证据边权重",
-        "description": "共享证据卡片边在混合图中的权重",
-        "group": "聚类",
-        "type": "float",
-    },
-    "clustering.weight_quality": {
-        "value": "0.05",
-        "label": "质量先验边权重",
-        "description": "高质量论文对边在混合图中的权重",
-        "group": "聚类",
-        "type": "float",
-    },
-    # 相关性过滤
-    "relevance.enabled": {
-        "value": "true",
-        "label": "启用 Topic 相关性过滤",
-        "description": "开启后，对核心和辅助文献做 Topic 相关性评估，过滤弱相关论文",
-        "group": "相关性过滤",
-        "type": "bool",
-    },
-    "relevance.threshold": {
-        "value": "0.4",
-        "label": "相关性阈值",
-        "description": "LLM 评估的相关性分数低于此值的论文将被过滤",
-        "group": "相关性过滤",
-        "type": "float",
-    },
-    "relevance.concurrency": {
-        "value": "-1",
-        "label": "相关性评估并发度",
-        "description": "-1 表示自动：按已启用 LLM provider 的 rpm_limit 总和设置并发；正整数表示手动上限。",
-        "group": "相关性过滤",
-        "type": "int",
-    },
-    "relevance.timeout_s": {
-        "value": "120",
-        "label": "单篇 LLM 超时秒数",
-        "description": "单篇论文相关性评估 LLM 调用的最长等待秒数",
-        "group": "相关性过滤",
-        "type": "int",
-    },
-    # 写作阶段
-    "writing.total_target_words": {
-        "value": "12000",
-        "label": "综述目标字数",
-        "description": "综述全文的目标字数",
-        "group": "写作",
-        "type": "int",
-    },
-    "writing.section_reference_target": {
-        "value": "30",
-        "label": "每章参考文献数",
-        "description": "每个章节分配的候选参考文献上限",
-        "group": "写作",
-        "type": "int",
-    },
+DEFAULT_CONFIG: dict[str, dict[str, str]] = {
     "ui.show_usage": {
         "value": "false",
         "label": "显示调用明细",
-        "description": "开启后用户可在项目详情页查看 LLM 调用明细，并在控制台查看个人用量页面",
+        "description": (
+            "开启后用户可在项目详情页查看 LLM 调用明细，并在控制台查看个人用量页面"
+        ),
         "group": "系统",
         "type": "bool",
-    },
+    }
 }
 
 
-# =============================================================================
-# 数据库初始化
-# =============================================================================
-
-
 async def init_pipeline_config_table() -> None:
-    """创建 pipeline_config 表（如果不存在）"""
+    """Create the feature-flag table used by the frontend."""
+
     db = get_database()
     async with db.session() as session:
         await session.execute(
             text("""
-            CREATE TABLE IF NOT EXISTS pipeline_config (
-                key VARCHAR(100) PRIMARY KEY,
-                value TEXT NOT NULL,
-                label VARCHAR(200) NOT NULL DEFAULT '',
-                description TEXT NOT NULL DEFAULT '',
-                group_name VARCHAR(50) NOT NULL DEFAULT 'general',
-                value_type VARCHAR(20) NOT NULL DEFAULT 'string',
-                updated_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
+                CREATE TABLE IF NOT EXISTS pipeline_config (
+                    key VARCHAR(100) PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    label VARCHAR(200) NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    group_name VARCHAR(50) NOT NULL DEFAULT 'general',
+                    value_type VARCHAR(20) NOT NULL DEFAULT 'string',
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """)
         )
-        await session.commit()
 
 
 async def _ensure_defaults() -> None:
-    """确保默认配置项存在"""
+    """Upsert supported flags and remove keys from the deleted legacy graph."""
+
     db = get_database()
     async with db.session() as session:
-        for key, cfg in DEFAULT_CONFIG.items():
+        for key, config in DEFAULT_CONFIG.items():
             await session.execute(
                 text("""
-                INSERT INTO pipeline_config (key, value, label, description, group_name, value_type)
-                VALUES (:key, :value, :label, :desc, :group, :vtype)
-                ON CONFLICT (key) DO NOTHING
-            """),
+                    INSERT INTO pipeline_config (
+                        key, value, label, description, group_name, value_type
+                    )
+                    VALUES (:key, :value, :label, :description, :group, :value_type)
+                    ON CONFLICT (key) DO UPDATE SET
+                        label = EXCLUDED.label,
+                        description = EXCLUDED.description,
+                        group_name = EXCLUDED.group_name,
+                        value_type = EXCLUDED.value_type
+                """),
                 {
                     "key": key,
-                    "value": cfg["value"],
-                    "label": cfg["label"],
-                    "desc": cfg["description"],
-                    "group": cfg["group"],
-                    "vtype": cfg["type"],
+                    "value": config["value"],
+                    "label": config["label"],
+                    "description": config["description"],
+                    "group": config["group"],
+                    "value_type": config["type"],
                 },
             )
         await session.execute(
-            text("""
-            UPDATE pipeline_config
-            SET value = '160', updated_at = NOW()
-            WHERE key = 'rerank.core_count' AND value = '80'
-        """)
+            text("DELETE FROM pipeline_config WHERE key NOT LIKE 'ui.%'")
         )
-        # 迁移：更新旧的超时默认值
-        timeout_migrations = {
-            "gap_analysis.timeout_s": ("45", "180"),
-            "evidence.timeout_s": ("120", "300"),
-            "community_memory.timeout_s": ("90", "180"),
-        }
-        for key, (old_val, new_val) in timeout_migrations.items():
-            await session.execute(
-                text("""
-                UPDATE pipeline_config
-                SET value = :new_val, updated_at = NOW()
-                WHERE key = :key AND value = :old_val
-            """),
-                {"key": key, "old_val": old_val, "new_val": new_val},
-            )
-        # 中文化迁移：更新旧版英文标签/描述/分组
-        cn_migrations = [
-            ("evidence.timeout_s", "label", "证据卡片超时"),
-            (
-                "evidence.timeout_s",
-                "description",
-                "单篇证据卡片 LLM 调用的最长等待秒数，超时后使用确定性 fallback 卡片以保证批次完成",
-            ),
-            ("evidence.timeout_s", "group_name", "证据卡片"),
-            ("gap_analysis.timeout_s", "label", "缺口分析超时"),
-            (
-                "gap_analysis.timeout_s",
-                "description",
-                "缺口分析 LLM judge 的最长等待秒数，超时后使用确定性 gap 判定继续流程",
-            ),
-            ("gap_analysis.timeout_s", "group_name", "缺口分析"),
-            ("ui.show_usage", "label", "显示调用明细"),
-            (
-                "ui.show_usage",
-                "description",
-                "开启后用户可在项目详情页查看 LLM 调用明细，并在控制台查看个人用量页面",
-            ),
-            ("ui.show_usage", "group_name", "系统"),
-        ]
-        for key, col, cn_val in cn_migrations:
-            await session.execute(
-                text(
-                    f"UPDATE pipeline_config SET {col} = :val, updated_at = NOW() WHERE key = :key"  # nosec B608
-                ),
-                {"key": key, "val": cn_val},
-            )
-        await session.commit()
-
-
-# =============================================================================
-# 读取配置
-# =============================================================================
-
-
-async def get_pipeline_config_dict() -> dict[str, str]:
-    """读取所有 pipeline 配置为 dict"""
-    db = get_database()
-    async with db.session() as session:
-        result = await session.execute(text("SELECT key, value FROM pipeline_config"))
-        rows = result.fetchall()
-    return {row[0]: row[1] for row in rows}
-
-
-async def get_pipeline_config_value(key: str, default: str = "") -> str:
-    """读取单个配置值"""
-    db = get_database()
-    async with db.session() as session:
-        result = await session.execute(
-            text("SELECT value FROM pipeline_config WHERE key = :key"),
-            {"key": key},
-        )
-        row = result.fetchone()
-    return row[0] if row else default
-
-
-def build_node_config(raw: dict[str, str]) -> dict[str, object]:
-    """
-    将扁平的 key-value 配置转换为各节点读取的 config dict。
-
-    返回的 dict 可直接传入 PipelineState.config。
-    """
-
-    def _int(key: str, default: int) -> int:
-        v = raw.get(key, str(default))
-        try:
-            return int(v)
-        except (ValueError, TypeError):
-            return default
-
-    def _float(key: str, default: float) -> float:
-        v = raw.get(key, str(default))
-        try:
-            return float(v)
-        except (ValueError, TypeError):
-            return default
-
-    def _bool(key: str, default: bool) -> bool:
-        v = raw.get(key, str(default)).lower()
-        return v in ("true", "1", "yes")
-
-    def _list(key: str, default: list[str]) -> list[str]:
-        v = raw.get(key, "")
-        if not v:
-            return default
-        return [s.strip() for s in v.split(",") if s.strip()]
-
-    return {
-        # search
-        "limit_per_source": _int("search.limit_per_source", 200),
-        "sources": _list(
-            "search.sources",
-            ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"],
-        ),
-        "search.max_rounds": _int("search.max_rounds", 3),
-        "search.initial_query_limit": _int("search.initial_query_limit", 12),
-        "search.refine_query_limit": _int("search.refine_query_limit", 8),
-        "search.target_relevant": _int("search.target_relevant", 50),
-        "search.min_relevant": _int("search.min_relevant", 20),
-        # filter
-        "min_citation_count": _int("filter.min_citation_count", 0),
-        "require_abstract": _bool("filter.require_abstract", True),
-        # bm25
-        "bm25.min_score": _float("bm25.min_score", 0.5),
-        "bm25.max_papers": _int("bm25.max_papers", 2000),
-        # embedding
-        "max_embedding_papers": _int("embedding.max_papers", 1000),
-        # rerank
-        "rerank.max_papers": _int("rerank.max_papers", 500),
-        "core_reference_count": _int("rerank.core_count", 160),
-        "auxiliary_reference_count": _int("rerank.auxiliary_count", 160),
-        # kg
-        "kg_concurrency": _int("kg.concurrency", -1),
-        "evidence_concurrency": _int("evidence.concurrency", -1),
-        "evidence_timeout_s": _int("evidence.timeout_s", 300),
-        "community_memory_concurrency": _int("community_memory.concurrency", -1),
-        "community_memory_timeout_s": _int("community_memory.timeout_s", 180),
-        "community_memory_llm_limit": _int("community_memory.llm_limit", 16),
-        "gap_analysis_timeout_s": _int("gap_analysis.timeout_s", 180),
-        # clustering
-        "clustering_algorithm": raw.get("clustering.algorithm", "leiden"),
-        "clustering_resolution": _float("clustering.resolution", 1.0),
-        "hybrid_graph_weights": {
-            "knn": _float("clustering.weight_knn", 0.45),
-            "kg_relation": _float("clustering.weight_kg_relation", 0.25),
-            "shared_entity": _float("clustering.weight_shared_entity", 0.15),
-            "evidence": _float("clustering.weight_evidence", 0.10),
-            "quality": _float("clustering.weight_quality", 0.05),
-        },
-        # writing
-        "total_target_words": _int("writing.total_target_words", 12000),
-        "section_reference_target": _int("writing.section_reference_target", 30),
-        # relevance filter
-        "topic_relevance_enabled": _bool("relevance.enabled", True),
-        "topic_relevance_threshold": _float("relevance.threshold", 0.4),
-        "topic_relevance_concurrency": _int("relevance.concurrency", -1),
-        "topic_relevance_timeout_s": _int("relevance.timeout_s", 120),
-    }
-
-
-# =============================================================================
-# API 路由
-# =============================================================================
 
 
 class PipelineConfigItem(BaseModel):
@@ -545,24 +86,36 @@ class PipelineConfigUpdate(BaseModel):
     value: str
 
 
+def _validate_value(config_type: str, value: str) -> str:
+    normalized = value.strip().lower()
+    if config_type == "bool":
+        if normalized not in {"true", "false"}:
+            raise HTTPException(
+                status_code=422,
+                detail="Boolean feature flags accept only 'true' or 'false'",
+            )
+        return normalized
+    return value
+
+
 @router.get("/features")
-async def get_features() -> dict[str, object]:
-    """获取UI功能开关配置（无需认证，前端启动时读取）"""
+async def get_features() -> dict[str, bool]:
+    """Return public UI feature flags."""
+
+    await _ensure_defaults()
     db = get_database()
     async with db.session() as session:
-        from sqlalchemy import text
-
-        r = await session.execute(
+        result = await session.execute(
             text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'")
         )
-        rows = r.fetchall()
-    features = {row[0].replace("ui.", ""): row[1] == "true" for row in rows}
-    return features
+        rows = result.fetchall()
+    return {str(row[0]).removeprefix("ui."): row[1] == "true" for row in rows}
 
 
 @router.get("", response_model=list[PipelineConfigItem])
 async def list_pipeline_config() -> list[PipelineConfigItem]:
-    """获取所有 pipeline 配置"""
+    """List supported runtime feature flags."""
+
     await _ensure_defaults()
     db = get_database()
     async with db.session() as session:
@@ -573,15 +126,14 @@ async def list_pipeline_config() -> list[PipelineConfigItem]:
             )
         )
         rows = result.fetchall()
-
     return [
         PipelineConfigItem(
-            key=row[0],
-            value=row[1],
-            label=row[2],
-            description=row[3],
-            group=row[4],
-            type=row[5],
+            key=str(row[0]),
+            value=str(row[1]),
+            label=str(row[2]),
+            description=str(row[3]),
+            group=str(row[4]),
+            type=str(row[5]),
         )
         for row in rows
     ]
@@ -589,45 +141,44 @@ async def list_pipeline_config() -> list[PipelineConfigItem]:
 
 @router.put("/{key}")
 async def update_pipeline_config(
-    key: str, body: PipelineConfigUpdate
+    key: str,
+    body: PipelineConfigUpdate,
 ) -> dict[str, str]:
-    """更新单个 pipeline 配置"""
+    """Update a supported feature flag."""
+
     db = get_database()
     async with db.session() as session:
         result = await session.execute(
-            text("SELECT key FROM pipeline_config WHERE key = :key"),
+            text("SELECT value_type FROM pipeline_config WHERE key = :key"),
             {"key": key},
         )
-        if not result.fetchone():
+        row = result.fetchone()
+        if not row or key not in DEFAULT_CONFIG:
             raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
-
+        value = _validate_value(str(row[0]), body.value)
         await session.execute(
             text(
-                "UPDATE pipeline_config SET value = :value, updated_at = NOW() WHERE key = :key"
+                "UPDATE pipeline_config "
+                "SET value = :value, updated_at = NOW() WHERE key = :key"
             ),
-            {"key": key, "value": body.value},
+            {"key": key, "value": value},
         )
-        await session.commit()
-
-    return {
-        "key": key,
-        "value": body.value,
-        "message": "配置已更新，新 pipeline 运行时生效",
-    }
+    return {"key": key, "value": value, "message": "配置已更新"}
 
 
 @router.post("/reset")
 async def reset_pipeline_config() -> dict[str, str]:
-    """重置所有 pipeline 配置为默认值"""
+    """Reset supported feature flags to defaults."""
+
+    await _ensure_defaults()
     db = get_database()
     async with db.session() as session:
-        for key, cfg in DEFAULT_CONFIG.items():
+        for key, config in DEFAULT_CONFIG.items():
             await session.execute(
                 text(
-                    "UPDATE pipeline_config SET value = :value, updated_at = NOW() WHERE key = :key"
+                    "UPDATE pipeline_config "
+                    "SET value = :value, updated_at = NOW() WHERE key = :key"
                 ),
-                {"key": key, "value": cfg["value"]},
+                {"key": key, "value": config["value"]},
             )
-        await session.commit()
-
     return {"message": "所有配置已重置为默认值"}

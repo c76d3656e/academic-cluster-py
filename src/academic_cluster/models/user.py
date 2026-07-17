@@ -2,13 +2,13 @@
 用户和认证相关的 Pydantic 模型
 """
 
+import enum
 from datetime import datetime
-from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class UserRole(StrEnum):
+class UserRole(enum.StrEnum):
     """用户角色"""
 
     USER = "user"

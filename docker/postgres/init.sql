@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 -- Refresh tokens table
 CREATE TABLE IF NOT EXISTS refresh_tokens (
@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     is_revoked BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
-CREATE INDEX idx_refresh_tokens_hash ON refresh_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
 
 -- User activities table
 CREATE TABLE IF NOT EXISTS user_activities (
@@ -42,8 +42,8 @@ CREATE TABLE IF NOT EXISTS user_activities (
     ip_address VARCHAR(45),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_user_activities_user_id ON user_activities(user_id);
-CREATE INDEX idx_user_activities_created_at ON user_activities(created_at);
+CREATE INDEX IF NOT EXISTS idx_user_activities_user_id ON user_activities(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_activities_created_at ON user_activities(created_at);
 
 -- Papers table
 CREATE TABLE IF NOT EXISTS papers (
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 
 -- Outlines table
 CREATE TABLE IF NOT EXISTS outlines (
@@ -157,28 +157,6 @@ CREATE TABLE IF NOT EXISTS evidence_cards (
     confidence FLOAT,
     cluster_id UUID REFERENCES clusters(id) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Community memories synthesized from clusters, evidence cards, KG, and paper metadata
-CREATE TABLE IF NOT EXISTS community_memories (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
-    cluster_id UUID REFERENCES clusters(id) ON DELETE CASCADE,
-    summary TEXT,
-    method_families JSONB NOT NULL DEFAULT '[]'::jsonb,
-    key_claims JSONB NOT NULL DEFAULT '[]'::jsonb,
-    limitations JSONB NOT NULL DEFAULT '[]'::jsonb,
-    future_directions JSONB NOT NULL DEFAULT '[]'::jsonb,
-    foundation_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
-    development_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
-    frontier_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
-    representative_papers JSONB NOT NULL DEFAULT '[]'::jsonb,
-    cross_community_links JSONB NOT NULL DEFAULT '[]'::jsonb,
-    proof_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(project_id, cluster_id)
 );
 
 -- Knowledge graph entities
@@ -228,27 +206,25 @@ CREATE TABLE IF NOT EXISTS pipeline_audit_log (
 );
 
 -- Create indexes
-CREATE INDEX idx_papers_external_id ON papers(external_id);
-CREATE INDEX idx_papers_source ON papers(source);
-CREATE INDEX idx_papers_title_trgm ON papers USING gin(title gin_trgm_ops);
-CREATE INDEX idx_embeddings_paper_id ON embeddings(paper_id);
-CREATE INDEX idx_cluster_assignments_cluster_id ON cluster_assignments(cluster_id);
-CREATE INDEX idx_cluster_assignments_paper_id ON cluster_assignments(paper_id);
-CREATE INDEX idx_outlines_project_id ON outlines(project_id);
-CREATE INDEX idx_written_content_outline_id ON written_content(outline_id);
-CREATE INDEX idx_evidence_cards_paper_id ON evidence_cards(paper_id);
-CREATE INDEX idx_evidence_cards_project_id ON evidence_cards(project_id);
-CREATE UNIQUE INDEX idx_evidence_cards_project_paper ON evidence_cards(project_id, paper_id)
+CREATE INDEX IF NOT EXISTS idx_papers_external_id ON papers(external_id);
+CREATE INDEX IF NOT EXISTS idx_papers_source ON papers(source);
+CREATE INDEX IF NOT EXISTS idx_papers_title_trgm ON papers USING gin(title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_embeddings_paper_id ON embeddings(paper_id);
+CREATE INDEX IF NOT EXISTS idx_cluster_assignments_cluster_id ON cluster_assignments(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_cluster_assignments_paper_id ON cluster_assignments(paper_id);
+CREATE INDEX IF NOT EXISTS idx_outlines_project_id ON outlines(project_id);
+CREATE INDEX IF NOT EXISTS idx_written_content_outline_id ON written_content(outline_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_cards_paper_id ON evidence_cards(paper_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_cards_project_id ON evidence_cards(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_cards_project_paper ON evidence_cards(project_id, paper_id)
     WHERE project_id IS NOT NULL;
-CREATE INDEX idx_community_memories_project_id ON community_memories(project_id);
-CREATE INDEX idx_community_memories_cluster_id ON community_memories(cluster_id);
-CREATE UNIQUE INDEX idx_kg_entities_normalized_name ON kg_entities(normalized_name);
-CREATE INDEX idx_kg_relations_source ON kg_relations(source_entity_id);
-CREATE INDEX idx_kg_relations_target ON kg_relations(target_entity_id);
-CREATE INDEX idx_pipeline_checkpoints_project ON pipeline_checkpoints(project_id);
-CREATE INDEX idx_pipeline_checkpoints_node ON pipeline_checkpoints(project_id, node_name);
-CREATE INDEX idx_pipeline_audit_log_project ON pipeline_audit_log(project_id);
-CREATE INDEX idx_pipeline_audit_log_node ON pipeline_audit_log(project_id, node_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kg_entities_normalized_name ON kg_entities(normalized_name);
+CREATE INDEX IF NOT EXISTS idx_kg_relations_source ON kg_relations(source_entity_id);
+CREATE INDEX IF NOT EXISTS idx_kg_relations_target ON kg_relations(target_entity_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_checkpoints_project ON pipeline_checkpoints(project_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_checkpoints_node ON pipeline_checkpoints(project_id, node_name);
+CREATE INDEX IF NOT EXISTS idx_pipeline_audit_log_project ON pipeline_audit_log(project_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_audit_log_node ON pipeline_audit_log(project_id, node_name);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -259,24 +235,70 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Apply updated_at triggers
-CREATE TRIGGER update_papers_updated_at BEFORE UPDATE ON papers
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Apply updated_at triggers idempotently.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_papers_updated_at'
+          AND tgrelid = 'papers'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_papers_updated_at BEFORE UPDATE ON papers
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
 
-CREATE TRIGGER update_projects_updated_at BEFORE UPDATE ON projects
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_projects_updated_at'
+          AND tgrelid = 'projects'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_projects_updated_at BEFORE UPDATE ON projects
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
 
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_users_updated_at'
+          AND tgrelid = 'users'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
 
-CREATE TRIGGER update_outlines_updated_at BEFORE UPDATE ON outlines
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_outlines_updated_at'
+          AND tgrelid = 'outlines'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_outlines_updated_at BEFORE UPDATE ON outlines
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
 
-CREATE TRIGGER update_written_content_updated_at BEFORE UPDATE ON written_content
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_written_content_updated_at'
+          AND tgrelid = 'written_content'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_written_content_updated_at BEFORE UPDATE ON written_content
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
 
-CREATE TRIGGER update_pipeline_checkpoints_updated_at BEFORE UPDATE ON pipeline_checkpoints
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_pipeline_checkpoints_updated_at'
+          AND tgrelid = 'pipeline_checkpoints'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_pipeline_checkpoints_updated_at BEFORE UPDATE ON pipeline_checkpoints
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;
 
 -- ============================================================================
 -- Observability Tables: Pipeline Runs / Node Executions / LLM Calls
@@ -335,6 +357,7 @@ CREATE INDEX IF NOT EXISTS idx_node_exec_status ON node_executions(status);
 CREATE TABLE IF NOT EXISTS llm_calls (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     project_id UUID,
+    execution_id UUID,
     pipeline_run_id UUID REFERENCES pipeline_runs(id) ON DELETE CASCADE,
     node_execution_id UUID REFERENCES node_executions(id) ON DELETE CASCADE,
     node_name VARCHAR(100),
@@ -364,6 +387,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_llm_calls_project ON llm_calls(project_id);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_execution_id ON llm_calls(execution_id);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_run ON llm_calls(pipeline_run_id);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_node ON llm_calls(node_execution_id);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_node_name ON llm_calls(node_name);
@@ -373,12 +397,12 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status);
 
 -- ============================================================================
--- Provider Registry: 管理 LLM/Embedding/Rerank Provider 配置
+-- Provider Registry: 管理 LLM/Embedding Provider 配置
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS provider_registry (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    kind            VARCHAR(20) NOT NULL,           -- llm / embedding / rerank
+    kind            VARCHAR(20) NOT NULL,           -- llm / embedding
     display_name    VARCHAR(100) NOT NULL,
     base_url        TEXT NOT NULL,
     model           VARCHAR(200),
@@ -407,9 +431,20 @@ CREATE INDEX IF NOT EXISTS idx_provider_registry_kind ON provider_registry(kind)
 CREATE INDEX IF NOT EXISTS idx_provider_registry_enabled ON provider_registry(is_enabled);
 CREATE INDEX IF NOT EXISTS idx_provider_registry_health ON provider_registry(health_status);
 
-CREATE TRIGGER update_provider_registry_updated_at
-    BEFORE UPDATE ON provider_registry
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_provider_registry_updated_at'
+          AND tgrelid = 'provider_registry'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_provider_registry_updated_at
+            BEFORE UPDATE ON provider_registry
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;
 
 -- ============================================================================
 -- Source Registry: academic search source credentials
@@ -429,9 +464,140 @@ CREATE TABLE IF NOT EXISTS source_registry (
 CREATE INDEX IF NOT EXISTS idx_source_registry_key ON source_registry(key);
 CREATE INDEX IF NOT EXISTS idx_source_registry_enabled ON source_registry(is_enabled);
 
-CREATE TRIGGER update_source_registry_updated_at
-    BEFORE UPDATE ON source_registry
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_source_registry_updated_at'
+          AND tgrelid = 'source_registry'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_source_registry_updated_at
+            BEFORE UPDATE ON source_registry
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;
+
+-- ============================================================================
+-- Multi-agent execution, audit logs, and project-scoped paper ownership
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS agent_executions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    agent_name VARCHAR(100) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    input_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    output_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    duration_ms BIGINT NOT NULL DEFAULT 0,
+    token_usage JSONB NOT NULL DEFAULT '{}'::jsonb,
+    quality_score DOUBLE PRECISION,
+    error_message TEXT,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_project_id
+    ON agent_executions(project_id);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_agent_name
+    ON agent_executions(agent_name);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_status
+    ON agent_executions(status);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_project_started
+    ON agent_executions(project_id, started_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_executions_project_active
+    ON agent_executions(project_id)
+    WHERE status IN ('pending', 'running');
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'llm_calls_execution_id_fkey'
+          AND conrelid = 'llm_calls'::regclass
+    ) THEN
+        ALTER TABLE llm_calls
+            ADD CONSTRAINT llm_calls_execution_id_fkey
+            FOREIGN KEY (execution_id)
+            REFERENCES agent_executions(id) ON DELETE SET NULL;
+    END IF;
+END
+$$;
+
+CREATE TABLE IF NOT EXISTS agent_decisions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    execution_id UUID NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    agent_name VARCHAR(100) NOT NULL,
+    decision VARCHAR(100) NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_execution_id
+    ON agent_decisions(execution_id);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_project_id
+    ON agent_decisions(project_id);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_project_created
+    ON agent_decisions(project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_tool_calls (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    execution_id UUID NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    agent_name VARCHAR(100) NOT NULL,
+    tool_name VARCHAR(200) NOT NULL,
+    input_summary TEXT,
+    output_summary TEXT,
+    duration_ms BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'success',
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_execution_id
+    ON agent_tool_calls(execution_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_project_id
+    ON agent_tool_calls(project_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_tool_name
+    ON agent_tool_calls(tool_name);
+CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_project_created
+    ON agent_tool_calls(project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS project_papers (
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    paper_id UUID NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    first_seen_execution_id UUID REFERENCES agent_executions(id) ON DELETE SET NULL,
+    last_seen_execution_id UUID REFERENCES agent_executions(id) ON DELETE SET NULL,
+    source_query TEXT,
+    relevance_score DOUBLE PRECISION,
+    is_selected BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id, paper_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_papers_paper_id
+    ON project_papers(paper_id);
+CREATE INDEX IF NOT EXISTS idx_project_papers_first_execution
+    ON project_papers(first_seen_execution_id);
+CREATE INDEX IF NOT EXISTS idx_project_papers_last_execution
+    ON project_papers(last_seen_execution_id);
+CREATE INDEX IF NOT EXISTS idx_project_papers_project_selected
+    ON project_papers(project_id, is_selected, created_at);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'update_project_papers_updated_at'
+          AND tgrelid = 'project_papers'::regclass
+          AND NOT tgisinternal
+    ) THEN
+        CREATE TRIGGER update_project_papers_updated_at
+            BEFORE UPDATE ON project_papers
+            FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    END IF;
+END
+$$;
 
 -- Function for KNN vector search
 CREATE OR REPLACE FUNCTION search_similar_papers(

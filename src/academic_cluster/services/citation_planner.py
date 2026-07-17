@@ -14,12 +14,14 @@ Citation Planner - 为综述论文各章节分配候选参考文献
 
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
 
+ClusterId = str | int
 
-class CandidateSelectionSource(StrEnum):
+
+class CandidateSelectionSource(enum.StrEnum):
     """候选文献的选取来源（优先级从高到低，对齐 Rust 版）"""
 
     COMMUNITY_CORE = "community_core"
@@ -43,24 +45,12 @@ class NearbyHybridCandidate:
 
 
 @dataclass
-class SectionCitationCandidate:
-    """单篇候选文献的详细信息"""
-
-    paper_id: str
-    cluster_id: int | None
-    is_core: bool
-    source: CandidateSelectionSource
-    hybrid_anchor_paper_id: str | None = None
-    hybrid_weight_basis_points: int | None = None
-
-
-@dataclass
 class SectionCitationPlan:
     """一个章节的引用分配计划"""
 
     section_index: int
     section_title: str
-    key_clusters: list[int]
+    key_clusters: list[ClusterId]
     candidate_paper_ids: list[str]  # 按优先级排序的论文 ID
     candidate_details: list[dict[str, Any]]  # 论文详情，用于渲染
 
@@ -79,9 +69,9 @@ def _fallback_section_clusters(
     section_index: int,
     section_count: int,
     target: int,
-    ordered_clusters: list[int],
-    cluster_counts: dict[int, int],
-) -> list[int]:
+    ordered_clusters: list[ClusterId],
+    cluster_counts: dict[ClusterId, int],
+) -> list[ClusterId]:
     """
     对齐 Rust 版 fallback_section_clusters：旋转滑动窗口。
 
@@ -99,7 +89,7 @@ def _fallback_section_clusters(
     else:
         start = section_index % cluster_count
 
-    selected: list[int] = []
+    selected: list[ClusterId] = []
     candidate_count = 0
     for offset in range(cluster_count):
         cluster = ordered_clusters[(start + offset) % cluster_count]
@@ -112,35 +102,29 @@ def _fallback_section_clusters(
 
 
 def _build_paper_cluster_map(
-    papers: list[dict[str, Any]],
     clusters: list[dict[str, Any]],
-) -> tuple[dict[str, int], dict[int, list[str]]]:
+) -> dict[str, ClusterId]:
     """
     构建论文-聚类映射。
 
-    返回:
-        paper_to_cluster: paper_id -> cluster_id
-        cluster_to_papers: cluster_id -> [paper_id, ...]（保持 papers 中的顺序）
+    返回 paper_id -> cluster_id，兼容生产 UUID 和旧整数聚类 ID。
     """
-    paper_to_cluster: dict[str, int] = {}
-    cluster_to_papers: dict[int, list[str]] = {}
+    paper_to_cluster: dict[str, ClusterId] = {}
 
     for cluster in clusters:
-        cluster_id: int = cluster["id"]
-        cluster_to_papers[cluster_id] = []
+        cluster_id: ClusterId = cluster["id"]
         for pid in cluster.get("paper_ids", []):
             paper_to_cluster[pid] = cluster_id
-            cluster_to_papers[cluster_id].append(pid)
 
-    return paper_to_cluster, cluster_to_papers
+    return paper_to_cluster
 
 
 def _get_ordered_clusters(
-    papers: list[dict[str, Any]], paper_to_cluster: dict[str, int]
-) -> list[int]:
+    papers: list[dict[str, Any]], paper_to_cluster: dict[str, ClusterId]
+) -> list[ClusterId]:
     """按论文出现顺序返回去重的聚类 ID 列表（对齐 Rust 版 ordered_input_clusters）"""
-    seen: set[int] = set()
-    ordered: list[int] = []
+    seen: set[ClusterId] = set()
+    ordered: list[ClusterId] = []
     for paper in papers:
         cid = paper_to_cluster.get(paper["id"])
         if cid is not None and cid not in seen:
@@ -151,12 +135,12 @@ def _get_ordered_clusters(
 
 def _get_cluster_counts(
     papers: list[dict[str, Any]],
-    paper_to_cluster: dict[str, int],
-    ordered_clusters: list[int],
-) -> dict[int, int]:
+    paper_to_cluster: dict[str, ClusterId],
+    ordered_clusters: list[ClusterId],
+) -> dict[ClusterId, int]:
     """对齐 Rust 版 cluster_counts：统计每个聚类的论文数"""
     known = set(ordered_clusters)
-    counts: dict[int, int] = {}
+    counts: dict[ClusterId, int] = {}
     for paper in papers:
         cid = paper_to_cluster.get(paper["id"])
         if cid is not None and cid in known:
@@ -234,7 +218,7 @@ def plan_review_citations(
 
     参数:
         sections: 大纲章节列表
-        papers:   全部论文列表（已按 rerank 排序）
+        papers:   当前项目的全部论文列表（按稳定检索顺序）
         clusters: 聚类数据列表
         section_reference_target: 每个章节的目标参考文献数量
         hybrid_edges: 混合图边列表（用于跨聚类邻居发现）
@@ -254,7 +238,7 @@ def plan_review_citations(
             for i, sec in enumerate(sections)
         ]
 
-    paper_to_cluster, cluster_to_papers = _build_paper_cluster_map(papers, clusters)
+    paper_to_cluster = _build_paper_cluster_map(clusters)
     ordered_clusters = _get_ordered_clusters(papers, paper_to_cluster)
     cluster_cnts = _get_cluster_counts(papers, paper_to_cluster, ordered_clusters)
     section_count = len(sections)
@@ -268,7 +252,6 @@ def plan_review_citations(
             section=section,
             papers=papers,
             paper_to_cluster=paper_to_cluster,
-            cluster_to_papers=cluster_to_papers,
             ordered_clusters=ordered_clusters,
             cluster_count=len(ordered_clusters),
             target=target,
@@ -286,14 +269,13 @@ def _plan_section_citations(
     section_count: int,
     section: dict[str, Any],
     papers: list[dict[str, Any]],
-    paper_to_cluster: dict[str, int],
-    cluster_to_papers: dict[int, list[str]],
-    ordered_clusters: list[int],
+    paper_to_cluster: dict[str, ClusterId],
+    ordered_clusters: list[ClusterId],
     cluster_count: int,
     target: int,
     hybrid_edges: list[dict[str, Any]],
     core_reference_count: int,
-    cluster_counts: dict[int, int],
+    cluster_counts: dict[ClusterId, int],
 ) -> SectionCitationPlan:
     """
     对齐 Rust 版 plan_section_citations_with_context：8 层优先级系统。
@@ -322,13 +304,11 @@ def _plan_section_citations(
         primary_clusters = set(ordered_clusters)
         key_clusters = []
     else:
-        fallback_ids = _fallback_section_clusters(
+        fallback_cluster_ids = _fallback_section_clusters(
             section_index, section_count, target, ordered_clusters, cluster_counts
         )
-        primary_clusters = {
-            ordered_clusters[i] for i in fallback_ids if i < cluster_count
-        }
-        key_clusters = sorted(primary_clusters)
+        primary_clusters = set(fallback_cluster_ids)
+        key_clusters = fallback_cluster_ids
         fills_remaining = True
 
     # 收集主聚类论文索引（保持 papers 中的排序）
@@ -448,76 +428,3 @@ def _plan_section_citations(
         candidate_paper_ids=selected_ids,
         candidate_details=details,
     )
-
-
-def render_section_references(
-    plan: SectionCitationPlan,
-    global_paper_map: dict[str, dict[str, Any]],
-) -> str:
-    """
-    将章节的候选参考文献渲染为编号列表。
-
-    参数:
-        plan: 章节引用计划
-        global_paper_map: paper_id -> 论文数据的全局映射
-
-    返回:
-        格式化的参考文献编号列表字符串
-    """
-    lines: list[str] = []
-    for i, pid in enumerate(plan.candidate_paper_ids, 1):
-        paper = global_paper_map.get(pid, {})
-        authors = paper.get("authors", [])
-        author_str = ", ".join(
-            a.get("name", "Unknown") if isinstance(a, dict) else str(a)
-            for a in authors[:3]
-        )
-        if len(authors) > 3:
-            author_str += " et al."
-        title = paper.get("title", "")
-        venue = paper.get("journal", paper.get("venue", ""))
-        year = paper.get("year", "")
-        lines.append(f'[{i}] {author_str}, "{title}", {venue}, {year}.')
-    return "\n".join(lines)
-
-
-def citation_plan_summary(plans: list[SectionCitationPlan]) -> dict[str, Any]:
-    """
-    生成引用计划的统计摘要。
-
-    返回:
-        包含各章节和全局的候选来源计数统计字典
-    """
-
-    def _source_counts(details: list[dict[str, Any]]) -> dict[str, int]:
-        counts: dict[str, int] = {}
-        for d in details:
-            src = d.get("source", "unknown")
-            counts[src] = counts.get(src, 0) + 1
-        return counts
-
-    global_counts: dict[str, int] = {}
-    sections_summary: list[dict[str, Any]] = []
-
-    for plan in plans:
-        section_counts = _source_counts(plan.candidate_details)
-        for src, cnt in section_counts.items():
-            global_counts[src] = global_counts.get(src, 0) + cnt
-        sections_summary.append(
-            {
-                "section_index": plan.section_index,
-                "section_title": plan.section_title,
-                "key_clusters": plan.key_clusters,
-                "candidate_reference_count": len(plan.candidate_paper_ids),
-                "primary_reference_count": len(plan.primary_paper_ids),
-                "secondary_reference_count": len(plan.secondary_paper_ids),
-                "candidate_source_counts": section_counts,
-            }
-        )
-
-    result: dict[str, Any] = {
-        "section_count": len(plans),
-        "sections": sections_summary,
-        "candidate_source_counts": global_counts,
-    }
-    return result

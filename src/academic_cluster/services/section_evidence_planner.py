@@ -44,10 +44,6 @@ def _score_overlap(query_tokens: set[str], value: Any) -> float:
     )
 
 
-def _as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
 def _source_weight(source: str) -> float:
     if source in {"community_core", "community_auxiliary"}:
         return 0.30
@@ -58,20 +54,11 @@ def _source_weight(source: str) -> float:
     return 0.0
 
 
-def _section_query(section: dict[str, Any], memories: list[dict[str, Any]]) -> str:
-    target = {
-        str(x)
-        for x in (
-            section.get("target_communities")
-            or section.get("key_clusters")
-            or section.get("clusters")
-            or []
-        )
-    }
-    related = [m for m in memories if str(m.get("cluster_id")) in target]
+def _section_query(section: dict[str, Any]) -> str:
     parts: list[Any] = [
         section.get("title"),
         section.get("description"),
+        section.get("key_points"),
         section.get("section_role"),
         section.get("core_question_hint"),
         section.get("method_families"),
@@ -79,25 +66,7 @@ def _section_query(section: dict[str, Any], memories: list[dict[str, Any]]) -> s
         section.get("limitations_to_cover"),
         section.get("future_directions_to_cover"),
     ]
-    for memory in related:
-        parts.extend(
-            [
-                memory.get("summary"),
-                memory.get("method_families"),
-                memory.get("key_claims"),
-                memory.get("limitations"),
-                memory.get("future_directions"),
-            ]
-        )
     return _text(parts)
-
-
-def _memory_by_cluster(memories: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {
-        str(memory.get("cluster_id")): memory
-        for memory in memories
-        if memory.get("cluster_id") is not None
-    }
 
 
 def _cards_by_paper(
@@ -143,54 +112,12 @@ def _support_item(
     }
 
 
-def _render_community_context(
-    section: dict[str, Any], memories: list[dict[str, Any]]
-) -> str:
-    target = {
-        str(x)
-        for x in (
-            section.get("target_communities")
-            or section.get("key_clusters")
-            or section.get("clusters")
-            or []
-        )
-    }
-    related = [m for m in memories if str(m.get("cluster_id")) in target]
-    lines = []
-    for memory in related:
-        metadata = memory.get("metadata") or {}
-        coherence = metadata.get("coherence_assessment") or {}
-        topic_rel = metadata.get("topic_relevance") or {}
-        lines.append(
-            f"community {memory.get('cluster_id')}: {memory.get('summary', '')}"
-        )
-        methods = memory.get("method_families") or []
-        if methods:
-            lines.append("method_families: " + "; ".join(str(x) for x in methods[:8]))
-        limitations = memory.get("limitations") or []
-        if limitations:
-            lines.append("limitations: " + "; ".join(str(x) for x in limitations[:6]))
-        future = memory.get("future_directions") or []
-        if future:
-            lines.append("future_directions: " + "; ".join(str(x) for x in future[:5]))
-        if coherence:
-            lines.append(
-                f"coherence: score={coherence.get('score')}; {coherence.get('rationale', '')}"
-            )
-        if topic_rel:
-            lines.append(
-                f"topic_relevance: score={topic_rel.get('score')}; {topic_rel.get('rationale', '')}"
-            )
-    return "\n".join(lines)
-
-
 def plan_section_evidence(
     *,
     topic: str,
     sections: list[dict[str, Any]],
     citation_plans: list[SectionCitationPlan],
     evidence_cards: list[dict[str, Any]],
-    community_memories: list[dict[str, Any]],
     paper_map: dict[str, dict[str, Any]],
     clusters: list[dict[str, Any]],
     max_references_per_section: int = 18,
@@ -199,7 +126,6 @@ def plan_section_evidence(
     """Filter citation plans and build per-section support matrices."""
     cards_by_pid = _cards_by_paper(evidence_cards)
     paper_to_cluster = _paper_cluster_map(clusters)
-    memory_map = _memory_by_cluster(community_memories)
     filtered_plans: list[SectionCitationPlan] = []
     evidence_plans: dict[int, dict[str, Any]] = {}
     topic_tokens = _tokens(topic)
@@ -208,7 +134,7 @@ def plan_section_evidence(
         section = (
             sections[plan.section_index] if plan.section_index < len(sections) else {}
         )
-        query = _section_query(section, community_memories)
+        query = _section_query(section)
         query_tokens = _tokens(query) | topic_tokens
         target_clusters = {
             str(x)
@@ -238,12 +164,10 @@ def plan_section_evidence(
             card_score = max(
                 (_score_overlap(query_tokens, card) for card in cards), default=0.0
             )
-            memory_score = _score_overlap(query_tokens, memory_map.get(cluster_id, {}))
             evidence_bonus = 0.12 if cards else 0.0
             score = (
-                0.40 * card_score
-                + 0.24 * paper_score
-                + 0.16 * memory_score
+                0.50 * card_score
+                + 0.30 * paper_score
                 + cluster_bonus
                 + evidence_bonus
                 + _source_weight(source)
@@ -297,7 +221,6 @@ def plan_section_evidence(
             "section_thesis": section.get("description", ""),
             "selected_paper_ids": selected_pids,
             "support_matrix": support_matrix,
-            "community_context": _render_community_context(section, community_memories),
             "evidence_limitations": "\n".join(
                 f"- weak_or_indirect: {item['paper_id']} {item['title']}"
                 for item in weak[:8]
@@ -310,28 +233,3 @@ def plan_section_evidence(
         }
 
     return filtered_plans, evidence_plans
-
-
-def cards_from_support_matrix(
-    support_matrix: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Convert support matrix rows back to evidence-card-like rows for writers."""
-    cards = []
-    for item in support_matrix:
-        if not item.get("evidence_card_id") and not item.get("claim"):
-            continue
-        cards.append(
-            {
-                "id": item.get("evidence_card_id"),
-                "paper_id": item.get("paper_id"),
-                "title": item.get("title"),
-                "claim": item.get("claim"),
-                "evidence_span": item.get("evidence_span"),
-                "method": item.get("method"),
-                "metric": item.get("metric"),
-                "limitation": item.get("limitation"),
-                "confidence": item.get("confidence"),
-                "relevance_score": item.get("relevance_score"),
-            }
-        )
-    return cards

@@ -921,7 +921,7 @@ async def search_all_sources(
         "crossref": search_crossref,
     }
 
-    tasks: list[Any] = []
+    tasks: list[asyncio.Task[Any]] = []
     active_sources: list[str] = []
     for source in sources:
         if source in search_functions:
@@ -930,7 +930,9 @@ async def search_all_sources(
                 if per_source_limits
                 else limit_per_source
             )
-            tasks.append(search_functions[source](query, limit=limit))
+            tasks.append(
+                asyncio.create_task(search_functions[source](query, limit=limit))
+            )
             active_sources.append(source)
 
     # 使用 wait_for 添加总体超时，避免某个源卡住阻塞整个搜索

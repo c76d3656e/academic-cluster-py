@@ -55,19 +55,14 @@ def _pricing_model_candidates(model_name: str | None) -> list[str]:
 class ProviderCreateRequest(BaseModel):
     """创建 Provider 请求"""
 
-    kind: str = Field(..., pattern="^(llm|embedding|rerank)$")
+    kind: str = Field(..., pattern="^(llm|embedding)$")
     display_name: str = Field(..., min_length=1, max_length=100)
     base_url: str = Field(..., min_length=1)
     model: str | None = None
     api_key: str | None = None
     is_enabled: bool = True
-    priority: int = Field(default=100, ge=1)
-    rpm_limit: int = Field(default=10, ge=1)
-    weight: int = Field(default=1, ge=1)
-    extra_keys: list[str] | None = None
-    key_strategy: str = Field(
-        default="round_robin", pattern="^(round_robin|random|priority)$"
-    )
+    priority: int = Field(default=100, ge=1, strict=True)
+    rpm_limit: int = Field(default=10, ge=1, strict=True)
     auto_ban: bool = True
     test_model: str | None = None
     input_price_per_m: float = Field(default=0, ge=0, description="输入价格 $/M tokens")
@@ -85,11 +80,8 @@ class ProviderUpdateRequest(BaseModel):
     model: str | None = None
     api_key: str | None = None
     is_enabled: bool | None = None
-    priority: int | None = None
-    rpm_limit: int | None = None
-    weight: int | None = None
-    extra_keys: list[str] | None = None
-    key_strategy: str | None = None
+    priority: int | None = Field(default=None, ge=1, strict=True)
+    rpm_limit: int | None = Field(default=None, ge=1, strict=True)
     auto_ban: bool | None = None
     test_model: str | None = None
     input_price_per_m: float | None = None
@@ -109,8 +101,6 @@ class ProviderResponse(BaseModel):
     is_enabled: bool = True
     priority: int = 100
     rpm_limit: int = 10
-    weight: int = 1
-    key_strategy: str = "round_robin"
     health_status: str = "unknown"
     last_health_check: str | None = None
     last_error: str | None = None
@@ -121,7 +111,6 @@ class ProviderResponse(BaseModel):
     input_price_per_m: float = 0
     output_price_per_m: float = 0
     metadata: dict[str, Any] | None = None
-    extra_key_count: int = 0
     created_by: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -155,7 +144,7 @@ class ReloadResult(BaseModel):
 # =============================================================================
 
 
-def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
+def _row_to_provider(row: Any) -> ProviderResponse:
     """将数据库行转换为 ProviderResponse（支持 tuple 或 RowMapping）"""
     m = row._mapping if hasattr(row, "_mapping") else row
 
@@ -167,17 +156,6 @@ def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
         except Exception:
             api_key_hint = "****"
 
-    extra_key_count = 0
-    raw = extra_keys_raw if extra_keys_raw is not None else m.get("extra_keys")
-    if raw:
-        import json
-
-        try:
-            keys = json.loads(raw) if isinstance(raw, str) else raw
-            extra_key_count = len(keys) if isinstance(keys, list) else 0
-        except Exception:  # nosec B110
-            pass
-
     return ProviderResponse(
         id=str(m["id"]),
         kind=m["kind"],
@@ -188,8 +166,6 @@ def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
         is_enabled=m["is_enabled"],
         priority=m["priority"],
         rpm_limit=m["rpm_limit"],
-        weight=m["weight"],
-        key_strategy=m["key_strategy"] or "round_robin",
         health_status=m["health_status"] or "unknown",
         last_health_check=str(m["last_health_check"])
         if m["last_health_check"]
@@ -202,7 +178,6 @@ def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
         input_price_per_m=float(m.get("input_price_per_m") or 0),
         output_price_per_m=float(m.get("output_price_per_m") or 0),
         metadata=m["metadata"] if isinstance(m["metadata"], dict) else None,
-        extra_key_count=extra_key_count,
         created_by=str(m["created_by"]) if m["created_by"] else None,
         created_at=str(m["created_at"]) if m["created_at"] else None,
         updated_at=str(m["updated_at"]) if m["updated_at"] else None,
@@ -221,7 +196,7 @@ async def list_providers(
     db: DatabaseService = Depends(get_database),
 ) -> ProviderListResponse:
     """列出所有 Provider"""
-    conditions = []
+    conditions = ["kind IN ('llm', 'embedding')"]
     params: dict[str, Any] = {}
 
     if kind:
@@ -234,10 +209,10 @@ async def list_providers(
         result = await session.execute(
             text(f"""
                 SELECT id, kind, display_name, base_url, model, api_key_enc,
-                       is_enabled, priority, rpm_limit, weight, key_strategy,
+                       is_enabled, priority, rpm_limit,
                        health_status, last_health_check, last_error, failure_count,
                        auto_ban, cooldown_until, test_model, metadata, created_by,
-                       created_at, updated_at, extra_keys,
+                       created_at, updated_at,
                        input_price_per_m, output_price_per_m
                 FROM provider_registry
                 {where_clause}
@@ -266,23 +241,17 @@ async def create_provider(
         api_key_enc = encrypt_key(body.api_key)
 
     # 加密额外 Keys
-    extra_keys_enc = []
-    if body.extra_keys:
-        extra_keys_enc = [encrypt_key(k) for k in body.extra_keys]
-
     async with db.session() as session:
         result = await session.execute(
             text("""
                 INSERT INTO provider_registry (
                     kind, display_name, base_url, model, api_key_enc,
-                    is_enabled, priority, rpm_limit, weight, extra_keys,
-                    key_strategy, auto_ban, test_model,
+                    is_enabled, priority, rpm_limit, auto_ban, test_model,
                     input_price_per_m, output_price_per_m,
                     metadata, created_by
                 ) VALUES (
                     :kind, :display_name, :base_url, :model, :api_key_enc,
-                    :is_enabled, :priority, :rpm_limit, :weight, :extra_keys,
-                    :key_strategy, :auto_ban, :test_model,
+                    :is_enabled, :priority, :rpm_limit, :auto_ban, :test_model,
                     :input_price_per_m, :output_price_per_m,
                     :metadata, :created_by
                 )
@@ -297,9 +266,6 @@ async def create_provider(
                 "is_enabled": body.is_enabled,
                 "priority": body.priority,
                 "rpm_limit": body.rpm_limit,
-                "weight": body.weight,
-                "extra_keys": json.dumps(extra_keys_enc),
-                "key_strategy": body.key_strategy,
                 "auto_ban": body.auto_ban,
                 "test_model": body.test_model,
                 "input_price_per_m": body.input_price_per_m,
@@ -331,13 +297,10 @@ async def create_provider(
         is_enabled=body.is_enabled,
         priority=body.priority,
         rpm_limit=body.rpm_limit,
-        weight=body.weight,
-        key_strategy=body.key_strategy,
         health_status="unknown",
         auto_ban=body.auto_ban,
         test_model=body.test_model,
         metadata=body.metadata,
-        extra_key_count=len(body.extra_keys) if body.extra_keys else 0,
         created_at=str(row[1]),
     )
 
@@ -377,15 +340,6 @@ async def update_provider(
     if body.rpm_limit is not None:
         updates.append("rpm_limit = :rpm_limit")
         params["rpm_limit"] = body.rpm_limit
-    if body.weight is not None:
-        updates.append("weight = :weight")
-        params["weight"] = body.weight
-    if body.extra_keys is not None:
-        updates.append("extra_keys = :extra_keys")
-        params["extra_keys"] = json.dumps([encrypt_key(k) for k in body.extra_keys])
-    if body.key_strategy is not None:
-        updates.append("key_strategy = :key_strategy")
-        params["key_strategy"] = body.key_strategy
     if body.auto_ban is not None:
         updates.append("auto_ban = :auto_ban")
         params["auto_ban"] = body.auto_ban
@@ -411,10 +365,10 @@ async def update_provider(
                 UPDATE provider_registry SET {", ".join(updates)}
                 WHERE id = :id
                 RETURNING id, kind, display_name, base_url, model, api_key_enc,
-                          is_enabled, priority, rpm_limit, weight, key_strategy,
+                          is_enabled, priority, rpm_limit,
                           health_status, last_health_check, last_error, failure_count,
                           auto_ban, cooldown_until, test_model, metadata, created_by,
-                          created_at, updated_at, extra_keys,
+                          created_at, updated_at,
                           input_price_per_m, output_price_per_m
             """),  # nosec B608
             params,
@@ -499,8 +453,6 @@ async def test_provider(
             await _test_llm(base_url, api_key, test_model or model)
         elif kind == "embedding":
             await _test_embedding(base_url, api_key, test_model or model)
-        elif kind == "rerank":
-            await _test_rerank(base_url, api_key, test_model or model)
         else:
             raise ValueError(f"Unknown kind: {kind}")
 
@@ -581,28 +533,17 @@ async def _test_embedding(base_url: str, api_key: str, model: str) -> None:
         )
         if resp.status_code >= 400:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            payload = resp.json()
+        except ValueError as error:
+            raise RuntimeError("embedding provider returned invalid JSON") from error
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            raise RuntimeError("embedding provider returned an invalid response")
 
+        from ...services.embedding_service import _validated_embedding
 
-async def _test_rerank(base_url: str, api_key: str, model: str) -> None:
-    """测试 Rerank 端点"""
-    import httpx
-
-    url = base_url.rstrip("/")
-    if not url.endswith("/v1"):
-        url += "/v1"
-    url += "/rerank"
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={"model": model, "query": "test", "documents": ["hello world"]},
-        )
-        if resp.status_code >= 400:
-            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        _validated_embedding(data[0].get("embedding"))
 
 
 async def _update_health(

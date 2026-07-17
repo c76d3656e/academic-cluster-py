@@ -19,13 +19,17 @@ _fernet: Fernet | None = None
 def _get_fernet() -> Fernet:
     """获取或初始化 Fernet 实例"""
     global _fernet
-    if _fernet is not None:
-        return _fernet
-
     from ..config import get_settings
 
     settings = get_settings()
     key = settings.provider_encryption_key
+
+    if not key and settings.is_production:
+        raise RuntimeError(
+            "PROVIDER_ENCRYPTION_KEY is required to encrypt provider keys in production"
+        )
+    if _fernet is not None:
+        return _fernet
 
     if not key:
         # 自动生成一个临时 key（仅用于开发环境）

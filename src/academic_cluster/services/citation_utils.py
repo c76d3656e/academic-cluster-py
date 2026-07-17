@@ -92,89 +92,6 @@ def strip_revision_commentary(content: str) -> str:
     return content.strip()
 
 
-_PRECISE_METRIC_RE = re.compile(
-    r"(?:[A-Za-zα-ωΑ-Ω]\s*=\s*)?-?\d+(?:\.\d+)?\s*(?:%|％|倍|秒|ms|毫秒|分钟|次/分钟|次/小时)"
-    r"|(?:D|F|γ|Gamma|gamma)\s*=\s*-?\d+(?:\.\d+)?",
-    re.IGNORECASE,
-)
-
-
-def _evidence_metric_text(evidence_cards: list[dict[str, Any]] | None) -> str:
-    if not evidence_cards:
-        return ""
-    fields = (
-        "claim",
-        "evidence_span",
-        "metric",
-        "method",
-        "limitation",
-        "paper_title",
-        "title",
-    )
-    parts: list[str] = []
-    for card in evidence_cards:
-        if not isinstance(card, dict):
-            continue
-        for field in fields:
-            value = card.get(field)
-            if value is None:
-                continue
-            parts.append(str(value))
-    return "\n".join(parts)
-
-
-def strip_unsupported_precise_metrics(
-    content: str,
-    evidence_cards: list[dict[str, Any]] | None,
-) -> str:
-    """Drop sentences containing precise metrics absent from section evidence cards.
-
-    This intentionally targets strong quantitative claims only. General years,
-    citation numbers, and non-metric integers are left untouched.
-    """
-    if not content:
-        return ""
-    evidence_text = _evidence_metric_text(evidence_cards)
-    if not evidence_text:
-        return content
-
-    parts = re.split(r"([。！？!?]\s*)", content)
-    kept: list[str] = []
-    dropped = False
-    for idx in range(0, len(parts), 2):
-        sentence = parts[idx]
-        punctuation = parts[idx + 1] if idx + 1 < len(parts) else ""
-        if not sentence:
-            if punctuation:
-                kept.append(punctuation)
-            continue
-        metrics = [
-            match.group(0).strip() for match in _PRECISE_METRIC_RE.finditer(sentence)
-        ]
-        unsupported = [
-            metric
-            for metric in metrics
-            if metric
-            and metric not in evidence_text
-            and metric.replace("％", "%") not in evidence_text
-        ]
-        if unsupported:
-            # 如果句子有引用标记 [N]，说明指标来自被引文献，保留
-            if re.search(r"\[\d+\]", sentence):
-                kept.append(sentence + punctuation)
-            else:
-                dropped = True
-                continue
-        else:
-            kept.append(sentence + punctuation)
-
-    cleaned = "".join(kept)
-    if dropped:
-        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
-    return cleaned.strip()
-
-
 # Matches [N] or [N,M,K] or [N-M] style citation tokens inside markdown.
 # We exclude year-like brackets [1800-2200] via a negative lookahead in
 # the caller rather than here, because the regex itself is intentionally
@@ -184,10 +101,6 @@ _CITATION_RE = re.compile(r"\[([0-9,\s;–—、，·\-]+)\]")
 # Matches a bare year-like bracket such as [2024] or [2020-2023].
 _YEAR_BRACKET_RE = re.compile(r"\[(\d{4})(?:\s*[-–—]\s*(\d{4}))?\]")
 
-# Matches UUID-style paper_id in brackets, e.g. [433802d1-ebf8-49f7-8efc-0183ef0170b8]
-_UUID_CITATION_RE = re.compile(
-    r"\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]"
-)
 _PAREN_NUMERIC_CITATION_RE = re.compile(
     r"[（(]\s*((?:\[[0-9,\s;–—、，·\-]+\]\s*)+)\s*[）)]"
 )
@@ -290,10 +203,21 @@ def renumber_citations_by_first_use(
         metadata fields.
     """
     first_appearance: dict[int, int] = {}  # original -> new
+    resolved_papers: dict[int, dict[str, Any]] = {}
     next_num = 1
+
+    def _resolve_paper(orig: int) -> dict[str, Any]:
+        if orig in resolved_papers:
+            return resolved_papers[orig]
+        paper_info = paper_map.get(orig, paper_map.get(str(orig)))
+        if not isinstance(paper_info, dict):
+            raise ValueError(f"unknown citation number: {orig}")
+        resolved_papers[orig] = paper_info
+        return paper_info
 
     def _remap_number(orig: int) -> int:
         nonlocal next_num
+        _resolve_paper(orig)
         if orig not in first_appearance:
             first_appearance[orig] = next_num
             next_num += 1
@@ -319,7 +243,7 @@ def renumber_citations_by_first_use(
     # Build the reference mapping list in new-number order.
     mappings: list[dict[str, Any]] = []
     for orig, new in sorted(first_appearance.items(), key=lambda kv: kv[1]):
-        paper_info = paper_map.get(orig, paper_map.get(str(orig), {}))
+        paper_info = _resolve_paper(orig)
         mappings.append(
             {
                 "new_number": new,
@@ -334,150 +258,6 @@ def renumber_citations_by_first_use(
         )
 
     return renumbered, mappings
-
-
-# ---------------------------------------------------------------------------
-# 3. validate_citations
-# ---------------------------------------------------------------------------
-
-
-def validate_citations(
-    markdown: str,
-    valid_paper_count: int,
-    allowed_indices: set[int] | None = None,
-) -> dict[str, Any]:
-    """Validate citations in *markdown*.
-
-    Parameters
-    ----------
-    markdown : str
-        Text containing ``[N]`` citation tokens.
-    valid_paper_count : int
-        Highest valid citation number (1-based).  Numbers > this are
-        considered out-of-range.
-    allowed_indices : set[int] | None
-        If provided, citation numbers not in this set are flagged as
-        ``outside_plan`` even if they are in range.
-
-    Returns
-    -------
-    dict
-        ``valid_count``, ``invalid_count``, ``invalid_numbers``,
-        ``out_of_range``, ``outside_plan``.
-    """
-    all_numbers: list[int] = []
-    for match in _CITATION_RE.finditer(markdown):
-        # Skip year-like brackets.
-        if _YEAR_BRACKET_RE.fullmatch(match.group(0)):
-            continue
-        nums = parse_citation_numbers(match.group(1))
-        all_numbers.extend(nums)
-
-    unique_nums = set(all_numbers)
-
-    out_of_range: list[int] = sorted(
-        n for n in unique_nums if n > valid_paper_count or n < 1
-    )
-    outside_plan: list[int] = []
-    if allowed_indices is not None:
-        outside_plan = sorted(
-            n for n in unique_nums if n not in allowed_indices and n not in out_of_range
-        )
-
-    invalid_numbers_set: set[int] = set(out_of_range)
-    if allowed_indices is not None:
-        invalid_numbers_set.update(outside_plan)
-
-    invalid_numbers = sorted(invalid_numbers_set)
-    # Count how many citation *tokens* contain at least one invalid number.
-    invalid_count = 0
-    for match in _CITATION_RE.finditer(markdown):
-        if _YEAR_BRACKET_RE.fullmatch(match.group(0)):
-            continue
-        nums = parse_citation_numbers(match.group(1))
-        if any(n in invalid_numbers_set for n in nums):
-            invalid_count += 1
-
-    return {
-        "valid_count": len(all_numbers)
-        - sum(1 for n in all_numbers if n in invalid_numbers_set),
-        "invalid_count": invalid_count,
-        "invalid_numbers": invalid_numbers,
-        "out_of_range": out_of_range,
-        "outside_plan": outside_plan,
-    }
-
-
-# ---------------------------------------------------------------------------
-# 4. strip_invalid_citations
-# ---------------------------------------------------------------------------
-
-
-def strip_invalid_citations(
-    markdown: str,
-    invalid_numbers: set[int],
-) -> str:
-    """Remove invalid citation numbers from ``[N,M,K]`` tokens.
-
-    If a token contains a mix of valid and invalid numbers, only the valid
-    ones are kept.  If all numbers in a token are invalid, the entire
-    ``[...]`` block is removed.  Year brackets like ``[2024]`` are
-    preserved.
-    """
-
-    def _clean_token(match: re.Match[str]) -> str:
-        original = str(match.group(0))
-        # Preserve year brackets.
-        if _YEAR_BRACKET_RE.fullmatch(original):
-            return original
-
-        nums = parse_citation_numbers(match.group(1))
-        if not nums:
-            return original
-
-        remaining = [n for n in nums if n not in invalid_numbers]
-        if not remaining:
-            # All invalid – remove the entire token.
-            return ""
-        # Rebuild with only valid numbers.
-        return "[" + ",".join(str(n) for n in remaining) + "]"
-
-    return _CITATION_RE.sub(_clean_token, markdown)
-
-
-# ---------------------------------------------------------------------------
-# 4b. replace_uuid_citations
-# ---------------------------------------------------------------------------
-
-
-def replace_uuid_citations(
-    markdown: str,
-    paper_id_to_number: dict[str, int],
-) -> str:
-    """Replace UUID-style citations like [433802d1-...] with proper [N] numbers.
-
-    Parameters
-    ----------
-    markdown : str
-        The review markdown text that may contain UUID citations.
-    paper_id_to_number : dict[str, int]
-        Mapping from paper_id (UUID string) to citation number (int).
-
-    Returns
-    -------
-    str
-        Markdown with UUID citations replaced by [N] numbers.
-    """
-
-    def _replace_uuid(match: re.Match[str]) -> str:
-        uuid = str(match.group(1))
-        num = paper_id_to_number.get(uuid)
-        if num is not None:
-            return f"[{num}]"
-        # Unknown UUID – remove the citation entirely
-        return ""
-
-    return _UUID_CITATION_RE.sub(_replace_uuid, markdown)
 
 
 def normalize_citation_surface(content: str) -> str:
@@ -504,91 +284,6 @@ def normalize_citation_surface(content: str) -> str:
     content = re.sub(r"\s+([，,。；;：:])", r"\1", content)
     content = re.sub(r"([。！？])([A-Za-z\u4e00-\u9fff])", r"\1 \2", content)
     return content.strip()
-
-
-# ---------------------------------------------------------------------------
-# 5. render_reference_list
-# ---------------------------------------------------------------------------
-
-
-def render_reference_list(
-    papers: list[dict[str, Any]],
-    mappings: list[dict[str, Any]] | None = None,
-) -> str:
-    """Render a numbered reference list in IEEE format.
-
-    Parameters
-    ----------
-    papers : list[dict]
-        Each dict should have ``authors``, ``title``, ``venue``, ``year``,
-        ``doi`` keys (values may be empty strings).
-    mappings : list[dict] | None
-        If provided, each dict must have a ``new_number`` key.  The list
-        length must match *papers*.  Otherwise papers are numbered 1..N
-        in list order.
-
-    Returns
-    -------
-    str
-        The reference list as a multi-line string, each line starting
-        with ``[N]``.
-    """
-    lines: list[str] = []
-    for idx, paper in enumerate(papers):
-        if mappings is not None and idx < len(mappings):
-            num = mappings[idx].get("new_number", idx + 1)
-        else:
-            num = idx + 1
-
-        raw_authors = paper.get("authors") or ""
-        if isinstance(raw_authors, list):
-            # DB stores authors as [{"id": ..., "name": ...}, ...]
-            authors = ", ".join(
-                a.get("name", str(a)) if isinstance(a, dict) else str(a)
-                for a in raw_authors
-            )
-        else:
-            authors = str(raw_authors).strip()
-
-        title = str(paper.get("title") or "").strip()
-        venue = str(paper.get("journal") or paper.get("venue") or "").strip()
-        year = str(paper.get("year") or "").strip()
-        doi = str(paper.get("doi") or "").strip()
-
-        # Truncate author list: first 3 authors + "et al." if more.
-        if authors:
-            author_parts = [a.strip() for a in re.split(r"[;]", authors) if a.strip()]
-            # If no semicolons, try comma-split but be conservative
-            # (author names often contain commas).
-            if len(author_parts) <= 1:
-                author_parts = [
-                    a.strip() for a in re.split(r",\s*(?=[A-Z])", authors) if a.strip()
-                ]
-            if len(author_parts) > 3:
-                authors = ", ".join(author_parts[:3]) + " et al."
-            else:
-                authors = ", ".join(author_parts)
-
-        parts: list[str] = [f"[{num}]"]
-        if authors:
-            parts.append(f"{authors},")
-        if title:
-            parts.append(f'"{title}",')
-        if venue:
-            parts.append(f"{venue},")
-        if year:
-            parts.append(f"{year}.")
-        if doi:
-            parts.append(f"DOI:{doi}.")
-
-        line = " ".join(parts)
-        # Clean up double punctuation / trailing spaces.
-        line = re.sub(r"\.\.", ".", line)
-        line = re.sub(r",\.", ".", line)
-        line = line.rstrip() + "\n"
-        lines.append(line)
-
-    return "".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -682,99 +377,6 @@ def strip_section_reference_block(content: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 6c. clean_filler_phrases
-# ---------------------------------------------------------------------------
-
-# Filler phrases that add no analytical value.  Each entry is (pattern, replacement).
-_FILLER_PATTERNS: list[tuple[str, str]] = [
-    ("从方法论角度来看，", ""),
-    ("从方法论角度", ""),
-    ("从技术演进角度来看，", ""),
-    ("从技术演进角度", ""),
-    ("从理论角度来看，", ""),
-    ("从理论角度", ""),
-    ("从应用角度来看，", ""),
-    ("从应用角度", ""),
-    ("从宏观层面来看，", ""),
-    ("从宏观层面来看", ""),
-    ("从宏观层面", ""),
-    ("从微观层面来看，", ""),
-    ("从微观层面来看", ""),
-    ("从微观层面", ""),
-    ("在理论层面上，", ""),
-    ("在理论层面上", ""),
-    ("在理论层面", ""),
-    ("在实践层面上，", ""),
-    ("在实践层面上", ""),
-    ("在实践层面", ""),
-    ("在技术层面上，", ""),
-    ("在技术层面上", ""),
-    ("在技术层面", ""),
-    ("在方法层面上，", ""),
-    ("在方法层面上", ""),
-    ("在方法层面", ""),
-    ("在应用层面上，", ""),
-    ("在应用层面上", ""),
-    ("在应用层面", ""),
-    ("在模型层面上，", ""),
-    ("在模型层面上", ""),
-    ("在模型层面", ""),
-    ("在数据层面上，", ""),
-    ("在数据层面上", ""),
-    ("在数据层面", ""),
-    ("在性能层面上，", ""),
-    ("在性能层面上", ""),
-    ("在性能层面", ""),
-    ("在效率层面上，", ""),
-    ("在效率层面上", ""),
-    ("在效率层面", ""),
-    ("在架构层面上，", ""),
-    ("在架构层面上", ""),
-    ("在架构层面", ""),
-    ("在算法层面上，", ""),
-    ("在算法层面上", ""),
-    ("在算法层面", ""),
-    ("在系统层面上，", ""),
-    ("在系统层面上", ""),
-    ("在系统层面", ""),
-]
-
-
-def clean_filler_phrases(content: str) -> str:
-    """Remove academic filler phrases that add no analytical value."""
-    for pattern, replacement in _FILLER_PATTERNS:
-        content = content.replace(pattern, replacement)
-    # Clean up orphaned punctuation after filler removal (e.g. "，该模型" → "该模型").
-    content = re.sub(r"^[，,、；;：:]+", "", content, flags=re.MULTILINE)
-    # Clean up orphaned punctuation after sentence-ending marks (e.g. "。，" → "。").
-    content = re.sub(r"([。！？])[，,、；;]+", r"\1", content)
-    # Clean up double spaces or leading/trailing whitespace artifacts.
-    content = re.sub(r"[ \t]{2,}", " ", content)
-    content = re.sub(r"\n{3,}", "\n\n", content)
-    return content.strip()
-
-
-# ---------------------------------------------------------------------------
-# strip_author_year_citations
-# ---------------------------------------------------------------------------
-
-# Matches author-year style citations like (Friedman, 2024), (Smith et al., 2023),
-# (Zhang & Li, 2022), (Wang et al., 2021; Li et al., 2022)
-_AUTHOR_YEAR_CITATION_RE = re.compile(
-    r"[（(]"
-    r"[A-Z][a-z]+(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-z]+))?"
-    r"(?:\s*[,;]\s*[A-Z][a-z]+(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-z]+))?)*"
-    r"\s*,\s*\d{4}(?:\s*[;,]\s*\d{4})*"
-    r"[）)]"
-)
-
-
-def strip_author_year_citations(content: str) -> str:
-    """Remove author-year style citations like (Friedman, 2024) that violate [N] format."""
-    return _AUTHOR_YEAR_CITATION_RE.sub("", content)
-
-
-# ---------------------------------------------------------------------------
 # strip_meta_commentary
 # ---------------------------------------------------------------------------
 
@@ -795,17 +397,6 @@ def strip_meta_commentary(content: str) -> str:
     content = _META_COMMENTARY_RE.sub("", content)
     content = _META_COMMENTARY_TAIL_RE.sub("", content)
     return content.strip()
-
-
-def is_primarily_chinese(content: str, threshold: float = 0.3) -> bool:
-    """Check if content is primarily Chinese. Returns True if CJK chars > threshold of total non-space chars."""
-    if not content:
-        return True
-    non_space = [c for c in content if not c.isspace()]
-    if not non_space:
-        return True
-    cjk_count = sum(1 for c in non_space if "一" <= c <= "鿿")
-    return cjk_count / len(non_space) >= threshold
 
 
 # ---------------------------------------------------------------------------

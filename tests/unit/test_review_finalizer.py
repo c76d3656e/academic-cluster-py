@@ -1,31 +1,6 @@
-from academic_cluster.services.review_finalizer import (
-    finalize_review_markdown,
-    remap_section_local_citations,
-)
+import pytest
 
-
-def test_remap_section_local_citations_preserves_section_candidate_identity():
-    paper_number_by_id = {"paper-a": 1, "paper-b": 2, "paper-c": 3}
-
-    remapped, invalid = remap_section_local_citations(
-        "方法一形成基线 [1]，方法二提供补充证据 [2]。",
-        ["paper-b", "paper-c"],
-        paper_number_by_id,
-    )
-
-    assert invalid == set()
-    assert remapped == "方法一形成基线 [2]，方法二提供补充证据 [3]。"
-
-
-def test_remap_section_local_citations_reports_outside_candidate_numbers():
-    remapped, invalid = remap_section_local_citations(
-        "该论断引用了不存在的章节候选 [3]。",
-        ["paper-a", "paper-b"],
-        {"paper-a": 1, "paper-b": 2},
-    )
-
-    assert invalid == {3}
-    assert remapped == "该论断引用了不存在的章节候选 。"
+from academic_cluster.services.review_finalizer import finalize_review_markdown
 
 
 def test_finalize_review_markdown_uses_first_appearance_reference_mapping():
@@ -83,3 +58,44 @@ def test_finalize_review_markdown_references_only_cited_papers():
     assert "Cited Paper" in finalized.markdown
     assert "Uncited Paper" not in finalized.markdown
     assert len(finalized.reference_mappings) == 1
+
+
+def test_finalize_review_counts_abstract_and_titles_in_first_use_order():
+    finalized = finalize_review_markdown(
+        review_title="Review [3]",
+        abstract="Abstract cites the second section first [2].",
+        sections=[
+            {"title": "Background [1]"},
+            {"title": "Applications"},
+        ],
+        section_bodies=[
+            "Background body uses [1] and then [3].",
+            "Applications body uses [2].",
+        ],
+        paper_metadata_map={
+            1: {"paper_id": "paper-a", "title": "A"},
+            2: {"paper_id": "paper-b", "title": "B"},
+            3: {"paper_id": "paper-c", "title": "C"},
+        },
+    )
+
+    assert [mapping["original_number"] for mapping in finalized.reference_mappings] == [
+        3,
+        2,
+        1,
+    ]
+    assert finalized.body_markdown.startswith("# Review [1]")
+    assert "## 摘要\n\nAbstract cites the second section first [2]." in (
+        finalized.body_markdown
+    )
+    assert "## 1. Background [3]" in finalized.body_markdown
+
+
+def test_finalize_rejects_unknown_title_citation():
+    with pytest.raises(ValueError, match="unknown citation number: 99"):
+        finalize_review_markdown(
+            review_title="Survey [99]",
+            sections=[{"title": "Body"}],
+            section_bodies=["Supported claim [1]."],
+            paper_metadata_map={1: {"paper_id": "paper-1", "title": "Known paper"}},
+        )

@@ -8,13 +8,23 @@
 """
 
 import asyncio
+import contextlib
+import json
 import re
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
 import structlog
-from langchain_core.messages import AIMessage
+from langchain_core.language_models.base import LanguageModelInput
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.runnables import Runnable, RunnableBinding
+from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
+from pydantic import ConfigDict
 
 logger = structlog.get_logger()
 
@@ -25,6 +35,17 @@ _llm_queue_capacity = 0
 _THINK_BLOCK_RE = re.compile(
     r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL
 )
+
+
+async def _cancel_and_wait(task: asyncio.Task[Any] | None) -> None:
+    """Cancel an in-flight provider task and always consume its terminal state."""
+
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await task
 
 
 def _messages_to_openai(input: Any) -> list[dict[str, Any]]:
@@ -57,6 +78,44 @@ def _router_response_to_aimessage(response: Any, provider_alias: str = "") -> AI
         if isinstance(choice, dict)
         else getattr(choice, "finish_reason", "")
     )
+    raw_tool_calls = (
+        msg_dict.get("tool_calls", [])
+        if isinstance(msg_dict, dict)
+        else getattr(msg_dict, "tool_calls", [])
+    ) or []
+    tool_calls: list[dict[str, Any]] = []
+    for raw_call in raw_tool_calls:
+        if isinstance(raw_call, dict):
+            call_data = raw_call
+        elif hasattr(raw_call, "model_dump"):
+            call_data = raw_call.model_dump()
+        else:
+            call_data = {
+                "id": getattr(raw_call, "id", ""),
+                "function": getattr(raw_call, "function", {}),
+            }
+        raw_function = call_data.get("function") or {}
+        if not isinstance(raw_function, dict) and hasattr(raw_function, "model_dump"):
+            raw_function = raw_function.model_dump()
+        function = raw_function if isinstance(raw_function, dict) else {}
+        raw_arguments = function.get("arguments") or {}
+        if isinstance(raw_arguments, str):
+            try:
+                arguments = json.loads(raw_arguments)
+            except json.JSONDecodeError:
+                arguments = {}
+        else:
+            arguments = raw_arguments
+        if not isinstance(arguments, dict) or not function.get("name"):
+            continue
+        tool_calls.append(
+            {
+                "name": str(function["name"]),
+                "args": arguments,
+                "id": str(call_data.get("id") or ""),
+                "type": "tool_call",
+            }
+        )
 
     usage = getattr(response, "usage", None) or response.get("usage", {}) or {}
 
@@ -66,11 +125,12 @@ def _router_response_to_aimessage(response: Any, provider_alias: str = "") -> AI
         or {}
     )
     actual_provider = str(
-        hidden.get("model_id", "") or hidden.get("api_base", "") or provider_alias
+        provider_alias or hidden.get("custom_llm_provider", "") or "llm"
     )
 
     return AIMessage(
         content=content or "",
+        tool_calls=tool_calls,
         usage_metadata={
             "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
             "output_tokens": int(usage.get("completion_tokens", 0) or 0),
@@ -80,6 +140,8 @@ def _router_response_to_aimessage(response: Any, provider_alias: str = "") -> AI
             "model_name": getattr(response, "model", None) or response.get("model", ""),
             "token_usage": dict(usage) if not isinstance(usage, dict) else usage,
             "provider": actual_provider,
+            "model_id": str(hidden.get("model_id", "") or ""),
+            "api_base_url": str(hidden.get("api_base", "") or ""),
             "finish_reason": finish_reason,
         },
     )
@@ -137,10 +199,124 @@ def _safe_attr(obj: Any, *names: str, default: Any = None) -> Any:
 
 def _api_key_hint(llm: Any) -> str | None:
     key = _safe_attr(llm, "openai_api_key", "api_key", default=None)
+    return _api_key_value_hint(key)
+
+
+def _api_key_value_hint(key: Any) -> str | None:
     if not key:
         return None
     value = getattr(key, "get_secret_value", lambda: str(key))()
     return sha256(str(value).encode("utf-8")).hexdigest()[:12]
+
+
+def _object_field(obj: Any, name: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    try:
+        return getattr(obj, name, default)
+    except Exception:
+        return default
+
+
+@dataclass(frozen=True)
+class _ResolvedRouterDeployment:
+    provider_alias: str
+    model_name: str
+    api_base_url: str
+    api_key: Any
+
+
+def _resolve_router_response_deployment(
+    router: Any, response: Any
+) -> _ResolvedRouterDeployment | None:
+    """Resolve the exact deployment selected by LiteLLM from response metadata."""
+
+    hidden = getattr(response, "_hidden_params", None)
+    if not isinstance(hidden, dict):
+        return None
+    model_id = hidden.get("model_id")
+    get_deployment = getattr(router, "get_deployment", None)
+    if not isinstance(model_id, str) or not model_id or not callable(get_deployment):
+        return None
+    try:
+        deployment = get_deployment(model_id)
+    except Exception:
+        return None
+    if deployment is None:
+        return None
+
+    model_info = _object_field(deployment, "model_info", {})
+    litellm_params = _object_field(deployment, "litellm_params", {})
+    return _ResolvedRouterDeployment(
+        provider_alias=str(_object_field(model_info, "provider_alias", "") or ""),
+        model_name=str(_object_field(litellm_params, "model", "") or ""),
+        api_base_url=str(
+            _object_field(litellm_params, "api_base", "")
+            or hidden.get("api_base", "")
+            or ""
+        ),
+        api_key=_object_field(litellm_params, "api_key"),
+    )
+
+
+def _unwrap_bound_llm(llm: Any) -> tuple[Any, dict[str, Any]]:
+    """Return the underlying model and all kwargs applied by ``bind_tools``."""
+
+    current = llm
+    bound_kwargs: dict[str, Any] = {}
+    while isinstance(current, RunnableBinding):
+        bound_kwargs = {**dict(current.kwargs), **bound_kwargs}
+        current = current.bound
+    return current, bound_kwargs
+
+
+class AuditedChatModel(BaseChatModel):
+    """Tool-bindable async chat model that uses the canonical audit wrapper."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    inner: Any
+
+    @property
+    def _llm_type(self) -> str:
+        return "academic-cluster-audited"
+
+    def bind_tools(
+        self,
+        tools: Sequence[dict[str, Any] | type | Callable[..., Any] | BaseTool],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        bind_kwargs = dict(kwargs)
+        if tool_choice is not None:
+            bind_kwargs["tool_choice"] = tool_choice
+        return type(self)(inner=self.inner.bind_tools(tools, **bind_kwargs))
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del messages, stop, run_manager, kwargs
+        raise RuntimeError("AuditedChatModel supports asynchronous invocation only")
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del run_manager
+        if stop:
+            kwargs["stop"] = stop
+        response = await ainvoke_with_callbacks(self.inner, messages, **kwargs)
+        if not isinstance(response, BaseMessage):
+            raise TypeError("audited chat model returned a non-message response")
+        return ChatResult(generations=[ChatGeneration(message=response)])
 
 
 def _get_llm_queue_semaphore() -> asyncio.Semaphore:
@@ -208,7 +384,7 @@ def create_llm(
         api_key=params["api_key"],
         base_url=params.get("api_base"),
         max_tokens=max_tokens,  # type: ignore[call-arg]
-        timeout=300,  # 单次 HTTP 请求超时 5 分钟
+        timeout=300,  # 单次 HTTP 请求超时 5 分钟——匹配 KG task timeout
     )
     # 在 llm 对象上附加 provider 别名和路由分组名，供 ainvoke_with_callbacks 读取
     model_info = deployment.get("model_info", {}) or {}
@@ -236,7 +412,7 @@ async def ainvoke_with_callbacks(
 
     通过 LiteLLM Router 发出实际 HTTP 请求，由 Router 处理：
     - 多端点加权路由（simple-shuffle）
-    - 失败自动重试 + 故障转移（num_retries=2）
+    - 失败自动重试 + 故障转移（Router num_retries=3）
     - RPM/TPM 限速
     - 不健康端点 cooldown（allowed_fails=3, cooldown_time=60s）
 
@@ -251,59 +427,54 @@ async def ainvoke_with_callbacks(
     import time as _time
 
     from .observability import (
-        get_current_node,
+        get_current_agent_phase,
+        get_current_execution,
         get_current_project,
-        get_current_tracker,
-        get_resolved_run_id,
     )
 
     start_time = _time.monotonic()
-    node_name = get_current_node() or "unknown"
-    tracker = get_current_tracker()
-    run_id = get_resolved_run_id()
-    if not run_id:
+    base_llm, bound_kwargs = _unwrap_bound_llm(llm)
+    project_id = get_current_project()
+    execution_id = get_current_execution()
+    agent_phase = get_current_agent_phase()
+    node_name = agent_phase or ("agent" if execution_id else "unknown")
+    if not project_id or not execution_id:
         logger.warning(
-            "ainvoke_with_callbacks no run_id",
+            "ainvoke_with_callbacks has no audit execution context",
             node=node_name,
-            has_tracker=tracker is not None,
+            has_project=project_id is not None,
+            has_execution=execution_id is not None,
         )
 
-    _temperature = getattr(llm, "_temperature", 0.7)
-    _max_tokens = getattr(llm, "_max_tokens", None)
+    _temperature = getattr(base_llm, "_temperature", 0.7)
+    _max_tokens = getattr(base_llm, "_max_tokens", None)
 
-    provider_alias = getattr(llm, "_provider_alias", "") or "llm"
+    provider_alias = getattr(base_llm, "_provider_alias", "") or "llm"
     requested_model = (
-        getattr(llm, "_requested_model", None)
-        or _safe_attr(llm, "model_name", "model", default=None)
+        getattr(base_llm, "_requested_model", None)
+        or _safe_attr(base_llm, "model_name", "model", default=None)
         or "unknown"
     )
-    upstream_model = getattr(llm, "_upstream_model", None) or requested_model
-    api_base_url = getattr(llm, "_api_base_url", None) or str(
-        _safe_attr(llm, "openai_api_base", "base_url", default="") or ""
+    upstream_model = getattr(base_llm, "_upstream_model", None) or requested_model
+    api_base_url = getattr(base_llm, "_api_base_url", None) or str(
+        _safe_attr(base_llm, "openai_api_base", "base_url", default="") or ""
     )
-    litellm_model = getattr(llm, "_litellm_model", "openai/" + requested_model)
+    api_key_hint = _api_key_hint(base_llm)
+    litellm_model = getattr(base_llm, "_litellm_model", "openai/" + requested_model)
     call_id = None
     db = None
+    invoke_task: asyncio.Task[Any] | None = None
 
-    if run_id:
+    if project_id and execution_id:
         try:
             from .database import get_database
 
             db = get_database()
-            exec_id = tracker._node_ids.get(node_name) if tracker else None
-            if not exec_id:
-                exec_id = await db.create_node_execution(
-                    run_id,
-                    node_name,
-                    "llm",
-                )
-                if tracker:
-                    tracker._node_ids[node_name] = exec_id
             call_id = await db.create_llm_call(
-                pipeline_run_id=run_id,
-                node_execution_id=exec_id,
-                project_id=get_current_project()
-                or getattr(tracker, "project_id", None),
+                pipeline_run_id=None,
+                node_execution_id=None,
+                project_id=project_id,
+                execution_id=execution_id,
                 node_name=node_name,
                 call_type="llm",
                 provider_name=provider_alias,
@@ -311,7 +482,7 @@ async def ainvoke_with_callbacks(
                 requested_model=requested_model,
                 upstream_model=upstream_model,
                 api_base_url=api_base_url,
-                api_key_hint=_api_key_hint(llm),
+                api_key_hint=api_key_hint,
                 status="running",
                 input_preview=_preview_value(input),
                 request_metadata={
@@ -320,6 +491,8 @@ async def ainvoke_with_callbacks(
                     "temperature": _temperature,
                     "max_tokens": _max_tokens,
                     "provider_alias": provider_alias,
+                    "execution_id": execution_id,
+                    "agent_phase": agent_phase,
                     "config_keys": sorted((config or {}).keys())
                     if isinstance(config, dict)
                     else [],
@@ -342,7 +515,8 @@ async def ainvoke_with_callbacks(
         if pool is not None:
             messages = _messages_to_openai(input)
             semaphore = _get_llm_queue_semaphore()
-            router_kwargs = dict(kwargs)
+            router = pool.router
+            router_kwargs = {**bound_kwargs, **kwargs}
             router_kwargs.pop("config", None)
 
             max_retries = 3
@@ -350,8 +524,9 @@ async def ainvoke_with_callbacks(
             for attempt in range(max_retries):
                 try:
                     async with semaphore:
-                        response = await asyncio.wait_for(
-                            pool.router.acompletion(
+                        # 使用 asyncio.wait 替代 wait_for——wait_for 无法取消 httpx
+                        invoke_task = asyncio.create_task(
+                            router.acompletion(
                                 model=litellm_model,
                                 messages=messages,
                                 temperature=_temperature,
@@ -359,9 +534,22 @@ async def ainvoke_with_callbacks(
                                 timeout=timeout,
                                 frequency_penalty=0.5,
                                 **router_kwargs,
-                            ),
-                            timeout=timeout + 60,
+                            )
                         )
+                        _done, _ = await asyncio.wait(
+                            [invoke_task], timeout=timeout + 60
+                        )
+                        if _done:
+                            completed_task = invoke_task
+                            assert completed_task is not None
+                            invoke_task = None
+                            response = completed_task.result()
+                        else:
+                            await _cancel_and_wait(invoke_task)
+                            invoke_task = None
+                            raise TimeoutError(
+                                f"LLM call timed out after {timeout + 60}s"
+                            )
                     break  # success
                 except TimeoutError as te:
                     last_timeout_error = te
@@ -378,18 +566,39 @@ async def ainvoke_with_callbacks(
                     else:
                         raise last_timeout_error from None
 
+            resolved_deployment = _resolve_router_response_deployment(router, response)
+            if resolved_deployment is not None:
+                provider_alias = resolved_deployment.provider_alias or provider_alias
+                api_base_url = resolved_deployment.api_base_url or api_base_url
+                api_key_hint = (
+                    _api_key_value_hint(resolved_deployment.api_key) or api_key_hint
+                )
+                if resolved_deployment.model_name:
+                    upstream_model = resolved_deployment.model_name
             response = _router_response_to_aimessage(response, provider_alias)
             response = sanitize_llm_response(response)
         else:
             # Fallback: 直接使用 llm.ainvoke()（测试环境未初始化 pool 时）
             semaphore = _get_llm_queue_semaphore()
             async with semaphore:
-                response = await asyncio.wait_for(
-                    llm.ainvoke(input, config=config, **kwargs), timeout=timeout
+                invoke_task = asyncio.create_task(
+                    llm.ainvoke(input, config=config, **kwargs)
                 )
-                response = sanitize_llm_response(response)
+                _done, _ = await asyncio.wait([invoke_task], timeout=timeout)
+                if _done:
+                    completed_task = invoke_task
+                    assert completed_task is not None
+                    invoke_task = None
+                    response = completed_task.result()
+                    response = sanitize_llm_response(response)
+                else:
+                    await _cancel_and_wait(invoke_task)
+                    invoke_task = None
+                    raise TimeoutError(f"LLM call timed out after {timeout}s")
 
     except asyncio.CancelledError:
+        await _cancel_and_wait(invoke_task)
+        invoke_task = None
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
         err_msg = "LLM call cancelled"
         if db and call_id:
@@ -477,22 +686,6 @@ async def ainvoke_with_callbacks(
     except Exception:  # nosec B110
         pass
 
-    # 记录到 tracker
-    if tracker:
-        try:
-            await tracker.token_tracker.record(
-                node_name=node_name,
-                provider_name=provider_alias,
-                model_name=model_name,
-                call_type="llm",
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cost=cost,
-                latency_ms=elapsed_ms,
-            )
-        except Exception:  # nosec B110
-            pass
-
     if db and call_id:
         try:
             await db.finish_llm_call(
@@ -505,6 +698,9 @@ async def ainvoke_with_callbacks(
                 output_preview=_preview_value(getattr(response, "content", "")),
                 model_name=model_name,
                 upstream_model=upstream_model,
+                provider_name=provider_alias,
+                api_base_url=api_base_url,
+                api_key_hint=api_key_hint,
                 input_price_per_m=input_price,
                 output_price_per_m=output_price,
             )
@@ -514,53 +710,3 @@ async def ainvoke_with_callbacks(
             )
 
     return response
-
-
-def create_llm_with_retry(
-    temperature: float = 0.7,
-    max_tokens: int | None = None,
-    max_retries: int = 3,
-) -> Any:
-    """
-    创建带重试的 LLM 调用包装器。
-
-    每次重试使用不同的 provider（轮询），实现故障转移。
-
-    Returns:
-        async callable: _invoke(messages) -> response
-    """
-
-    async def _invoke(messages: Any) -> Any:
-        from tenacity import (
-            retry,
-            stop_after_attempt,
-            wait_exponential,
-        )
-
-        @retry(
-            stop=stop_after_attempt(max_retries),
-            wait=wait_exponential(multiplier=2, min=3, max=30),
-            reraise=True,
-        )
-        async def _call() -> Any:
-            llm = create_llm(temperature=temperature, max_tokens=max_tokens)
-            return await ainvoke_with_callbacks(llm, messages)
-
-        return await _call()
-
-    return _invoke
-
-
-async def invoke_llm(
-    messages: list[Any],
-    temperature: float = 0.7,
-    max_tokens: int | None = None,
-) -> Any:
-    """
-    便捷函数：创建 LLM 并调用，自动注入 callback。
-
-    Returns:
-        LLM response
-    """
-    llm = create_llm(temperature=temperature, max_tokens=max_tokens)
-    return await ainvoke_with_callbacks(llm, messages)

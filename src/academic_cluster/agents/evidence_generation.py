@@ -128,10 +128,13 @@ async def generate_evidence_card(
                     f"LLM returned invalid JSON for evidence card: {raw_content[:200]}"
                 ) from None
 
+    if not isinstance(result, dict):
+        raise ValueError("LLM returned invalid evidence payload: JSON object expected")
+
     # 添加论文 ID
     result["paper_id"] = paper.get("id")
 
-    return result  # type: ignore[no-any-return]
+    return result
 
 
 def _clean_text(value: Any) -> str:
@@ -244,7 +247,7 @@ async def generate_evidence_cards_batch(
     if cluster_topics is None:
         cluster_topics = {}
 
-    max_concurrency = max(1, int(concurrency or len(papers) or 1))
+    max_concurrency = max(1, min(int(concurrency or 10), len(papers) or 1))
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _bounded_generate(
@@ -263,12 +266,21 @@ async def generate_evidence_cards_batch(
             except Exception as e:
                 return idx, None, e
 
-    tasks = [_bounded_generate(i, paper) for i, paper in enumerate(papers)]
+    tasks: list[asyncio.Task[tuple[int, dict[str, Any] | None, Exception | None]]] = []
+    async with asyncio.TaskGroup() as task_group:
+        tasks = [
+            task_group.create_task(
+                _bounded_generate(index, paper),
+                name=f"agent-evidence:{paper.get('id', index)}",
+            )
+            for index, paper in enumerate(papers)
+        ]
+
     evidence_cards: list[dict[str, Any] | None] = [None] * len(papers)
     total = len(papers)
 
-    for completed, future in enumerate(asyncio.as_completed(tasks), 1):
-        idx, card, error = await future
+    for completed, task in enumerate(tasks, 1):
+        idx, card, error = task.result()
         if error:
             logger.error(
                 "Evidence generation failed, using fallback card",

@@ -1,7 +1,7 @@
 """
 SSE (Server-Sent Events) 实时推送服务
 
-用于向前端推送 Pipeline 执行状态和社区可视化数据。
+用于向前端推送 Agent 执行进度、错误和完成事件。
 """
 
 import asyncio
@@ -9,7 +9,7 @@ import json
 from collections.abc import AsyncGenerator
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..services.auth import get_token_service
@@ -98,16 +98,6 @@ class SSEManager:
             data["detail"] = detail
         await self.send_event(project_id, "progress", data)
 
-    async def send_community_visualization(
-        self, project_id: str, visualization: dict[str, object]
-    ) -> None:
-        """发送社区可视化数据"""
-        await self.send_event(project_id, "community_visualization", visualization)
-
-    async def send_outline(self, project_id: str, outline: dict[str, object]) -> None:
-        """发送大纲数据"""
-        await self.send_event(project_id, "outline", outline)
-
     async def send_error(self, project_id: str, error: str) -> None:
         """发送错误事件"""
         await self.send_event(project_id, "error", {"message": error})
@@ -167,40 +157,35 @@ async def sse_generator(
 async def stream_events(
     project_id: str,
     request: Request,
-    token: str = Query(..., description="JWT access token"),
+    authorization: str | None = Header(default=None),
 ) -> StreamingResponse:
-    """
-    SSE 端点
+    """Stream project progress using a Bearer header, never a URL token."""
 
-    客户端可以通过 EventSource 连接此端点接收实时更新。
-    由于 EventSource 不支持自定义 Header，token 通过 query 参数传递。
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Bearer token required")
 
-    示例：
-    ```javascript
-    const eventSource = new EventSource('/api/stream/project-id?token=xxx');
-    eventSource.addEventListener('progress', (e) => {
-        const data = JSON.parse(e.data);
-        console.log('Progress:', data);
-    });
-    ```
-    """
-    # 安全修复: SSE 端点必须认证，防止未授权用户监听项目事件
     token_service = get_token_service()
     try:
         payload = token_service.decode_access_token(token)
-    except ValueError:
+        user_id = str(payload["sub"])
+    except (KeyError, TypeError, ValueError):
         raise HTTPException(
             status_code=401, detail="Invalid or expired token"
         ) from None
 
     db = get_database()
-    user = await db.get_user_by_id(payload["sub"])
+    user = await db.get_user_by_id(user_id)
     if not user or not user.get("is_active", False):
         raise HTTPException(status_code=401, detail="User not found or deactivated")
 
     # 权限检查: 验证用户有权访问该项目
     project = await db.get_project(project_id)
-    if project and project.get("user_id") != user["id"] and user.get("role") != "admin":
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.get("user_id") != user["id"] and user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
 
     return StreamingResponse(

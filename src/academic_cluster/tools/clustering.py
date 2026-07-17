@@ -1,10 +1,9 @@
 """
 聚类工具
 
-实现混合图构建、社区检测（Leiden / Walktrap）、可视化生成等功能。
+实现混合图构建和社区检测（Leiden / Walktrap）。
 """
 
-import math
 import uuid
 from collections import defaultdict
 from typing import Any
@@ -13,22 +12,6 @@ import networkx as nx
 import structlog
 
 logger = structlog.get_logger()
-
-
-def _plain_float(value: object, default: float = 0.0) -> float:
-    """Return a checkpoint-safe Python float from numpy or numeric values."""
-    try:
-        return float(str(value))
-    except (TypeError, ValueError):
-        return default
-
-
-def _plain_int(value: object, default: int = 0) -> int:
-    """Return a checkpoint-safe Python int from numpy or numeric values."""
-    try:
-        return int(str(value))
-    except (TypeError, ValueError):
-        return default
 
 
 # =============================================================================
@@ -329,173 +312,3 @@ def _fallback_clustering(graph: nx.Graph) -> list[dict[str, Any]]:
             }
         )
     return clusters
-
-
-# =============================================================================
-# 可视化生成
-# =============================================================================
-
-
-def generate_community_visualization(
-    graph: nx.Graph,
-    clusters: list[dict[str, Any]],
-    papers: list[dict[str, Any]],
-    layout: str = "force",
-) -> dict[str, Any]:
-    """
-    生成社区可视化数据
-
-    Args:
-        graph: 混合图
-        clusters: 聚类列表
-        papers: 论文列表
-        layout: 布局算法 (force, circular, spring)
-
-    Returns:
-        可视化数据 {nodes, edges, clusters}
-    """
-    # 创建论文 ID 到聚类的映射
-    paper_to_cluster = {}
-    for cluster in clusters:
-        for paper_id in cluster.get("paper_ids") or []:
-            paper_to_cluster[paper_id] = cluster["id"]
-
-    # 创建论文 ID 到论文的映射
-    paper_map = {p.get("id"): p for p in papers}
-
-    # 生成颜色
-    cluster_colors = _generate_colors(len(clusters))
-    cluster_color_map = {
-        cluster["id"]: cluster_colors[i] for i, cluster in enumerate(clusters)
-    }
-
-    # 计算布局
-    if graph.number_of_nodes() == 0:
-        pos = {}
-    elif layout == "force":
-        pos = nx.spring_layout(
-            graph, k=1 / math.sqrt(graph.number_of_nodes()), iterations=50
-        )
-    elif layout == "circular":
-        pos = nx.circular_layout(graph)
-    else:
-        pos = nx.spring_layout(graph)
-
-    # 生成节点数据
-    nodes = []
-    for node_id in graph.nodes():
-        paper = paper_map.get(node_id, {})
-        cluster_id = paper_to_cluster.get(node_id, "unknown")
-
-        nodes.append(
-            {
-                "id": node_id,
-                "label": paper.get("title", "")[:50],
-                "x": _plain_float(pos[node_id][0]) if node_id in pos else 0.0,
-                "y": _plain_float(pos[node_id][1]) if node_id in pos else 0.0,
-                "cluster": cluster_id,
-                "color": cluster_color_map.get(cluster_id, "#999999"),
-                "size": _plain_float(
-                    math.log(paper.get("citation_count", 0) + 1) * 3 + 5
-                ),
-                "title": paper.get("title", ""),
-                "citation_count": _plain_int(paper.get("citation_count", 0)),
-            }
-        )
-
-    # 生成边数据
-    edges = []
-    for u, v, data in graph.edges(data=True):
-        weight = data.get("weight", 0.0)
-        if weight > 0.05:  # 只显示权重较大的边
-            edges.append(
-                {
-                    "source": u,
-                    "target": v,
-                    "weight": _plain_float(weight),
-                    "width": _plain_float(weight * 3),
-                }
-            )
-
-    # 生成聚类摘要
-    cluster_summaries = []
-    for cluster in clusters:
-        cluster_papers = [
-            paper_map.get(pid, {}) for pid in cluster.get("paper_ids") or []
-        ]
-
-        cluster_summaries.append(
-            {
-                "id": cluster["id"],
-                "size": _plain_int(cluster["size"]),
-                "color": cluster_color_map.get(cluster["id"], "#999999"),
-                "papers": [
-                    {
-                        "id": p.get("id"),
-                        "title": p.get("title", "")[:80],
-                    }
-                    for p in cluster_papers[:5]  # 只显示前 5 篇
-                ],
-            }
-        )
-
-    visualization = {
-        "nodes": nodes,
-        "edges": edges,
-        "clusters": cluster_summaries,
-        "layout": layout,
-        "metadata": {
-            "total_nodes": len(nodes),
-            "total_edges": len(edges),
-            "total_clusters": len(clusters),
-        },
-    }
-
-    logger.info(
-        "Community visualization generated",
-        nodes=len(nodes),
-        edges=len(edges),
-        clusters=len(clusters),
-    )
-
-    return visualization
-
-
-def _generate_colors(n: int) -> list[str]:
-    """生成 N 个不同的颜色"""
-    colors = [
-        "#FF6B6B",
-        "#4ECDC4",
-        "#45B7D1",
-        "#96CEB4",
-        "#FFEAA7",
-        "#DDA0DD",
-        "#98D8C8",
-        "#F7DC6F",
-        "#BB8FCE",
-        "#85C1E9",
-        "#F8C471",
-        "#82E0AA",
-        "#F1948A",
-        "#AED6F1",
-        "#D7BDE2",
-        "#A3E4D7",
-        "#FAD7A0",
-        "#D5F5E3",
-        "#FADBD8",
-        "#D4E6F1",
-    ]
-
-    if n <= len(colors):
-        return colors[:n]
-
-    # 生成更多颜色
-    import colorsys
-
-    extra_colors = []
-    for i in range(n - len(colors)):
-        hue = i / (n - len(colors))
-        r, g, b = colorsys.hsv_to_rgb(hue, 0.7, 0.9)
-        extra_colors.append(f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}")
-
-    return colors + extra_colors

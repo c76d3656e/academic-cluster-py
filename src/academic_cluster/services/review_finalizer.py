@@ -55,74 +55,42 @@ def citation_reference_numbers(
     return numbers
 
 
-def remap_section_local_citations(
-    markdown: str,
-    candidate_paper_ids: list[str],
-    paper_number_by_id: dict[str, int],
-) -> tuple[str, set[int]]:
-    """
-    Convert section-local [N] citations into stable global paper numbers.
-
-    The LLM sees each section's references as [1..section_candidates]. Without
-    this step, two sections can use [1] for different papers and final assembly
-    will bind both claims to the same global paper.
-    """
-    invalid_local_numbers: set[int] = set()
-
-    def _replace_token(match: re.Match[str]) -> str:
-        original = str(match.group(0))
-        if _YEAR_BRACKET_RE.fullmatch(original):
-            return original
-
-        local_numbers = parse_citation_numbers(match.group(1))
-        if not local_numbers:
-            return original
-
-        global_numbers: list[int] = []
-        for local_number in local_numbers:
-            if local_number < 1 or local_number > len(candidate_paper_ids):
-                invalid_local_numbers.add(local_number)
-                continue
-            paper_id = candidate_paper_ids[local_number - 1]
-            global_number = paper_number_by_id.get(paper_id)
-            if global_number is None:
-                invalid_local_numbers.add(local_number)
-                continue
-            if global_number not in global_numbers:
-                global_numbers.append(global_number)
-
-        if not global_numbers:
-            return ""
-        return "[" + ",".join(str(number) for number in global_numbers) + "]"
-
-    return _CITATION_RE.sub(_replace_token, markdown), invalid_local_numbers
-
-
 def assemble_review_deterministic(
     review_title: str,
     sections: list[dict[str, Any]],
     section_bodies: list[str],
     max_reference_count: int,
+    abstract: str = "",
 ) -> tuple[str, AssemblyReport]:
     """Assemble sections in outline order without asking an LLM to rewrite."""
     rendered_sections: list[str] = []
     for idx, section in enumerate(sections):
-        title = str(section.get("title") or f"Section {idx + 1}").strip()
+        title = normalize_citation_surface(
+            str(section.get("title") or f"Section {idx + 1}")
+        )
         body = section_bodies[idx].strip() if idx < len(section_bodies) else ""
         body = normalize_citation_surface(body)
         if not body:
             body = "No supported section draft was generated."
-        rendered_sections.append(f"## {title}\n\n{body}")
+        rendered_sections.append(f"## {idx + 1}. {title}\n\n{body}")
 
-    markdown = f"# {review_title.strip()}\n\n" + "\n\n".join(rendered_sections)
+    normalized_title = normalize_citation_surface(review_title)
+    normalized_abstract = normalize_citation_surface(abstract)
+    document_parts = [f"# {normalized_title}"]
+    if normalized_abstract:
+        document_parts.append(f"## 摘要\n\n{normalized_abstract}")
+    document_parts.extend(rendered_sections)
+    markdown = "\n\n".join(document_parts)
+    draft_fragments = [review_title, abstract, *section_bodies]
+    draft_fragments.extend(str(section.get("title") or "") for section in sections)
     draft_refs = (
         set().union(
             *[
-                citation_reference_numbers(body, max_reference_count)
-                for body in section_bodies
+                citation_reference_numbers(fragment, max_reference_count)
+                for fragment in draft_fragments
             ]
         )
-        if section_bodies
+        if draft_fragments
         else set()
     )
     assembled_refs = citation_reference_numbers(markdown, max_reference_count)
@@ -143,6 +111,7 @@ def finalize_review_markdown(
     sections: list[dict[str, Any]],
     section_bodies: list[str],
     paper_metadata_map: dict[int, dict[str, Any]],
+    abstract: str = "",
 ) -> FinalizedReview:
     """Build final markdown and references from deterministic assembly."""
     assembled, assembly_report = assemble_review_deterministic(
@@ -150,6 +119,7 @@ def finalize_review_markdown(
         sections=sections,
         section_bodies=section_bodies,
         max_reference_count=len(paper_metadata_map),
+        abstract=abstract,
     )
     body_without_refs = strip_reference_block(assembled).rstrip()
     renumbered_body, mappings = renumber_citations_by_first_use(

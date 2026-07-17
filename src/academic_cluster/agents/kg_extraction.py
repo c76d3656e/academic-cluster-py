@@ -7,59 +7,16 @@
 设计参考 Rust 版 academic-cluster-rs 的 kg_extraction 子图。
 """
 
+import asyncio
 import json
 import re
 import uuid
-from collections.abc import Callable
 from typing import Any
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
 logger = structlog.get_logger()
-
-
-# =============================================================================
-# Token 用量追踪
-# =============================================================================
-
-
-class TokenUsageTracker:
-    """累计追踪 LLM token 用量"""
-
-    def __init__(self) -> None:
-        self.prompt_tokens = 0
-        self.completion_tokens = 0
-        self.total_tokens = 0
-        self.call_count = 0
-
-    def add(self, usage: dict[str, Any]) -> None:
-        self.prompt_tokens += usage.get("prompt_tokens", 0)
-        self.completion_tokens += usage.get("completion_tokens", 0)
-        self.total_tokens += usage.get("total_tokens", 0)
-        self.call_count += 1
-
-    def summary(self) -> dict[str, int]:
-        return {
-            "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens,
-            "total_tokens": self.total_tokens,
-            "call_count": self.call_count,
-        }
-
-
-# 全局 tracker，每个 pipeline run 应重置
-_token_tracker = TokenUsageTracker()
-
-
-def get_token_tracker() -> TokenUsageTracker:
-    return _token_tracker
-
-
-def reset_token_tracker() -> None:
-    global _token_tracker
-    _token_tracker = TokenUsageTracker()
 
 
 # =============================================================================
@@ -366,6 +323,25 @@ def clamp_confidence(value: float) -> float:
 # =============================================================================
 
 
+def _strip_thinking_tags(text: str) -> str:
+    """去除模型推理标签（如 <think>...</think>）
+
+    许多模型（Qwen3、DeepSeek 等）在输出中包含推理过程，
+    用 <think> 标签包裹。这些内容不是 JSON 的一部分，必须清除。
+
+    处理方式：
+    1. 移除 <think>...</think> 完整标签对及其内容
+    2. 如果只有 </think>（开始标签被截断或不完整），也移除
+    """
+    # 去掉 <think>...</think>（包括内容）
+    text = re.sub(r"<think\b[^>]*>.*?</think\s*>", "", text, flags=re.DOTALL)
+    # 去掉单独的 </think>（没有对应的开始标签）
+    text = re.sub(r"</think\s*>", "", text)
+    # 去掉单独的 <think>（没有对应的结束标签）
+    text = re.sub(r"<think\b[^>]*>", "", text)
+    return text.strip()
+
+
 def _extract_json_object(text: str) -> str | None:
     """从文本中提取 JSON 对象（对齐 Rust 版 extract_json_object）"""
     start = text.find("{")
@@ -413,6 +389,12 @@ def fix_json(json_str: str) -> str:
     return json_str
 
 
+def _require_json_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("LLM returned invalid KG payload: JSON object expected")
+    return value
+
+
 def parse_kg_response(response: str) -> dict[str, Any]:
     """
     解析 LLM 的知识图谱提取响应
@@ -422,24 +404,30 @@ def parse_kg_response(response: str) -> dict[str, Any]:
     - Markdown 代码块中的 JSON
     - 非法转义字符修复
     - 常见格式错误的修复
+    - 模型 thinking 标签过滤（如 Qwen 的 <think> 输出）
     """
+    # 第零轮：过滤模型 thinking/推理标签
+    # 许多模型（如 Qwen3）会在正式输出前生成 <think>...</think> 推理内容
+    # 这些内容不是合法 JSON，必须先清除
+    response = _strip_thinking_tags(response)
+
     # 第一轮：尝试直接解析（先提取 JSON 对象，再 raw）
     extracted = _extract_json_object(response)
     if extracted:
         try:
-            return json.loads(extracted, strict=False)  # type: ignore[no-any-return]
+            return _require_json_object(json.loads(extracted, strict=False))
         except json.JSONDecodeError:
             pass
 
     try:
-        return json.loads(response, strict=False)  # type: ignore[no-any-return]
+        return _require_json_object(json.loads(response, strict=False))
     except json.JSONDecodeError:
         pass
 
     # 第二轮：用 fix_json 修复后重试
     try:
         fixed = fix_json(response)
-        return json.loads(fixed, strict=False)  # type: ignore[no-any-return]
+        return _require_json_object(json.loads(fixed, strict=False))
     except json.JSONDecodeError as e:
         logger.error(
             "Failed to parse KG response", error=str(e), response=response[:500]
@@ -449,21 +437,36 @@ def parse_kg_response(response: str) -> dict[str, Any]:
         ) from e
 
 
-# =============================================================================
-# Agent 创建
-# =============================================================================
-
-
-def create_kg_extraction_agent(
-    model: str | None = None,
+async def _call_llm_with_retry(
+    messages: list[Any],
+    max_retries: int = 3,
     temperature: float = 0.1,
-) -> ChatOpenAI:
-    """创建知识图谱提取 Agent"""
-    from ..services.llm_client import create_llm
+    timeout: float = 300,
+) -> Any:
+    """带重试的 LLM 调用，超时 + 指数退避
 
-    llm = create_llm(temperature=temperature)
-    logger.info("KG extraction agent created")
-    return llm
+    重试策略：
+    - 最多重试 max_retries 次
+    - 指数退避 3s → 6s → 12s
+    - 每次重试使用不同的 provider（轮询故障转移）
+    """
+    from tenacity import retry, stop_after_attempt, wait_exponential
+
+    @retry(
+        stop=stop_after_attempt(max_retries),
+        wait=wait_exponential(multiplier=2, min=3, max=30),
+        reraise=True,
+    )
+    async def _call() -> Any:
+        from ..services.llm_client import ainvoke_with_callbacks, create_llm
+
+        llm = create_llm(temperature=temperature, max_tokens=None)
+        return await asyncio.wait_for(
+            ainvoke_with_callbacks(llm, messages),
+            timeout=timeout,
+        )
+
+    return await _call()
 
 
 # =============================================================================
@@ -487,8 +490,6 @@ async def extract_kg_from_papers_batch(
     Returns:
         包含 entities 和 relations 的字典
     """
-    agent = create_kg_extraction_agent()
-
     # 构建 papers 文本（对齐 Rust 版 batch_text）
     paper_lines = []
     for p in papers:
@@ -510,27 +511,12 @@ async def extract_kg_from_papers_batch(
         HumanMessage(content=prompt),
     ]
 
-    from ..services.llm_client import ainvoke_with_callbacks
-
-    response = await ainvoke_with_callbacks(agent, messages)
-
-    # 追踪 token 用量
-    usage = getattr(response, "usage_metadata", None) or getattr(
-        response, "response_metadata", {}
+    response = await _call_llm_with_retry(
+        messages,
+        max_retries=3,
+        temperature=0.1,
+        timeout=300,
     )
-    if usage:
-        tracker = get_token_tracker()
-        tracker.add(
-            {
-                "prompt_tokens": usage.get(
-                    "input_tokens", usage.get("prompt_tokens", 0)
-                ),
-                "completion_tokens": usage.get(
-                    "output_tokens", usage.get("completion_tokens", 0)
-                ),
-                "total_tokens": usage.get("total_tokens", 0),
-            }
-        )
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
     raw_content = response.content
@@ -557,103 +543,6 @@ async def extract_kg_from_papers_batch(
 # =============================================================================
 
 
-async def extract_kg_batch(
-    papers: list[dict[str, Any]],
-    batch_size: int = 12,
-    progress_callback: Callable[..., Any] | None = None,
-    max_entities_per_paper: int = 12,
-    max_relations_per_paper: int = 12,
-) -> dict[str, Any]:
-    """
-    批量提取知识图谱
-
-    每 batch_size 篇论文打包成一个 prompt 发给 LLM（对齐 Rust 版设计）。
-
-    Args:
-        papers: 论文列表，每个包含 id, title, abstract
-        batch_size: 每个 prompt 包含的论文数
-        progress_callback: 进度回调函数，签名 async (current, total, message)
-        max_entities_per_paper: 每篇论文最大实体数
-        max_relations_per_paper: 每篇论文最大关系数
-
-    Returns:
-        规范化后的实体和关系
-    """
-
-    # 重置 token tracker
-    reset_token_tracker()
-
-    all_entities = []
-    all_relations = []
-    total = len(papers)
-
-    # 分批处理
-    for batch_start in range(0, total, batch_size):
-        batch = papers[batch_start : batch_start + batch_size]
-        batch_end = min(batch_start + batch_size, total)
-
-        if progress_callback:
-            await progress_callback(
-                batch_start,
-                total,
-                f"KG extraction: papers {batch_start + 1}-{batch_end}/{total}",
-            )
-
-        try:
-            result = await extract_kg_from_papers_batch(
-                batch,
-                max_entities_per_paper=max_entities_per_paper,
-                max_relations_per_paper=max_relations_per_paper,
-            )
-            raw_entities = result.get("entities", [])
-            raw_relations = result.get("relations", [])
-
-            # 设置 paper_ids（从 paper_id 字段提取）
-            for entity in raw_entities:
-                pid = entity.get("paper_id", "")
-                entity["paper_ids"] = [pid] if pid else []
-
-            for rel in raw_relations:
-                pid = rel.get("paper_id", "")
-                rel["paper_ids"] = [pid] if pid else []
-
-            all_entities.extend(raw_entities)
-            all_relations.extend(raw_relations)
-
-        except Exception as e:
-            logger.error(
-                "KG batch extraction failed", batch_start=batch_start, error=str(e)
-            )
-
-        if progress_callback:
-            await progress_callback(
-                batch_end,
-                total,
-                f"KG extraction: {batch_end}/{total} papers done",
-            )
-
-    # 规范化和去重（对齐 Rust 版 normalize_kg）
-    normalized = normalize_kg(all_entities, all_relations)
-
-    tracker = get_token_tracker()
-    usage = tracker.summary()
-
-    logger.info(
-        "Batch KG extraction completed",
-        total_papers=total,
-        unique_entities=normalized["stats"]["entity_count"],
-        unique_relations=normalized["stats"]["relation_count"],
-        dropped_relations=normalized["stats"]["dropped_relations"],
-        token_usage=usage,
-    )
-
-    return {
-        "entities": normalized["entities"],
-        "relations": normalized["relations"],
-        "token_usage": usage,
-    }
-
-
 # =============================================================================
 # 规范化（对齐 Rust 版 normalize.rs）
 # =============================================================================
@@ -674,7 +563,7 @@ def normalize_kg(
     entity_map: dict[str, dict[str, Any]] = {}
 
     for raw in raw_entities:
-        name = (raw.get("name") or "").strip()
+        name = str(raw.get("name") or "").strip()
         if not name:
             continue
         key = normalized_name(name)
@@ -682,13 +571,22 @@ def normalize_kg(
             continue
 
         entity_type = canonical_entity_type(
-            raw.get("entity_type") or raw.get("type") or ""
+            str(raw.get("entity_type") or raw.get("type") or "")
         )
         confidence = clamp_confidence(raw.get("confidence", 0.5))
-        raw_paper_ids = raw.get("paper_ids", [])
-        paper_ids = [pid for pid in raw_paper_ids if pid and _is_valid_uuid(pid)]
-        aliases = [a.strip() for a in raw.get("aliases", []) if a.strip()]
-        evidence = (raw.get("evidence") or "").strip() or None
+        raw_paper_ids = raw.get("paper_ids")
+        paper_ids = (
+            [str(pid) for pid in raw_paper_ids if pid and _is_valid_uuid(str(pid))]
+            if isinstance(raw_paper_ids, list)
+            else []
+        )
+        raw_aliases = raw.get("aliases")
+        aliases = (
+            [str(alias).strip() for alias in raw_aliases if str(alias).strip()]
+            if isinstance(raw_aliases, list)
+            else []
+        )
+        evidence = str(raw.get("evidence") or "").strip() or None
 
         if key in entity_map:
             existing = entity_map[key]
@@ -729,8 +627,8 @@ def normalize_kg(
     dropped_relations = 0
 
     for raw in raw_relations:
-        source_name = (raw.get("source") or "").strip()
-        target_name = (raw.get("target") or "").strip()
+        source_name = str(raw.get("source") or "").strip()
+        target_name = str(raw.get("target") or "").strip()
         if not source_name or not target_name:
             dropped_relations += 1
             continue
@@ -753,7 +651,7 @@ def normalize_kg(
 
         # 规范化关系类型
         rel_type = canonical_relation_type(
-            raw.get("relation_type") or raw.get("type") or ""
+            str(raw.get("relation_type") or raw.get("type") or "")
         )
         # 丢弃未知关系类型
         if rel_type not in RELATION_TYPES:
@@ -766,10 +664,14 @@ def normalize_kg(
             continue
         relation_keys.add(key)
 
-        raw_paper_ids = raw.get("paper_ids", [])
-        paper_ids = [pid for pid in raw_paper_ids if pid and _is_valid_uuid(pid)]
+        raw_paper_ids = raw.get("paper_ids")
+        paper_ids = (
+            [str(pid) for pid in raw_paper_ids if pid and _is_valid_uuid(str(pid))]
+            if isinstance(raw_paper_ids, list)
+            else []
+        )
         confidence = clamp_confidence(raw.get("confidence", 0.5))
-        evidence = (raw.get("evidence") or "").strip() or None
+        evidence = str(raw.get("evidence") or "").strip() or None
 
         relations.append(
             {

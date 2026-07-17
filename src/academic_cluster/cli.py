@@ -1,31 +1,45 @@
-"""
-CLI 入口
-"""
+"""Command-line entry point for the single-worker API service."""
 
-import structlog
-from rich.console import Console
+from __future__ import annotations
+
+import argparse
+from collections.abc import Sequence
+
+import uvicorn
 
 from .config import get_settings
 
-logger = structlog.get_logger()
-console = Console()
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="academic-cluster",
+        description="Run the Academic Cluster API and multi-agent workflow.",
+    )
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Reload source changes during local development.",
+    )
+    return parser
 
 
-def main() -> None:
-    """CLI 主入口"""
-    console.print("[bold blue]Academic Cluster[/bold blue]")
-    console.print("学术论文聚类与综述生成系统")
-    console.print()
+def main(argv: Sequence[str] | None = None) -> None:
+    """Start the only supported one-worker ASGI deployment."""
 
+    args = _parser().parse_args(argv)
+    if not 1 <= args.port <= 65535:
+        raise SystemExit("--port must be between 1 and 65535")
     settings = get_settings()
-
-    console.print(f"环境: {settings.app_env}")
-    console.print(f"调试模式: {settings.app_debug}")
-    console.print()
-
-    # TODO: 实现 CLI 命令
-    console.print("[yellow]CLI 命令尚未实现[/yellow]")
-    console.print("请使用 API 服务: uvicorn academic_cluster.api.main:app")
+    uvicorn.run(
+        "academic_cluster.api.main:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        workers=1,
+        log_level=settings.log_level.casefold(),
+    )
 
 
 if __name__ == "__main__":

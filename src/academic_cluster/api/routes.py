@@ -2,16 +2,23 @@
 API 路由定义
 """
 
-import asyncio
-import contextlib
+import re
 import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from ..services.agent_runtime import (
+    AgentAlreadyRunningError,
+    AgentCheckpointNotFoundError,
+    AgentNotRunningError,
+    AgentRuntimeUnavailableError,
+    get_agent_run_manager,
+    resolve_agent_targets,
+)
 from ..services.database import DatabaseService, get_database
 from .dependencies import get_current_user
 
@@ -19,8 +26,41 @@ logger = structlog.get_logger()
 
 router = APIRouter()
 
-# 正在运行的 pipeline task 映射（project_id → asyncio.Task），用于暂停
-_running_pipelines: dict[str, asyncio.Task[None]] = {}
+_LEGACY_RUNNING_PHASES = {
+    "searching": "research",
+    "filtering": "research",
+    "embedding": "analysis",
+    "clustering": "analysis",
+    "extracting_kg": "analysis",
+    "generating_evidence": "analysis",
+    "analyzing_gaps": "analysis",
+    "outlining": "writing",
+    "writing": "writing",
+    "reviewing": "peer_review",
+}
+
+
+def normalize_project_status(raw_status: object) -> tuple[str, str | None]:
+    """Map every persisted legacy/internal status to the public five-state API."""
+
+    raw = str(raw_status or "created")
+    if raw.startswith("running:agent:"):
+        return "running", raw.removeprefix("running:agent:") or None
+    if raw.startswith("running"):
+        return "running", None
+    if raw in _LEGACY_RUNNING_PHASES:
+        return "running", _LEGACY_RUNNING_PHASES[raw]
+    canonical = {
+        "created": "pending",
+        "pending": "pending",
+        "completed": "completed",
+        "succeeded": "completed",
+        "failed": "failed",
+        "interrupted": "interrupted",
+        "cancelled": "interrupted",
+        "confirming_outline": "interrupted",
+    }
+    return canonical.get(raw, "pending"), None
 
 
 @router.get("/features")
@@ -65,18 +105,12 @@ class PipelineStatusResponse(BaseModel):
     """Pipeline 状态响应"""
 
     project_id: str
+    execution_id: str | None = None
     status: str
+    current_phase: str | None = None
     current_node: str | None = None
     progress: dict[str, Any] | None = None
     error_message: str | None = None
-
-
-class OutlineConfirmRequest(BaseModel):
-    """大纲确认请求"""
-
-    project_id: str
-    approved: bool
-    edited_outline: dict[str, Any] | None = None
 
 
 class ProjectListItem(BaseModel):
@@ -134,7 +168,7 @@ async def create_project(
         id=project_id,
         name=request.name,
         query=request.query,
-        status="created",
+        status="pending",
         message="Project created successfully",
     )
 
@@ -159,7 +193,7 @@ async def list_projects(
                 id=p["id"],
                 name=p.get("name", ""),
                 query=p.get("query", ""),
-                status=p.get("status", "created"),
+                status=normalize_project_status(p.get("status"))[0],
                 created_at=str(p.get("created_at", "")),
             )
             for p in projects
@@ -186,7 +220,11 @@ async def get_project_detail(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    return project
+    public_project = dict(project)
+    public_status, current_phase = normalize_project_status(project.get("status"))
+    public_project["status"] = public_status
+    public_project["current_phase"] = current_phase
+    return public_project
 
 
 @router.delete("/projects/{project_id}")
@@ -206,12 +244,9 @@ async def delete_project(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    from sqlalchemy import text
+    from ..services.project_cleanup import delete_project_data
 
-    async with db.session() as session:
-        await session.execute(
-            text("DELETE FROM projects WHERE id = :pid"), {"pid": project_id}
-        )
+    await delete_project_data(project_id, db)
 
     return {"message": "Project deleted"}
 
@@ -233,29 +268,41 @@ async def get_project_status(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # 获取最近一次 pipeline run 的错误信息
-    error_message = None
-    if project.get("status") in ("failed", "interrupted"):
-        from sqlalchemy import text
-
-        async with db.session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT error_message FROM pipeline_runs
-                    WHERE project_id = :pid AND error_message IS NOT NULL
-                    ORDER BY created_at DESC LIMIT 1
-                """),
-                {"pid": project_id},
-            )
-            row = result.fetchone()
-            if row and row[0]:
-                error_message = row[0]
+    execution = await db.get_latest_agent_execution(project_id)
+    raw_project_status = str(project.get("status") or "created")
+    normalized_project_status, current_phase = normalize_project_status(
+        raw_project_status
+    )
+    execution_status = str(execution.get("status") or "") if execution else ""
+    project_status = {
+        "pending": "running",
+        "running": "running",
+        "succeeded": "completed",
+        "failed": "failed",
+        "interrupted": "interrupted",
+        "cancelled": "interrupted",
+    }.get(execution_status)
+    if project_status is None:
+        project_status = normalized_project_status
+    if execution_status == "pending" and current_phase is None:
+        current_phase = "supervisor"
+    progress = None
+    if execution:
+        progress = {
+            "execution_id": str(execution["id"]),
+            "status": project_status,
+            "duration_ms": execution.get("duration_ms"),
+            "quality_score": execution.get("quality_score"),
+        }
 
     return PipelineStatusResponse(
         project_id=project_id,
-        status=project.get("status", "created"),
-        current_node=None,
-        error_message=error_message,
+        execution_id=str(execution["id"]) if execution else None,
+        status=project_status,
+        current_phase=current_phase,
+        current_node=current_phase,
+        progress=progress,
+        error_message=execution.get("error_message") if execution else None,
     )
 
 
@@ -265,9 +312,7 @@ async def get_project_progress(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
 ) -> dict[str, Any]:
-    """获取项目历史执行日志"""
-    from sqlalchemy import text
-
+    """Rebuild canonical Agent phase history from persisted decisions."""
     project = await db.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -277,32 +322,152 @@ async def get_project_progress(
     ):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    async with db.session() as session:
-        rows = await session.execute(
-            text("""
-                SELECT ne.node_name, ne.status, ne.started_at, ne.finished_at,
-                       ne.elapsed_ms, ne.error_message
-                FROM node_executions ne
-                JOIN pipeline_runs pr ON ne.pipeline_run_id = pr.id
-                WHERE pr.project_id = :project_id
-                ORDER BY COALESCE(ne.index, 0), ne.started_at
-            """),
-            {"project_id": project_id},
-        )
-        nodes = []
-        for r in rows.fetchall():
-            d = dict(r._mapping)
-            for k in ("started_at", "finished_at"):
-                if d.get(k):
-                    d[k] = d[k].isoformat()
-            nodes.append(d)
+    execution = await db.get_latest_agent_execution(project_id)
+    if not execution:
+        return {"nodes": []}
 
-    return {"nodes": nodes}
+    async with db.session() as session:
+        result = await session.execute(
+            text("""
+                SELECT decision, reason, created_at
+                FROM agent_decisions
+                WHERE execution_id = :execution_id
+                ORDER BY created_at ASC, id ASC
+            """),
+            {"execution_id": execution["id"]},
+        )
+        decisions = [dict(row._mapping) for row in result.fetchall()]
+
+    allowed_phases = {
+        "supervisor",
+        "research",
+        "analysis",
+        "writing",
+        "peer_review",
+        "finalize",
+    }
+    phase_events = [
+        decision
+        for decision in decisions
+        if str(decision.get("decision") or "") in allowed_phases
+    ]
+    if phase_events:
+        phase_events.insert(
+            0,
+            {
+                "decision": "supervisor",
+                "reason": "execution accepted",
+                "created_at": phase_events[0].get("created_at"),
+            },
+        )
+
+    execution_status = str(execution.get("status") or "")
+    failed_phase = ""
+    if execution_status == "failed":
+        for decision in reversed(phase_events):
+            reason = str(decision.get("reason") or "")
+            match = re.match(
+                r"(research|analysis|writing|peer_review) exhausted", reason
+            )
+            if match:
+                failed_phase = match.group(1)
+                break
+
+    latest_by_phase: dict[str, dict[str, Any]] = {}
+    phase_order: list[str] = []
+    for event in phase_events:
+        phase = str(event["decision"])
+        if phase not in latest_by_phase:
+            phase_order.append(phase)
+        latest_by_phase[phase] = event
+
+    nodes: list[dict[str, Any]] = []
+    for index, phase in enumerate(phase_order):
+        event = latest_by_phase[phase]
+        started_at = event.get("created_at")
+        next_started = (
+            latest_by_phase[phase_order[index + 1]].get("created_at")
+            if index + 1 < len(phase_order)
+            else None
+        )
+        if phase == failed_phase:
+            status = "failed"
+        elif index + 1 < len(phase_order) or execution_status == "succeeded":
+            status = "completed"
+        elif execution_status in {"failed", "interrupted", "cancelled"}:
+            status = "failed" if execution_status == "failed" else "interrupted"
+        else:
+            status = "running"
+        elapsed_ms = None
+        if started_at is not None and next_started is not None:
+            elapsed_ms = max(0, int((next_started - started_at).total_seconds() * 1000))
+        nodes.append(
+            {
+                "node_name": phase,
+                "status": status,
+                "started_at": started_at.isoformat() if started_at else None,
+                "finished_at": next_started.isoformat() if next_started else None,
+                "elapsed_ms": elapsed_ms,
+                "error_message": (
+                    execution.get("error_message") if status == "failed" else None
+                ),
+            }
+        )
+    return {"execution_id": str(execution["id"]), "nodes": nodes}
 
 
 # =============================================================================
 # Pipeline 路由
 # =============================================================================
+
+
+async def _get_authorized_pipeline_project(
+    project_id: str,
+    current_user: dict[str, Any],
+    db: DatabaseService,
+) -> dict[str, Any]:
+    project = await db.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
+    return project
+
+
+def _agent_targets(project: dict[str, Any]) -> tuple[int, int]:
+    return resolve_agent_targets(project.get("config"))
+
+
+async def _schedule_pipeline_agent(
+    *,
+    project: dict[str, Any],
+    db: DatabaseService,
+    resume: bool,
+) -> str:
+    from .sse import get_sse_manager
+
+    target_papers, target_words = _agent_targets(project)
+    try:
+        return await get_agent_run_manager().start(
+            project=project,
+            target_papers=target_papers,
+            target_words=target_words,
+            sse_manager=get_sse_manager(),
+            resume=resume,
+            db=db,
+        )
+    except AgentAlreadyRunningError as error:
+        raise HTTPException(
+            status_code=409,
+            detail="Agent already running for this project",
+        ) from error
+    except AgentCheckpointNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except AgentRuntimeUnavailableError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
 
 
 @router.post("/pipeline/{project_id}/start")
@@ -311,58 +476,19 @@ async def start_pipeline(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
 ) -> dict[str, str]:
-    """启动 Pipeline"""
-    project = await db.get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # 防止并发启动
-    if project_id in _running_pipelines:
-        raise HTTPException(status_code=409, detail="Pipeline already running")
-
-    logger.info("Starting pipeline", project_id=project_id)
-
-    from ..graphs.graph import run_pipeline
-    from .sse import get_sse_manager
-
-    sse_manager = get_sse_manager()
-
-    async def run_in_background() -> None:
-        try:
-            from .admin.pipeline_config import (
-                build_node_config,
-                get_pipeline_config_dict,
-            )
-
-            raw_config = await get_pipeline_config_dict()
-            pipeline_config = build_node_config(raw_config)
-            project_config = project.get("config") or {}
-            pipeline_config.update(project_config)
-
-            await run_pipeline(
-                query=project.get("query", ""),
-                project_id=project_id,
-                config=pipeline_config,
-                sse_manager=sse_manager,
-            )
-        except asyncio.CancelledError:
-            logger.info("Pipeline cancelled", project_id=project_id)
-            await db.update_project_status(project_id, "interrupted")
-        except Exception as e:
-            logger.error("Pipeline failed", error=str(e))
-        finally:
-            _running_pipelines.pop(project_id, None)
-
-    task = asyncio.create_task(run_in_background())
-    _running_pipelines[project_id] = task
-
-    return {"message": "Pipeline started", "project_id": project_id}
+    """启动唯一的持久化 Agent 流程（兼容旧 Pipeline API）。"""
+    project = await _get_authorized_pipeline_project(project_id, current_user, db)
+    logger.info("Starting agent pipeline", project_id=project_id)
+    execution_id = await _schedule_pipeline_agent(
+        project=project,
+        db=db,
+        resume=False,
+    )
+    return {
+        "message": "Agent started",
+        "project_id": project_id,
+        "execution_id": execution_id,
+    }
 
 
 @router.post("/pipeline/{project_id}/pause")
@@ -371,16 +497,21 @@ async def pause_pipeline(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
 ) -> dict[str, str]:
-    """暂停 Pipeline（取消正在运行的 asyncio task，标记为 interrupted）"""
-    task = _running_pipelines.get(project_id)
-    if not task:
-        raise HTTPException(status_code=400, detail="Pipeline not running")
-
-    logger.info("Pausing pipeline", project_id=project_id)
-    task.cancel()
-    _running_pipelines.pop(project_id, None)
-    await db.update_project_status(project_id, "interrupted")
-    return {"message": "Pipeline paused", "project_id": project_id}
+    """暂停 Agent，并等待执行记录写为 interrupted。"""
+    await _get_authorized_pipeline_project(project_id, current_user, db)
+    execution = await db.get_latest_agent_execution(project_id)
+    logger.info("Pausing agent", project_id=project_id)
+    try:
+        await get_agent_run_manager().cancel(project_id)
+    except AgentNotRunningError as error:
+        raise HTTPException(status_code=409, detail="Agent not running") from error
+    if not execution:
+        raise HTTPException(status_code=409, detail="Agent execution not found")
+    return {
+        "message": "Agent paused",
+        "project_id": project_id,
+        "execution_id": str(execution["id"]),
+    }
 
 
 @router.post("/pipeline/{project_id}/resume")
@@ -389,64 +520,23 @@ async def resume_pipeline(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
 ) -> dict[str, str]:
-    """从上次失败的检查点恢复 Pipeline"""
-    project = await db.get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # 防止并发启动
-    if project_id in _running_pipelines:
-        raise HTTPException(status_code=409, detail="Pipeline already running")
-
-    logger.info("Resuming pipeline from checkpoint", project_id=project_id)
-
-    from ..graphs.graph import run_pipeline
-    from .sse import get_sse_manager
-
-    sse_manager = get_sse_manager()
-
-    async def run_in_background() -> None:
-        try:
-            # 加载 pipeline 配置（DB 中的可调参数 + 项目自定义配置）
-            from .admin.pipeline_config import (
-                build_node_config,
-                get_pipeline_config_dict,
-            )
-
-            raw_config = await get_pipeline_config_dict()
-            pipeline_config = build_node_config(raw_config)
-            project_config = project.get("config") or {}
-            pipeline_config.update(project_config)
-
-            await run_pipeline(
-                query=project.get("query", ""),
-                project_id=project_id,
-                config=pipeline_config,
-                sse_manager=sse_manager,
-                resume=True,
-            )
-        except asyncio.CancelledError:
-            logger.info("Pipeline resume cancelled", project_id=project_id)
-            await db.update_project_status(project_id, "interrupted")
-        except Exception as e:
-            logger.error("Pipeline resume failed", error=str(e))
-        finally:
-            _running_pipelines.pop(project_id, None)
-
-    task = asyncio.create_task(run_in_background())
-    _running_pipelines[project_id] = task
-
-    return {"message": "Pipeline resumed from checkpoint", "project_id": project_id}
+    """按 checkpoint 状态恢复、协调终态或创建可追踪的新执行。"""
+    project = await _get_authorized_pipeline_project(project_id, current_user, db)
+    logger.info("Resuming agent from checkpoint", project_id=project_id)
+    execution_id = await _schedule_pipeline_agent(
+        project=project,
+        db=db,
+        resume=True,
+    )
+    return {
+        "message": "Pipeline resume or retry accepted",
+        "project_id": project_id,
+        "execution_id": execution_id,
+    }
 
 
 # =============================================================================
-# 大纲确认路由
+# 大纲读取路由
 # =============================================================================
 
 
@@ -473,25 +563,6 @@ async def get_outline(
         "project_id": project_id,
         "outline": outline,
         "status": outline.get("status", "pending") if outline else "pending",
-    }
-
-
-@router.post("/projects/{project_id}/outline/confirm")
-async def confirm_outline(
-    project_id: str,
-    request: OutlineConfirmRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
-) -> dict[str, str]:
-    """确认大纲"""
-    logger.info(
-        "Confirming outline",
-        project_id=project_id,
-        approved=request.approved,
-    )
-
-    return {
-        "message": "Outline confirmed" if request.approved else "Outline rejected",
-        "project_id": project_id,
     }
 
 
@@ -534,26 +605,7 @@ async def get_review(
             key=lambda s: section_order.get(str(s.get("section_id", "")), 999)
         )
 
-    # 获取证据卡片
-    evidence_cards = []
-    if outline:
-        # 获取该项目的证据卡片
-        async with db.session() as session:
-            from sqlalchemy import text
-
-            result = await session.execute(
-                text("""
-                    SELECT DISTINCT ON (ec.id) ec.*
-                    FROM evidence_cards ec
-                    LEFT JOIN clusters c ON ec.cluster_id = c.id
-                    WHERE ec.project_id = :project_id OR c.project_id = :project_id
-                    ORDER BY ec.id, ec.created_at
-                    LIMIT 200
-                """),
-                {"project_id": project_id},
-            )
-            rows = result.fetchall()
-            evidence_cards = [dict(row._mapping) for row in rows]
+    evidence_cards = await db.get_project_evidence_cards(project_id)
 
     final_artifact = await db.get_pipeline_checkpoint(
         project_id, "final_review_artifact"
@@ -575,6 +627,8 @@ async def get_review(
             abstract = snapshot.get("abstract")
             references = snapshot.get("references") or []
 
+    raw_status = str(project.get("status") or "created")
+    public_status, _current_phase = normalize_project_status(raw_status)
     return {
         "project_id": project_id,
         "outline": outline,
@@ -583,165 +637,5 @@ async def get_review(
         "references": references,
         "final_review": final_review,
         "abstract": abstract,
-        "status": project.get("status", "pending"),
+        "status": public_status,
     }
-
-
-@router.get("/projects/{project_id}/visualization")
-async def get_visualization(
-    project_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: DatabaseService = Depends(get_database),
-) -> dict[str, Any]:
-    """获取社区可视化数据"""
-    project = await db.get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    visualization = await db.get_visualization_by_project_id(project_id)
-
-    return {
-        "project_id": project_id,
-        "visualization": visualization,
-    }
-
-
-# =============================================================================
-# 可观测性路由
-# =============================================================================
-
-
-@router.get("/runs/{run_id}/stats")
-async def get_run_stats(
-    run_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: DatabaseService = Depends(get_database),
-) -> dict[str, Any]:
-    """获取 Pipeline 运行统计"""
-    stats = await db.get_pipeline_run_stats(run_id)
-    if not stats:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
-    return stats
-
-
-@router.get("/runs/{run_id}/nodes")
-async def get_run_nodes(
-    run_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: DatabaseService = Depends(get_database),
-) -> dict[str, Any]:
-    """获取 Pipeline 运行的节点执行列表"""
-    stats = await db.get_pipeline_run_stats(run_id)
-    if not stats:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
-    nodes = await db.get_node_executions(run_id)
-    return {"run_id": run_id, "nodes": nodes}
-
-
-@router.get("/runs/{run_id}/llm-calls")
-async def get_run_llm_calls(
-    run_id: str,
-    node_name: str | None = None,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: DatabaseService = Depends(get_database),
-) -> dict[str, Any]:
-    """获取 Pipeline 运行的 LLM 调用记录"""
-    stats = await db.get_pipeline_run_stats(run_id)
-    if not stats:
-        raise HTTPException(status_code=404, detail="Pipeline run not found")
-    calls = await db.get_llm_calls(run_id, node_name=node_name)
-    return {"run_id": run_id, "llm_calls": calls}
-
-
-@router.get("/usage/summary")
-async def get_usage_summary(
-    run_id: str | None = None,
-    project_id: str | None = None,
-    days: int = 30,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: DatabaseService = Depends(get_database),
-) -> dict[str, Any]:
-    """获取用量汇总（按 provider/model 分组）"""
-    summary = await db.get_provider_usage_summary(
-        run_id=run_id,
-        project_id=project_id,
-        days=days,
-    )
-    return {"days": days, "summary": summary}
-
-
-# =============================================================================
-# WebSocket 路由（实时更新）
-# =============================================================================
-
-
-class ConnectionManager:
-    """WebSocket 连接管理"""
-
-    def __init__(self) -> None:
-        self.active_connections: dict[str, list[WebSocket]] = {}
-
-    async def connect(self, websocket: WebSocket, project_id: str) -> None:
-        await websocket.accept()
-        if project_id not in self.active_connections:
-            self.active_connections[project_id] = []
-        self.active_connections[project_id].append(websocket)
-
-    def disconnect(self, websocket: WebSocket, project_id: str) -> None:
-        if project_id in self.active_connections:
-            self.active_connections[project_id].remove(websocket)
-
-    async def send_update(self, project_id: str, data: dict[str, Any]) -> None:
-        if project_id in self.active_connections:
-            for connection in self.active_connections[project_id]:
-                with contextlib.suppress(Exception):
-                    await connection.send_json(data)
-
-
-manager = ConnectionManager()
-
-
-@router.websocket("/ws/{project_id}")
-async def websocket_endpoint(
-    websocket: WebSocket, project_id: str, token: str | None = None
-) -> None:
-    """WebSocket 端点，用于实时更新"""
-    # 安全修复: WebSocket 连接必须携带有效 token（通过 query 参数传递）
-    from ..services.auth import get_token_service
-
-    if not token:
-        await websocket.close(code=4001, reason="Missing authentication token")
-        return
-
-    token_service = get_token_service()
-    try:
-        payload = token_service.decode_access_token(token)
-    except ValueError:
-        await websocket.close(code=4001, reason="Invalid or expired token")
-        return
-
-    db = get_database()
-    user = await db.get_user_by_id(payload["sub"])
-    if not user or not user.get("is_active", False):
-        await websocket.close(code=4001, reason="User not found or deactivated")
-        return
-
-    # 权限检查: 验证用户有权访问该项目
-    project = await db.get_project(project_id)
-    if project and project.get("user_id") != user["id"] and user.get("role") != "admin":
-        await websocket.close(code=4003, reason="Access denied")
-        return
-
-    await manager.connect(websocket, project_id)
-    try:
-        while True:
-            await websocket.receive_text()
-            logger.info("WebSocket message received", project_id=project_id)
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, project_id)

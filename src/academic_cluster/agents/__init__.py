@@ -1,18 +1,30 @@
-"""
-Agent 模块 - 定义 LangGraph 中的 Agent
+"""Production multi-agent workflow public API.
 
-Agent 是具有自主决策能力的 LLM 节点，可以决定调用哪些工具、何时停止。
-与普通节点不同，Agent 节点使用 LLM 进行推理和决策。
+The LangGraph supervisor coordinates a bounded research agent, deterministic
+analysis phase, outline/writing phase, and peer-review agent.
 """
 
-from .evidence_generation import create_evidence_agent
-from .kg_extraction import create_kg_extraction_agent
-from .query_planning import create_query_planning_agent
-from .writing import create_writing_agent
+from .agent_graph import (
+    AgentState,
+    compile_agent_graph,
+    run_agent_graph,
+)
+from .orchestrator import (
+    OrchestratorAgent,
+    create_orchestrator,
+)
+from .peer_review_team import run_peer_review
+from .research_team import create_research_agent, run_research
+from .writing_team import run_writing
 
 __all__ = [
-    "create_evidence_agent",
-    "create_kg_extraction_agent",
-    "create_query_planning_agent",
-    "create_writing_agent",
+    "AgentState",
+    "OrchestratorAgent",
+    "compile_agent_graph",
+    "create_orchestrator",
+    "create_research_agent",
+    "run_agent_graph",
+    "run_peer_review",
+    "run_research",
+    "run_writing",
 ]
