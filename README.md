@@ -10,7 +10,7 @@
 - **证据卡片生成** — 为每个研究主题生成结构化的证据摘要
 - **综述撰写** — 自动生成符合学术规范的综述文章，支持自定义字数和结构
 - **可恢复执行** — PostgreSQL checkpoint 按项目与执行隔离；可运行断点原地续跑，已完成断点自动协调，终态失败创建可追踪的新执行
-- **流程可观测** — Supervisor 决策、Agent 工具调用和阶段进度均按项目记录
+- **契约化与可观测** — 六节点具备版本化 Artifact Schema、ContextManifest、错误/回退语义、Langfuse trace 和 Promptfoo 验收
 - **多模型支持** — 支持 OpenAI API 兼容的多种 LLM 提供商与端点，支持负载均衡
 - **现代 Web 界面** — Vue 3 + FastAPI 构建的响应式前端，支持实时进度跟踪
 
@@ -114,6 +114,23 @@ PUBMED_API_KEY=your_pubmed_key
 | `target_words` | 12000 | 1000–100000，目标综述字数 |
 | `quality_threshold` | 75 | 同行评审质量阈值，范围 0–100 |
 
+### Langfuse（可选）
+
+Langfuse 默认关闭；未配置、SDK 或遥测网络异常不会中断 Agent。生产环境一旦显式启用，就必须提供有效密钥和 HTTPS endpoint。节点正文默认不上传。
+
+```env
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_TRACING_ENVIRONMENT=production
+LANGFUSE_RELEASE=academic-cluster-0.1.0
+LANGFUSE_SAMPLE_RATE=1.0
+LANGFUSE_CAPTURE_NODE_IO=false
+```
+
+同一次 `execution_id` 对应一条稳定 trace，六个图节点作为子 span。默认 span 只包含契约版本、Artifact 引用、schema digest、输出 variant 与耗时；将 `LANGFUSE_CAPTURE_NODE_IO` 设为 `true` 后，输入输出仍会先限长并脱敏。
+
 ## 架构
 
 ```text
@@ -127,12 +144,15 @@ Supervisor → Research → Embedding → Coverage
 
 Supervisor 只做确定性路由。阶段失败最多尝试 2 次，补充检索最多 2 轮，同行评审修订最多 2 次。正式 API 使用 PostgreSQL checkpoint；线程标识同时包含 `project_id` 与 `execution_id`，不会跨项目复用状态。当前后端通过 PostgreSQL advisory lock 强制单实例运行，不支持多个 Uvicorn worker。详细设计见 [docs/architecture.md](docs/architecture.md)。
 
+六个生产节点都通过 `NodeContract` 声明并在运行时强制校验：精确输入/输出 Artifact 版本与 JSON Schema、`ContextManifest`、服务参数绑定、错误/回退语义、fixtures 和验收准则。完整规范见 [docs/node-contracts.md](docs/node-contracts.md)，认证后的机器可读接口为 `GET /api/agent/contracts` 与 `GET /api/agent/contracts/{node_name}`。
+
 ### 技术栈
 
 - **后端**: Python 3.12+, FastAPI, LangGraph, SQLAlchemy
 - **前端**: Vue 3, TypeScript, Vite, Tailwind CSS
 - **数据库**: PostgreSQL (pgvector), Redis
 - **AI/ML**: OpenAI-compatible APIs, LiteLLM, NetworkX, igraph
+- **可观测与评估**: Langfuse 4.x, Promptfoo 0.121.19
 - **部署**: Docker, Docker Compose
 
 ## 生产部署
@@ -152,6 +172,22 @@ PROVIDER_ENCRYPTION_KEY=<固定的 Fernet key 或至少 32 字符的随机口令
 启动时会自动校验：如果 `APP_ENV=production` 且上述配置缺失、过短或仍是公开样例占位符，将拒绝启动。`PROVIDER_ENCRYPTION_KEY` 必须跨重启保持不变，否则数据库中保存的 Provider API Key 无法解密。可用 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 生成。
 
 ## 开发
+
+### 节点契约验收
+
+```bash
+# 检查机器可读 bundle 与生产图/契约是否一致
+uv run python scripts/export_node_contracts.py --check
+
+# 运行契约、fixture 和 Promptfoo 资产单测
+uv run pytest tests/unit/test_node_contracts.py tests/unit/test_promptfoo_contract_assets.py
+
+# Node.js 22；离线运行六节点 Promptfoo acceptance
+cd promptfoo
+uv run npx --yes promptfoo@0.121.19 eval --config promptfooconfig.yaml --no-cache
+```
+
+Promptfoo provider 只调用本项目的 deterministic fixture acceptance API，不访问 LLM、论文源或 Provider 密钥。
 
 ### 项目结构
 

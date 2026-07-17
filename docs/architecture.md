@@ -74,6 +74,54 @@ Analysis 内部顺序是固定的：
 5. 生成并持久化 evidence cards；LLM 失败产生的低置信度占位卡不会持久化或冒充可验证证据，没有真实证据卡时 Analysis 按阶段预算重试。
 6. 根据 evidence claims 分析研究差距。
 
+## 节点契约与可观测执行边界
+
+六个实际注册到 `StateGraph` 的节点同时也是契约注册表的全部成员：`supervisor`、`research`、`analysis`、`writing`、`peer_review`、`finalize`。注册表位于 `src/academic_cluster/agents/node_contracts.py`；图编译时会检查节点顺序与注册表完全一致，新增、删除或改名后未同步契约会直接拒绝编译。
+
+```mermaid
+flowchart LR
+    S["AgentState checkpoint"] --> IA["Input Artifact projection<br/>id + version 1.0.0 + JSON Schema"]
+    IA --> CM["ContextManifest<br/>project / execution / schema digest"]
+    CM --> LF["Langfuse node span"]
+    LF --> N["Production node"]
+    N --> OA["Output Artifact validation<br/>status-selected variant"]
+    OA -->|"valid"| CP["LangGraph state update / checkpoint"]
+    IA -->|"invalid"| FC["Fail closed"]
+    OA -->|"invalid"| FC
+    LF -. "telemetry unavailable" .-> N
+```
+
+每次节点调用执行以下固定协议：
+
+1. 仅投影该节点真实读取的 `AgentState` 字段，生成带稳定 `artifact_id` 和 `1.0.0` 版本的输入 Artifact。
+2. 按 Draft 2020-12 JSON Schema 校验必填字段、类型、有限数值与 `additionalProperties=false` 约束。
+3. 生成 `ContextManifest` 和确定性的 invocation digest，绑定 `project_id`、`execution_id`、节点名、契约版本、输入 Artifact 引用与 schema digest。
+4. 在同一 execution Langfuse trace 下启动节点 span；执行真实节点，业务返回值不被 tracing wrapper 改写。
+5. 按 `status` 选择唯一输出 variant，验证该分支的必填字段后才允许 LangGraph 合并状态。
+
+契约校验是业务正确性边界，采用 fail-closed；Langfuse 是旁路可观测性，采用 fail-open。二者不能互相替代：遥测 SDK、网络、flush 或 shutdown 失败不会改变业务结果，但 Artifact 版本、字段或输出分支不符合契约时，不会把不完整状态写入 checkpoint。
+
+```mermaid
+flowchart TD
+    E["Node outcome"] --> C{"Outcome class"}
+    C -->|"asyncio cancellation"| I["Propagate → execution interrupted"]
+    C -->|"phase exception"| R["phase_failed update → bounded Supervisor retry"]
+    C -->|"declared degradation"| W["warning / fallback output → continue"]
+    C -->|"contract violation"| F["raise → execution failed before state merge"]
+    C -->|"Langfuse failure"| O["local structured log → continue unchanged"]
+```
+
+完整的字段、参数绑定、输出 variants、错误/回退和验收准则见 `docs/node-contracts.md`。机器可读入口如下：
+
+- `GET /api/agent/contracts`：完整注册表和十二份输入/输出 Artifact Schema；
+- `GET /api/agent/contracts/{node_name}`：单节点契约；
+- `promptfoo/contracts/node-contracts.json`：图拓扑、运行时契约、schema、fixtures 和验收结果的可审计快照；
+- `uv run python scripts/export_node_contracts.py --check`：检测快照是否与生产图漂移。
+
+Promptfoo `0.121.19` 使用六份离线 fixture 执行同一套运行时 acceptance API，不调用模型、Provider 或外部数据源。CI 会先检查导出快照，再运行 Promptfoo；因此契约变更必须同时满足 Python 运行时、图路由与独立评估三层校验。
+
+Langfuse v4 为每次 `run_agent_graph` 建立 execution agent observation，并以 `execution_id` 生成稳定 trace ID；节点 span 自动继承该 trace。默认只发送 Artifact 引用、版本、schema digest、输出 variant、字段名和耗时，不发送论文、Prompt 或综述正文。只有显式设置 `LANGFUSE_CAPTURE_NODE_IO=true` 才会捕获经递归限深、限项、限长和敏感字段脱敏后的节点 I/O。
+
 ## 状态、隔离与恢复
 
 `AgentState` 是 `extra="forbid"` 的 Pydantic 模型，所有 checkpoint 字段必须显式声明。关键标识如下：
