@@ -546,12 +546,16 @@ uv run pytest tests/unit/test_node_contracts.py tests/unit/test_node_contract_ru
 
 - Promptfoo CLI 固定为 `0.121.19`，不得使用无版本的 latest。
 - bundle 声明 Node engine `^20.20.0 || >=22.22.0`；CI 使用 Node 22。
-- CI 设置 `PROMPTFOO_DISABLE_TELEMETRY=true`，评估使用 `--no-cache`。
+- CI 设置 `PROMPTFOO_DISABLE_TELEMETRY=true`，并将 `PROMPTFOO_PYTHON` 固定为项目 `.venv/bin/python`，评估使用 `--no-cache`。
 
 ```bash
 cd promptfoo
-uv run npx --yes promptfoo@0.121.19 eval --config promptfooconfig.yaml --no-cache
+# PowerShell: 先将 Promptfoo Python provider 绑定到项目 Python 3.12
+$env:PROMPTFOO_PYTHON=(Resolve-Path ..\.venv\Scripts\python.exe).Path
+promptfoo eval --config promptfooconfig.yaml --no-cache --no-write
 ```
+
+POSIX shell 使用 `PROMPTFOO_PYTHON="$(cd .. && pwd)/.venv/bin/python" promptfoo eval --config promptfooconfig.yaml --no-cache --no-write`。不能依赖系统 `python`：它可能是与项目依赖不兼容的旧版本。
 
 ## 7. Langfuse 可观测性、隐私与 fail-open
 

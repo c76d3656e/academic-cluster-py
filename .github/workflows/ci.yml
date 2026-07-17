@@ -172,7 +172,9 @@ jobs:
 
       - name: Run deterministic Promptfoo acceptance
         working-directory: promptfoo
-        run: uv run npx --yes promptfoo@0.121.19 eval --config promptfooconfig.yaml --no-cache
+        env:
+          PROMPTFOO_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: npx --yes promptfoo@0.121.19 eval --config promptfooconfig.yaml --no-cache
 
   frontend-lint:
     name: Frontend Lint & Type Check

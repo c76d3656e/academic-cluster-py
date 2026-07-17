@@ -182,12 +182,13 @@ uv run python scripts/export_node_contracts.py --check
 # 运行契约、fixture 和 Promptfoo 资产单测
 uv run pytest tests/unit/test_node_contracts.py tests/unit/test_promptfoo_contract_assets.py
 
-# Node.js 22；离线运行六节点 Promptfoo acceptance
+# Node.js 22；全局安装 promptfoo 后，显式使用项目 Python 3.12 虚拟环境
 cd promptfoo
-uv run npx --yes promptfoo@0.121.19 eval --config promptfooconfig.yaml --no-cache
+$env:PROMPTFOO_PYTHON=(Resolve-Path ..\.venv\Scripts\python.exe).Path
+promptfoo eval --config promptfooconfig.yaml --no-cache --no-write
 ```
 
-Promptfoo provider 只调用本项目的 deterministic fixture acceptance API，不访问 LLM、论文源或 Provider 密钥。
+在 POSIX shell 中使用 `PROMPTFOO_PYTHON="$(cd .. && pwd)/.venv/bin/python" promptfoo eval --config promptfooconfig.yaml --no-cache --no-write`。Promptfoo provider 只调用本项目的 deterministic fixture acceptance API，不访问 LLM、论文源或 Provider 密钥。
 
 ### 项目结构
 
