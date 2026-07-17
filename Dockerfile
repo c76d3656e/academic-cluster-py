@@ -19,6 +19,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Layer 2: 复制源码并安装项目本体（源码变动只重跑这一层）
 COPY src/ src/
 COPY pyproject.toml uv.lock README.md ./
+COPY scripts/migrate_agent_tables.sql scripts/migrate_agent_tables.sql
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
@@ -38,6 +39,7 @@ COPY --from=builder --chown=appuser:appuser /app/pyproject.toml /app/pyproject.t
 
 COPY --chown=appuser:appuser src/ src/
 COPY --chown=appuser:appuser jcrdata/ jcrdata/
+COPY --chown=appuser:appuser scripts/migrate_agent_tables.sql scripts/migrate_agent_tables.sql
 
 RUN mkdir -p data/raw data/processed data/embeddings logs && \
     chown -R appuser:appuser data logs
@@ -45,6 +47,7 @@ RUN mkdir -p data/raw data/processed data/embeddings logs && \
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    LANGGRAPH_STRICT_MSGPACK=true \
     PYTHONPATH=/app/src
 
 USER appuser

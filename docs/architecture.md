@@ -1,613 +1,182 @@
-# Academic Cluster Python - LangGraph 架构设计
+# Academic Cluster 多智能体架构
 
-## 1. 系统概述
+本文描述当前生产代码。流程入口位于 `src/academic_cluster/agents/agent_graph.py`，旧的 `graphs/` DAG、文件 Prompt、WebSocket 和社区可视化流程已移除。
 
-基于 LangGraph 复刻 Rust 版 Prism 系统，实现学术论文聚类、知识图谱构建、综述自动生成。
+## 系统边界
 
-## 2. LangGraph 核心概念映射
+```mermaid
+flowchart LR
+    UI["Vue 前端"] -->|"Bearer HTTP / SSE"| API["FastAPI API"]
+    API --> RM["唯一 AgentRunManager"]
+    RM --> G["LangGraph Agent graph"]
+    G --> RT["Research Agent"]
+    G --> AT["Analysis tools"]
+    G --> WT["Writing tools"]
+    G --> PR["Peer-review tool"]
 
-### 2.1 与 Rust DAG 的对应关系
+    RT --> SRC["Academic sources"]
+    RT --> PP
+    AT --> PP["LLM / Embedding provider pool"]
+    WT --> PP
+    PR --> PP
 
-| Rust 概念 | LangGraph 概念 | 说明 |
-|-----------|----------------|------|
-| GraphNode | Node (Python function) | 执行具体任务的函数 |
-| GraphState | State (TypedDict/Pydantic) | 节点间共享的状态 |
-| GraphEdge | Edge (add_edge) | 节点间的固定连接 |
-| ConditionalEdge | Conditional Edge (add_conditional_edges) | 根据状态动态路由 |
-| GraphRunner | StateGraph.compile().invoke() | 图执行引擎 |
-
-### 2.2 Agent vs Tool vs Function Calling
-
-**Agent（智能体）**:
-- 具有自主决策能力的 LLM 节点
-- 可以决定调用哪些工具、何时停止
-- 用于需要推理和判断的复杂任务
-- 示例：查询规划 Agent、综述写作 Agent
-
-**Tool（工具）**:
-- 被 Agent 调用的确定性函数
-- 执行具体操作（搜索、过滤、存储）
-- 不涉及 LLM 推理
-- 示例：学术搜索 Tool、BM25 检索 Tool
-
-**Function Calling**:
-- LLM 输出结构化数据的机制
-- Agent 通过 function calling 调用 Tool
-- LangChain 中通过 `bind_tools()` 实现
-
-## 3. 图架构设计
-
-### 3.1 主图 (Main Graph)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Academic Review Pipeline                            │
-│                                                                             │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                  │
-│  │   START      │───▶│   search     │───▶│  deduplicate │                  │
-│  └──────────────┘    └──────────────┘    └──────────────┘                  │
-│                                                     │                      │
-│                                                     ▼                      │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                  │
-│  │   embedding  │◀───│    bm25      │◀───│    filter    │                  │
-│  └──────────────┘    └──────────────┘    └──────────────┘                  │
-│         │                                                                      │
-│         ▼                                                                      │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                  │
-│  │  pgvector    │───▶│   rerank     │───▶│  kg_extract  │                  │
-│  │    knn       │    └──────────────┘    └──────────────┘                  │
-│  └──────────────┘           │                    │                          │
-│                             ▼                    ▼                          │
-│                    ┌──────────────────────────────────────┐                 │
-│                    │      community_detection              │                 │
-│                    │  (Hybrid Graph + Leiden)              │                 │
-│                    └──────────────────────────────────────┘                 │
-│                                    │                                        │
-│                                    ▼                                        │
-│  ┌──────────────┐    ┌──────────────────────────────────────┐               │
-│  │  evidence    │◀───│         visualize_community           │──── 推送前端 │
-│  │   cards      │    └──────────────────────────────────────┘               │
-│  └──────────────┘           │                                               │
-│         │                   ▼                                               │
-│         │          ┌──────────────┐                                         │
-│         └─────────▶│    gap       │──── 有差距 ───▶ targeted_refine ─┐     │
-│                    │   analysis    │                                  │     │
-│                    └──────────────┘◀─────────────────────────────────┘     │
-│                           │ 无差距                                         │
-│                           ▼                                                │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                  │
-│  │   outline    │───▶│ user_confirm │───▶│    write     │                  │
-│  │  generation  │    │   (interrupt)│    │   review     │                  │
-│  └──────────────┘    └──────────────┘    └──────────────┘                  │
-│                                                     │                      │
-│                                                     ▼                      │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                  │
-│  │   coverage   │───▶│   section    │───▶│   artifact   │                  │
-│  │    audit     │◀──▶│   revision   │    │  registration│                  │
-│  └──────────────┘    └──────────────┘    └──────────────┘                  │
-│                                                     │                      │
-│                                                     ▼                      │
-│                                              ┌──────────────┐              │
-│                                              │     END      │              │
-│                                              └──────────────┘              │
-└─────────────────────────────────────────────────────────────────────────────┘
+    RM --> PG[("PostgreSQL")]
+    G --> PG
+    G --> CP[("LangGraph checkpoints")]
+    AT --> VS["pgvector"]
+    VS --> PG
+    AT --> RC["Redis embedding cache"]
 ```
 
-### 3.2 State 定义
+- `/api/pipeline/*` 与 `/api/agent/*` 是兼容入口，但共用同一个 `AgentRunManager`。
+- PostgreSQL 的部分唯一索引保证一个项目最多存在一个 `pending` 或 `running` execution；这条约束跨进程生效。
+- API 接受任务后会先同步发布 `running:agent:supervisor`；极短暂的 execution `pending` 也统一对外显示为 `running`，不会让前端误以为任务尚未启动。
+- Checkpointer 初始化会持有会话级 PostgreSQL advisory lock；第二个后端实例会拒绝启动，因此当前部署契约是单进程、单 Uvicorn worker。
+- 正式应用启动必须初始化 PostgreSQL checkpointer，不会静默退回内存。内存 saver 只用于直接测试图。
+- 进度使用 `/api/stream/{project_id}` 的 SSE 流，令牌通过 `Authorization: Bearer` 传递，不进入 URL。
 
-```python
-from typing import TypedDict, Annotated
-from langgraph.graph import add_messages
+## 执行流程
 
-class PaperState(TypedDict):
-    """论文相关状态"""
-    papers: list[Paper]                    # 当前论文列表
-    core_papers: list[Paper]               # 核心参考论文 (top 80)
-    auxiliary_papers: list[Paper]           # 辅助参考论文 (next 160)
-    embeddings: dict[str, list[float]]     # paper_id -> embedding vector
-    kg_entities: list[KGEntity]            # 知识图谱实体
-    kg_relations: list[KGRelation]         # 知识图谱关系
+```mermaid
+flowchart TD
+    S["Supervisor"] --> R["Research"]
+    R --> S
+    S --> A["Analysis"]
 
-class ClusteringState(TypedDict):
-    """聚类相关状态"""
-    clusters: list[Cluster]                # 社区列表
-    cluster_assignments: dict[str, str]    # paper_id -> cluster_id
-    hybrid_graph: dict                      # 混合图数据
-    community_visualization: dict          # 可视化数据 (推送给前端)
+    A --> E["Generate/verify embeddings"]
+    E --> C["KNN clustering and coverage"]
+    C -->|"coverage < 0.55 and rounds remain"| MR["Request supplemental research"]
+    MR --> S
+    C -->|"coverage accepted"| KG["Knowledge graph extraction"]
+    KG --> EV["Evidence-card generation"]
+    EV --> GAP["Evidence-based gap analysis"]
+    GAP --> S
 
-class WritingState(TypedDict):
-    """写作相关状态"""
-    outline: Outline                       # 综述大纲
-    section_plans: list[SectionPlan]       # 各章节计划
-    citation_plans: list[CitationPlan]     # 引用计划
-    written_sections: list[WrittenSection] # 已写章节
-    final_review: str                      # 最终综述文本
-    bibtex: str                           # BibTeX 引用
-
-class PipelineState(TypedDict):
-    """主状态 - 整合所有子状态"""
-    # 元数据
-    project_id: str
-    query: str
-    status: str
-
-    # 配置
-    config: PipelineConfig
-
-    # 论文状态
-    papers: Annotated[list[Paper], add_messages]
-    core_papers: list[Paper]
-    auxiliary_papers: list[Paper]
-
-    # 嵌入和向量
-    embeddings: dict[str, list[float]]
-    knn_graph: dict
-
-    # 知识图谱
-    kg_entities: list[KGEntity]
-    kg_relations: list[KGRelation]
-
-    # 聚类
-    clusters: list[Cluster]
-    cluster_assignments: dict[str, str]
-    hybrid_graph: dict
-    community_visualization: dict
-
-    # 证据
-    evidence_cards: list[EvidenceCard]
-    gap_analysis: list[GapAnalysis]
-
-    # 写作
-    outline: Outline
-    section_plans: list[SectionPlan]
-    citation_plans: list[CitationPlan]
-    written_sections: list[WrittenSection]
-    final_review: str
-    bibtex: str
-
-    # 错误处理
-    errors: list[str]
-    retry_count: int
+    S --> W["Outline and parallel section writing"]
+    W --> S
+    S --> P["Peer review"]
+    P -->|"score below threshold and revisions remain"| REV["Parallel section revision"]
+    REV --> S
+    P -->|"accepted or revision budget exhausted"| F["Finalize"]
+    F --> END["Persist final artifact"]
 ```
 
-## 4. 节点详细设计
+Supervisor 不调用 LLM 决定路由，而是根据 `AgentState` 的完成标记、错误状态和次数预算确定下一阶段。每个业务阶段结束后都回到 Supervisor，因此状态转移只有一个决策点。
 
-### 4.1 搜索节点 (Search Node)
+Research ReAct 只有在 `finalize_research` 对应的 `ToolMessage` 明确执行成功时才算完成；仅生成工具调用、参数校验失败或错误 ToolMessage 都不能绕过 Research 完成条件。
 
-```python
-async def search_papers(state: PipelineState) -> dict:
-    """搜索学术论文 - 使用多个数据源"""
-    # 使用 Agent 进行查询规划
-    query_plan = await query_planning_agent.ainvoke({
-        "query": state["query"]
-    })
+Analysis 内部顺序是固定的：
 
-    # 并行搜索多个源
-    papers = await asyncio.gather(
-        search_semantic_scholar(query_plan),
-        search_pubmed(query_plan),
-        search_arxiv(query_plan),
-        search_openalex(query_plan),
-    )
+1. 解析本次实际 Embedding 模型，为当前项目论文生成或验证 embedding；缓存、数据库和状态使用同一模型名，向量必须是 1024 个有限数值。
+2. 只在同一个 Embedding 模型空间内构建 pgvector KNN 图，再进行聚类与覆盖度分析。
+3. 覆盖不足时回到 Research；覆盖通过后才继续。
+4. 抽取知识图谱。KG 失败会降级为 warning，不会伪造结果。
+5. 生成并持久化 evidence cards；LLM 失败产生的低置信度占位卡不会持久化或冒充可验证证据，没有真实证据卡时 Analysis 按阶段预算重试。
+6. 根据 evidence claims 分析研究差距。
 
-    # 合并结果
-    all_papers = deduplicate_papers(papers)
+## 状态、隔离与恢复
 
-    return {"papers": all_papers, "status": "searched"}
+`AgentState` 是 `extra="forbid"` 的 Pydantic 模型，所有 checkpoint 字段必须显式声明。关键标识如下：
+
+```text
+project_id   数据归属边界
+execution_id 单次执行与恢复边界
+thread_id    academic-cluster:agent:v1:{project_id}:{execution_id}
+checkpoint_ns ""
 ```
 
-### 4.2 知识图谱提取节点 (KG Extraction Node)
+项目论文通过 `project_papers` 关联，evidence cards、Agent decisions 和 tool calls 都带项目标识。Agent 工具使用 task-local `ContextVar` token 传递 `project_id` 与 `execution_id`，并发任务结束时 reset，不使用进程级项目栈。工具即使以结构化 `{"error": ...}` 返回降级结果，审计状态也会记录为 `failed`，不会伪装成成功调用。
 
-```python
-async def extract_knowledge_graph(state: PipelineState) -> dict:
-    """从论文中提取知识图谱"""
-    # 使用 Agent 批量提取实体和关系
-    kg_results = await kg_extraction_agent.abatch([
-        {"paper": paper}
-        for paper in state["core_papers"]
-    ])
+启动与恢复生命周期：
 
-    # 实体标准化和去重
-    entities = normalize_entities(kg_results)
-    relations = normalize_relations(kg_results)
+```mermaid
+sequenceDiagram
+    participant API
+    participant RM as AgentRunManager
+    participant DB as PostgreSQL
+    participant CP as Checkpointer
+    participant G as Agent graph
 
-    return {
-        "kg_entities": entities,
-        "kg_relations": relations
-    }
+    API->>RM: start(project)
+    RM->>DB: INSERT pending execution
+    DB-->>RM: execution_id
+    RM->>DB: project = running:agent:supervisor
+    RM->>G: create background task
+    G->>DB: status = running
+    G->>CP: checkpoint each graph step
+
+    alt pause or shutdown
+        API->>RM: cancel(project_id)
+        RM->>G: cancel and await task tree
+        G->>DB: execution/project = interrupted
+    end
+
+    API->>RM: resume(project)
+    RM->>CP: inspect exact snapshot once
+    alt interrupted or failed and snapshot.next is non-empty
+        RM->>DB: atomically claim existing execution
+        RM->>G: resume same execution_id
+    else snapshot reached END successfully
+        RM->>DB: reconcile execution = succeeded and project = completed
+    else terminal failure or failed execution without a checkpoint
+        RM->>DB: create new execution with retry_of_execution_id
+        RM->>G: start fresh execution_id
+    else interrupted execution without a checkpoint
+        RM-->>API: 404 no resumable checkpoint
+    end
 ```
 
-### 4.3 社区检测节点 (Community Detection Node)
+应用重启时，遗留的 `pending`/`running` execution 会被标记为 `interrupted`；这一步与旧 Pipeline 残留清理相互独立，旧表异常不会阻断 Agent 恢复。恢复决策以 snapshot 为真相，而不是仅看数据库状态：只要 `snapshot.next` 非空，即使数据库已经写成 `failed` 也复用原 execution；如果图已成功到 END 但数据库还停在 `interrupted`，则直接协调为完成；终态失败保留完整历史并创建独立 thread，在 `input_state.retry_of_execution_id` 中记录来源。fresh retry 同时继承原 execution 的 topic、论文数、目标字数和质量阈值，避免恢复时任务参数漂移。
 
-```python
-async def detect_communities(state: PipelineState) -> dict:
-    """构建混合图并进行社区检测"""
-    # 构建混合图 (5种边信号融合)
-    hybrid_graph = build_hybrid_graph(
-        knn_graph=state["knn_graph"],
-        kg_relations=state["kg_relations"],
-        kg_entities=state["kg_entities"],
-        evidence_cards=state["evidence_cards"],
-        core_papers=state["core_papers"],
-        weights={"knn": 0.45, "kg": 0.25, "entity": 0.15, "evidence": 0.10, "quality": 0.05}
-    )
+删除项目时先建立运行屏障并等待任务树退出，再清理 `checkpoints`、`checkpoint_blobs`、`checkpoint_writes` 三张 LangGraph 表（包括没有主 checkpoint 的孤儿 blob/write），最后在一个数据库事务中删除项目数据。
 
-    # 社区检测（支持 leiden / walktrap，通过 clustering.algorithm 配置切换）
-    clusters = community_detection(
-        graph=hybrid_graph,
-        algorithm="leiden",
-        resolution=1.0,
-        seed=42
-    )
+## 有界行为
 
-    # 生成可视化数据
-    visualization = generate_community_visualization(
-        graph=hybrid_graph,
-        clusters=clusters,
-        papers=state["papers"]
-    )
+| 行为 | 默认上限 | 结果 |
+|---|---:|---|
+| 单阶段失败尝试 | 2 | 达到上限后进入 Finalize 并标记失败 |
+| Research 轮次 | 2 | 覆盖仍低于 0.55 时失败 |
+| 同行评审修订 | 2 | 达到上限后保留 warning 并终结 |
+| Research 搜索工具调用 | 6 | 包装工具在运行时强制上限 |
+| 并行章节写作/修订 | 3 | `TaskGroup` + semaphore |
+| Evidence 并发 | 10 | 取消父任务会取消所有子任务 |
+| KG 核心论文预算 | 80 | 超出部分记录 warning |
 
-    return {
-        "clusters": clusters,
-        "cluster_assignments": {p.id: c.id for c in clusters for p in c.papers},
-        "hybrid_graph": hybrid_graph,
-        "community_visualization": visualization  # 推送给前端
-    }
+`TaskGroup` 用于 embedding、evidence、章节写作和修订等并发工作。暂停时管理器取消并等待顶层任务，结构化并发保证子任务不会继续在后台写数据库。
+
+## 引用一致性
+
+写作前先按项目论文创建稳定的全局引用映射。每个章节只获得与本节相关、数量受限的来源，来源包含标题、年份、摘要和 evidence claims。
+
+聚类 ID 被视为不透明标识，生产 UUID 与旧整数 ID 都直接贯穿引用规划；规划器不会再把 cluster ID 当作数组下标。
+
+初稿和修订完成后，流程只校验正文中的 `[N]`，不会把 References 自身的编号误判成正文引用。最终化步骤按正文首次出现顺序重编号，并同步：
+
+- 各章节正文；
+- 最终 Markdown；
+- `final_references` 中的 `new_number/original_number`；
+- References 列表。
+
+未在正文出现的论文不会进入最终 References。再次修订前，流程用 `original_number` 恢复稳定编号，避免同一个编号在不同修订轮次指向不同论文。
+
+## 对外状态契约
+
+项目状态统一为：
+
+```text
+pending | running | completed | failed | interrupted
 ```
 
-### 4.4 综述写作节点 (Review Writing Node)
+可见阶段统一为：
 
-```python
-async def write_review(state: PipelineState) -> dict:
-    """生成综述大纲和内容"""
-    # 生成大纲
-    outline = await outline_generation_agent.ainvoke({
-        "clusters": state["clusters"],
-        "kg_summary": summarize_kg(state["kg_entities"], state["kg_relations"]),
-        "query": state["query"]
-    })
-
-    # 中断等待用户确认 (Human-in-the-loop)
-    # LangGraph 会在此处暂停，等待用户确认大纲
-
-    # 生成各章节计划
-    section_plans = await generate_section_plans(outline, state["clusters"])
-
-    # 生成引用计划
-    citation_plans = generate_citation_plans(section_plans, state["papers"])
-
-    # 并行写入各章节
-    written_sections = await asyncio.gather(*[
-        write_section_agent.ainvoke({
-            "plan": plan,
-            "evidence": get_relevant_evidence(plan, state["evidence_cards"]),
-            "citations": get_section_citations(plan, citation_plans)
-        })
-        for plan in section_plans
-    ])
-
-    # 组装综述
-    final_review = assemble_review(written_sections, citation_plans)
-    bibtex = generate_bibtex(citation_plans)
-
-    return {
-        "outline": outline,
-        "section_plans": section_plans,
-        "citation_plans": citation_plans,
-        "written_sections": written_sections,
-        "final_review": final_review,
-        "bibtex": bibtex
-    }
+```text
+supervisor | research | analysis | writing | peer_review | finalize
 ```
 
-## 5. Agent 设计
+前端在 SSE 断开后进行有界指数退避重连，同时继续无重叠地轮询数据库状态；收到 complete 事件后也会重新查询状态，不能仅凭连接事件把失败任务显示为成功。所有 Chat 请求、SSE 流和轮询响应都有会话代次，旧响应不能覆盖新会话。进度再按 `execution_id` 隔离：同一 checkpoint 恢复保留历史，fresh retry 自动清除旧执行阶段。
 
-### 5.1 查询规划 Agent
+## 部署限制
 
-```python
-from langchain_openai import ChatOpenAI
-from langchain_core.tools import tool
+默认 Docker 启动一个 Uvicorn worker，且 PostgreSQL advisory lock 强制整个数据库只有一个 Agent API 实例。专用锁连接由后台任务持续探测；连接失效会立即禁止新任务、取消并等待当前任务树，`/health` 同时返回 503。连接已经失效时，关闭流程直接丢弃该会话，不会再次执行 unlock 产生二次异常；任何发生在 ASGI `yield` 前的启动失败也会关闭已初始化服务并释放锁。任务取消句柄保存在当前进程，因此 pause、项目删除与停机等待都能覆盖完整任务树。当前不支持多个 Uvicorn worker；若未来要横向扩展，必须先实现分布式任务所有权和取消信号，再移除单实例锁。部分唯一索引仍作为数据库层的重复执行防线。
 
-@tool
-def refine_search_query(query: str) -> str:
-    """优化搜索查询"""
-    # 确定性逻辑，不涉及 LLM
-    return query.strip().lower()
-
-@tool
-def evaluate_search_results(papers: list[dict]) -> dict:
-    """评估搜索结果质量"""
-    # 确定性评分逻辑
-    return {"score": len(papers) / 100}
-
-query_planning_agent = ChatOpenAI(model="gpt-4o-mini").bind_tools([
-    refine_search_query,
-    evaluate_search_results
-])
-```
-
-### 5.2 综述写作 Agent
-
-```python
-@tool
-def get_paper_context(paper_id: str) -> str:
-    """获取论文上下文"""
-    # 从数据库获取论文详情
-    return get_paper_from_db(paper_id)
-
-@tool
-def format_citation(paper_id: str, style: str = "apa") -> str:
-    """格式化引用"""
-    paper = get_paper_from_db(paper_id)
-    return format_apa_citation(paper)
-
-writing_agent = ChatOpenAI(model="gpt-4o").bind_tools([
-    get_paper_context,
-    format_citation
-])
-```
-
-## 6. 条件路由设计
-
-```python
-from langgraph.graph import END
-
-def should_continue_to_writing(state: PipelineState) -> str:
-    """判断是否可以进入写作阶段"""
-    # 检查社区差距分析结果
-    gaps = state["gap_analysis"]
-    total_gap_score = sum(g.score for g in gaps)
-
-    if total_gap_score > 0.3:
-        return "targeted_refine"  # 差距过大，需要补充搜索
-    else:
-        return "outline_generation"  # 可以开始写作
-
-def should_revise_sections(state: PipelineState) -> str:
-    """判断是否需要修订章节"""
-    coverage = calculate_coverage(state)
-    invalid_citations = count_invalid_citations(state)
-
-    if coverage < 0.8 or invalid_citations > 0:
-        return "section_revision"
-    else:
-        return "artifact_registration"
-```
-
-## 7. 中断和人工确认
-
-```python
-from langgraph.checkpoint.memory import MemorySaver
-
-# 使用 interrupt 实现人工确认
-def outline_generation_with_confirm(state: PipelineState) -> dict:
-    """生成大纲并等待用户确认"""
-    outline = generate_outline(state)
-
-    # 返回大纲，图会在此处暂停
-    # 用户确认后继续执行
-    return {"outline": outline}
-
-# 编译图时添加中断点
-graph = StateGraph(PipelineState)
-graph.add_node("outline_generation", outline_generation_with_confirm)
-graph.add_node("user_confirm", lambda s: s)  # 确认节点
-
-# 添加 interrupt
-graph.compile(
-    checkpointer=MemorySaver(),
-    interrupt_before=["user_confirm"]  # 在确认前中断
-)
-```
-
-## 8. 外部存储集成
-
-### 8.1 PostgreSQL 存储大型数据
-
-```python
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-
-class PaperRepository:
-    """论文存储仓库 - 状态中只保留 ID"""
-
-    def __init__(self, db_url: str):
-        self.engine = create_async_engine(db_url)
-
-    async def save_paper(self, paper: Paper) -> str:
-        """保存论文，返回 ID"""
-        async with AsyncSession(self.engine) as session:
-            session.add(paper)
-            await session.commit()
-            return paper.id
-
-    async def get_paper(self, paper_id: str) -> Paper:
-        """获取论文详情"""
-        async with AsyncSession(self.engine) as session:
-            return await session.get(Paper, paper_id)
-
-# 在状态中只保留引用
-class PipelineState(TypedDict):
-    paper_ids: list[str]  # 只保留 ID，不保留完整论文数据
-```
-
-### 8.2 Redis 缓存
-
-```python
-import redis.asyncio as redis
-
-class CacheService:
-    """缓存服务"""
-
-    def __init__(self, redis_url: str):
-        self.redis = redis.from_url(redis_url)
-
-    async def get_embeddings(self, paper_id: str) -> Optional[list[float]]:
-        """获取缓存的嵌入向量"""
-        data = await self.redis.get(f"embedding:{paper_id}")
-        return json.loads(data) if data else None
-
-    async def set_embeddings(self, paper_id: str, embedding: list[float]):
-        """缓存嵌入向量"""
-        await self.redis.set(
-            f"embedding:{paper_id}",
-            json.dumps(embedding),
-            ex=3600  # 1小时过期
-        )
-```
-
-## 9. 异步执行
-
-```python
-# 所有节点都定义为异步函数
-async def search_papers(state: PipelineState) -> dict:
-    ...
-
-async def extract_kg(state: PipelineState) -> dict:
-    ...
-
-# 使用 ainvoke 执行图
-result = await graph.ainvoke(initial_state)
-
-# 流式执行
-async for event in graph.astream(initial_state):
-    print(f"Node {event['node']} completed")
-```
-
-## 10. 调试配置
-
-```python
-# 启用调试模式
-graph = StateGraph(PipelineState)
-# ... 添加节点和边 ...
-compiled_graph = graph.compile(debug=True)
-
-# 配置 LangSmith
-import os
-os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGSMITH_API_KEY"] = "your-key"
-os.environ["LANGSMITH_PROJECT"] = "academic-cluster"
-
-# 在每个节点添加日志
-import structlog
-logger = structlog.get_logger()
-
-async def search_papers(state: PipelineState) -> dict:
-    logger.info("Starting paper search", query=state["query"])
-    # ... 执行逻辑 ...
-    logger.info("Search completed", paper_count=len(papers))
-    return {"papers": papers}
-```
-
-## 11. 完整图定义
-
-```python
-from langgraph.graph import StateGraph, END
-
-# 创建图
-workflow = StateGraph(PipelineState)
-
-# 添加节点
-workflow.add_node("search", search_papers)
-workflow.add_node("deduplicate", deduplicate_papers)
-workflow.add_node("filter", filter_papers)
-workflow.add_node("bm25", bm25_selection)
-workflow.add_node("embedding", generate_embeddings)
-workflow.add_node("pgvector_knn", store_and_knn)
-workflow.add_node("rerank", rerank_papers)
-workflow.add_node("kg_extraction", extract_knowledge_graph)
-workflow.add_node("community_detection", detect_communities)
-workflow.add_node("visualize_community", visualize_and_push_frontend)
-workflow.add_node("evidence_cards", generate_evidence_cards)
-workflow.add_node("gap_analysis", analyze_gaps)
-workflow.add_node("targeted_refine", targeted_refinement)
-workflow.add_node("outline_generation", generate_outline)
-workflow.add_node("user_confirm", confirm_outline)  # 中断点
-workflow.add_node("write_review", write_review)
-workflow.add_node("coverage_audit", audit_coverage)
-workflow.add_node("section_revision", revise_sections)
-workflow.add_node("artifact_registration", register_artifacts)
-workflow.add_node("finalize", finalize_run)
-
-# 添加边
-workflow.set_entry_point("search")
-workflow.add_edge("search", "deduplicate")
-workflow.add_edge("deduplicate", "filter")
-workflow.add_edge("filter", "bm25")
-workflow.add_edge("bm25", "embedding")
-workflow.add_edge("embedding", "pgvector_knn")
-workflow.add_edge("pgvector_knn", "rerank")
-workflow.add_edge("rerank", "kg_extraction")
-workflow.add_edge("kg_extraction", "community_detection")
-workflow.add_edge("community_detection", "visualize_community")
-workflow.add_edge("visualize_community", "evidence_cards")
-workflow.add_edge("evidence_cards", "gap_analysis")
-
-# 条件边：差距分析后决定路径
-workflow.add_conditional_edges(
-    "gap_analysis",
-    should_continue_to_writing,
-    {
-        "targeted_refine": "targeted_refine",
-        "outline_generation": "outline_generation"
-    }
-)
-
-workflow.add_edge("targeted_refine", "evidence_cards")  # 循环回去
-workflow.add_edge("outline_generation", "user_confirm")
-workflow.add_edge("user_confirm", "write_review")
-workflow.add_edge("write_review", "coverage_audit")
-
-# 条件边：覆盖审计后决定路径
-workflow.add_conditional_edges(
-    "coverage_audit",
-    should_revise_sections,
-    {
-        "section_revision": "section_revision",
-        "artifact_registration": "artifact_registration"
-    }
-)
-
-workflow.add_edge("section_revision", "coverage_audit")  # 循环回去
-workflow.add_edge("artifact_registration", "finalize")
-workflow.add_edge("finalize", END)
-
-# 编译图
-app = workflow.compile(
-    debug=True,
-    checkpointer=MemorySaver()
-)
-```
-
-## 12. 前端推送机制
-
-```python
-from fastapi import WebSocket
-
-class FrontendPusher:
-    """推送给前端的服务"""
-
-    def __init__(self):
-        self.connections: dict[str, WebSocket] = {}
-
-    async def push_community_visualization(self, project_id: str, data: dict):
-        """推送社区聚类可视化数据"""
-        ws = self.connections.get(project_id)
-        if ws:
-            await ws.send_json({
-                "type": "community_visualization",
-                "data": data
-            })
-
-# 在节点中调用
-async def visualize_and_push_frontend(state: PipelineState) -> dict:
-    """生成可视化并推送给前端"""
-    visualization = generate_visualization(state)
-
-    # 推送给前端
-    await frontend_pusher.push_community_visualization(
-        state["project_id"],
-        visualization
-    )
-
-    return {"community_visualization": visualization}
-```
+生产环境还会在启动时拒绝 debug、通配符 CORS、非 HMAC JWT 算法、公开占位符、弱数据库/JWT/Admin 密码或缺失的 `PROVIDER_ENCRYPTION_KEY`，并要求 LLM 与 Embedding pool 都已就绪。CORS 同时兼容 CSV 与旧 JSON 数组配置；通配符开发模式不会携带 credentials。PostgreSQL、Redis 凭据都通过结构化/百分号编码构造连接信息，密码中的 URL 分隔符不会改变连接目标。Provider 完成审计以 LiteLLM 响应中的实际 deployment 为准，记录真实 alias、base URL、key hint 和定价，而不是预选候选端点。Compose 的 PostgreSQL/Redis 宿主端口只绑定 `127.0.0.1`。`/health` 同时检查 checkpoint 单实例锁及两类 Agent provider，因此是 readiness 检查而不是固定存活响应。

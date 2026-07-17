@@ -26,16 +26,22 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --frozen --all-extras
 
       - name: Ruff lint
-        run: uv run ruff check src/
+        run: uv run ruff check src/ tests/
 
       - name: Ruff format check
-        run: uv run ruff format --check src/
+        run: uv run ruff format --check src/ tests/
 
       - name: Mypy type check
         run: uv run mypy src/academic_cluster/
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Verify migration SQL is packaged
+        run: uv run python -c "import glob, zipfile; wheel = glob.glob('dist/*.whl')[0]; assert 'academic_cluster/sql/migrate_agent_tables.sql' in zipfile.ZipFile(wheel).namelist()"
 
   python-test:
     name: Python Tests
@@ -65,8 +71,16 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/academic_cluster_test
-      REDIS_URL: redis://localhost:6379/0
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: academic_cluster_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      ACADEMIC_CLUSTER_TEST_DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/academic_cluster_test
+      LANGGRAPH_STRICT_MSGPACK: "true"
       JWT_SECRET_KEY: test-secret-key-for-ci-only
       APP_SECRET_KEY: test-app-secret-key-for-ci-only
       APP_ENV: testing
@@ -82,10 +96,21 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --frozen --all-extras
 
-      - name: Run tests
-        run: uv run pytest tests/unit/ -v --tb=short --cov=academic_cluster --cov-report=xml --cov-report=term-missing
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Initialize database schema
+        env:
+          PGPASSWORD: test
+        run: psql -h localhost -U postgres -d academic_cluster_test -v ON_ERROR_STOP=1 -f docker/postgres/init.sql
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit/ -m "not integration and not live" -v --tb=short --cov=academic_cluster --cov-report=xml --cov-report=term-missing
+
+      - name: Run PostgreSQL integration tests
+        run: uv run pytest tests/integration/ -m "integration and not live" -v --tb=short
 
       - name: Upload coverage
         if: always()
@@ -109,7 +134,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --frozen --all-extras
 
       - name: Bandit security scan
         run: uv run bandit -r src/ -c pyproject.toml
@@ -141,6 +166,9 @@ jobs:
 
       - name: Type check
         run: npm run type-check
+
+      - name: Unit tests
+        run: npm test
 
       - name: Build
         run: npm run build

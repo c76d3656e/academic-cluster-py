@@ -1,6 +1,6 @@
 # Academic Cluster
 
-**学术论文聚类与综述自动生成系统** — 基于 LangGraph 构建多阶段 Pipeline，自动完成论文检索、知识图谱抽取、聚类分析、证据卡片生成和综述撰写。
+**学术论文聚类与综述自动生成系统** — 基于 LangGraph 的持久化多智能体流程，自动完成论文检索、覆盖度分析、知识图谱与证据卡片生成、综述撰写和同行评审。
 
 ## 功能特点
 
@@ -9,8 +9,9 @@
 - **聚类分析** — 基于社区检测算法对论文进行主题聚类，识别研究热点
 - **证据卡片生成** — 为每个研究主题生成结构化的证据摘要
 - **综述撰写** — 自动生成符合学术规范的综述文章，支持自定义字数和结构
-- **全链路可观测** — 每个节点的执行状态、LLM 调用和 token 用量均持久化到数据库
-- **多模型支持** — 支持 OpenAI、Anthropic、Gitee 等多种 LLM 提供商，支持负载均衡
+- **可恢复执行** — PostgreSQL checkpoint 按项目与执行隔离；可运行断点原地续跑，已完成断点自动协调，终态失败创建可追踪的新执行
+- **流程可观测** — Supervisor 决策、Agent 工具调用和阶段进度均按项目记录
+- **多模型支持** — 支持 OpenAI API 兼容的多种 LLM 提供商与端点，支持负载均衡
 - **现代 Web 界面** — Vue 3 + FastAPI 构建的响应式前端，支持实时进度跟踪
 
 
@@ -51,7 +52,7 @@ pip install -e ".[dev]"
 docker compose up -d postgres redis
 
 # 启动后端
-uvicorn academic_cluster.api.main:app --reload
+academic-cluster --reload
 
 # 启动前端
 cd frontend
@@ -66,7 +67,7 @@ npm run dev
 | 配置项 | 默认值 |
 |--------|--------|
 | `ADMIN_EMAIL` | `admin@cluster.local` |
-| `ADMIN_PASSWORD` | `Admin123!` |
+| `ADMIN_PASSWORD` | 空（必须自行设置） |
 | `ADMIN_FULL_NAME` | `Administrator` |
 
 首次启动时自动创建管理员账户。修改 `.env` 后重启容器，密码会自动同步。
@@ -88,9 +89,9 @@ LLM_API_KEY=your_key
 LLM_PROVIDERS_JSON=[{"name":"provider_name","model":"model_name","api_url":"https://api.provider.com/v1","api_key":"key1","rpm_limit":10}]
 ```
 
-### Embedding & Rerank
+### Embedding
 
-同理支持单/多 provider，通过 `EMBEDDING_PROVIDERS_JSON` 和 `RERANK_PROVIDERS_JSON` 配置。
+同理支持单/多 provider，通过 `EMBEDDING_PROVIDERS_JSON` 配置。向量持久化固定使用 PostgreSQL pgvector 的 1024 维列，因此 Provider 必须返回恰好 1024 个有限数值；后台健康测试会在启用前验证该契约。
 
 ### 学术数据源
 
@@ -103,30 +104,35 @@ PUBMED_EMAIL=your_email@example.com
 PUBMED_API_KEY=your_pubmed_key
 ```
 
-### Pipeline 参数
+### 项目执行参数
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `KG_BATCH_SIZE` | 1 | 每次 LLM 请求处理的论文数 |
-| `KG_CONCURRENCY` | 10 | KG 抽取并发数 |
-| `CLUSTERING_RESOLUTION` | 1.0 | 聚类分辨率 |
-| `WRITING_TOTAL_TARGET_WORDS` | 12000 | 综述目标字数 |
+项目创建接口的 `config` 支持以下实际消费参数：
+
+| 参数 | 默认值 | 范围/说明 |
+|------|--------|-----------|
+| `target_papers` | 50 | 1–500，目标论文数 |
+| `target_words` | 12000 | 1000–100000，目标综述字数 |
+| `quality_threshold` | 75 | 同行评审质量阈值，范围 0–100 |
 
 ## 架构
 
+```text
+Supervisor → Research → Embedding → Coverage
+                          ├─ 覆盖不足且未到上限 → Research
+                          └─ 通过 → KG → Evidence → Gap analysis
+                                   → Writing → Peer review
+                                      ├─ 低于阈值且未到上限 → Revision
+                                      └─ 通过/达到上限 → Finalize
 ```
-搜索 → 去重 → 筛选 → BM25 → 嵌入 → KNN → 重排序
-  → 知识图谱 → 社区检测 → 证据卡片 → 差距分析
-  → [定向补充] → 大纲 → 写作 → 覆盖审计 → [修订]
-  → 产出注册 → 终结
-```
+
+Supervisor 只做确定性路由。阶段失败最多尝试 2 次，补充检索最多 2 轮，同行评审修订最多 2 次。正式 API 使用 PostgreSQL checkpoint；线程标识同时包含 `project_id` 与 `execution_id`，不会跨项目复用状态。当前后端通过 PostgreSQL advisory lock 强制单实例运行，不支持多个 Uvicorn worker。详细设计见 [docs/architecture.md](docs/architecture.md)。
 
 ### 技术栈
 
 - **后端**: Python 3.12+, FastAPI, LangGraph, SQLAlchemy
 - **前端**: Vue 3, TypeScript, Vite, Tailwind CSS
 - **数据库**: PostgreSQL (pgvector), Redis
-- **AI/ML**: OpenAI, Anthropic, LiteLLM, NetworkX
+- **AI/ML**: OpenAI-compatible APIs, LiteLLM, NetworkX, igraph
 - **部署**: Docker, Docker Compose
 
 ## 生产部署
@@ -136,13 +142,14 @@ PUBMED_API_KEY=your_pubmed_key
 ```env
 APP_ENV=production
 APP_DEBUG=false
-APP_SECRET_KEY=<随机长字符串>
 JWT_SECRET_KEY=<随机长字符串>
 POSTGRES_PASSWORD=<强密码>
+REDIS_PASSWORD=<强密码>
 ADMIN_PASSWORD=<强密码>
+PROVIDER_ENCRYPTION_KEY=<固定的 Fernet key 或至少 32 字符的随机口令>
 ```
 
-启动时会自动校验：如果 `APP_ENV=production` 且上述配置仍为默认值，将拒绝启动。
+启动时会自动校验：如果 `APP_ENV=production` 且上述配置缺失、过短或仍是公开样例占位符，将拒绝启动。`PROVIDER_ENCRYPTION_KEY` 必须跨重启保持不变，否则数据库中保存的 Provider API Key 无法解密。可用 `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` 生成。
 
 ## 开发
 
@@ -154,12 +161,9 @@ academic-cluster-py/
 │   ├── agents/          # AI Agent 实现
 │   ├── api/             # FastAPI 路由和中间件
 │   ├── config/          # 配置管理
-│   ├── graphs/          # LangGraph 工作流
 │   ├── models/          # 数据模型
-│   ├── prompts/         # LLM Prompt 模板
 │   ├── services/        # 业务逻辑服务
-│   ├── tools/           # 工具函数
-│   └── utils/           # 通用工具
+│   └── tools/           # Agent 工具与确定性算法
 ├── frontend/            # Vue 3 前端
 ├── tests/               # 测试用例
 ├── docker/              # Docker 配置

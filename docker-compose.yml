@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-academic_cluster}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     command: >
       postgres
         -c shared_buffers=128MB
@@ -17,7 +17,7 @@ services:
         -c maintenance_work_mem=64MB
         -c effective_cache_size=256MB
     ports:
-      - "${POSTGRES_EXTERNAL_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_EXTERNAL_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -34,13 +34,13 @@ services:
     image: redis:7-alpine
     container_name: academic-cluster-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     ports:
-      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_EXTERNAL_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
