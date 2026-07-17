@@ -86,6 +86,9 @@ def test_development_allows_provider_configuration_after_startup() -> None:
         ("langfuse_public_key", "your_langfuse_public_key"),
         ("langfuse_secret_key", "your_langfuse_secret_key"),
         ("langfuse_base_url", "http://langfuse.internal"),
+        ("langfuse_base_url", "https://user:password@langfuse.internal"),
+        ("langfuse_tracing_environment", "Production Environment"),
+        ("langfuse_tracing_environment", "langfuse-production"),
     ],
 )
 def test_enabled_production_langfuse_requires_secure_configuration(

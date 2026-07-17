@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from urllib.parse import quote, urlsplit
 
@@ -197,8 +198,21 @@ class Settings(BaseSettings):
             if _is_placeholder(self.langfuse_secret_key, minimum_length=12):
                 insecure.append("langfuse_secret_key")
             langfuse_url = urlsplit(self.langfuse_base_url)
-            if langfuse_url.scheme != "https" or not langfuse_url.netloc:
+            if (
+                langfuse_url.scheme != "https"
+                or not langfuse_url.hostname
+                or langfuse_url.username is not None
+                or langfuse_url.password is not None
+                or bool(langfuse_url.query or langfuse_url.fragment)
+            ):
                 insecure.append("langfuse_base_url")
+            tracing_environment = (self.langfuse_tracing_environment or "").strip()
+            if tracing_environment and (
+                len(tracing_environment) > 40
+                or re.fullmatch(r"[a-z0-9][a-z0-9_-]*", tracing_environment) is None
+                or tracing_environment.startswith("langfuse")
+            ):
+                insecure.append("langfuse_tracing_environment")
         if self._provider_json_is_insecure(self.llm_providers_json):
             insecure.append("llm_providers_json")
         if self._provider_json_is_insecure(self.embedding_providers_json):
