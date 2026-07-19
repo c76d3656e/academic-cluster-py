@@ -144,12 +144,9 @@ async def refresh_token(
     """刷新 Access Token"""
     token_hash = token_service.hash_refresh_token(body.refresh_token)
 
-    stored_token = await db.get_refresh_token(token_hash)
+    stored_token = await db.consume_refresh_token(token_hash)
     if not stored_token:
         raise HTTPException(status_code=401, detail="无效或已过期的 Refresh Token")
-
-    # 撤销旧 Token (Rotation)
-    await db.revoke_refresh_token(token_hash)
 
     # 获取用户信息
     user = await db.get_user_by_id(stored_token["user_id"])
@@ -287,6 +284,9 @@ async def change_user_role(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    if user_id == admin["id"] and role != "admin":
+        raise HTTPException(status_code=400, detail="不能降低自己的管理员权限")
+
     await db.set_user_role(user_id, role)
     await db.log_activity(
         admin["id"], "change_role", "user", user_id, {"new_role": role}
@@ -306,6 +306,9 @@ async def toggle_user_active(
     user = await db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    if user_id == admin["id"] and not is_active:
+        raise HTTPException(status_code=400, detail="不能停用自己的账户")
 
     await db.set_user_active(user_id, is_active)
     await db.log_activity(

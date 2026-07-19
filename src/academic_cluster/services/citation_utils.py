@@ -7,6 +7,7 @@ Handles citation validation, renumbering, and reference list generation.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterator
 from typing import Any
 
 _REVISION_COMMENTARY_MARKERS = (
@@ -96,13 +97,17 @@ def strip_revision_commentary(content: str) -> str:
 # We exclude year-like brackets [1800-2200] via a negative lookahead in
 # the caller rather than here, because the regex itself is intentionally
 # greedy to capture any bracket content that *might* be a citation.
-_CITATION_RE = re.compile(r"\[([0-9,\s;–—、，·\-]+)\]")
+_CITATION_RE = re.compile(r"\[([0-9,\s;；–—、，·\-]+)\]")
 
-# Matches a bare year-like bracket such as [2024] or [2020-2023].
+# Matches the shape of a bare year-like bracket. Numeric bounds are enforced by
+# ``_is_year_bracket`` so arbitrary four-digit citations cannot bypass checks.
 _YEAR_BRACKET_RE = re.compile(r"\[(\d{4})(?:\s*[-–—]\s*(\d{4}))?\]")
+_MIN_PUBLICATION_YEAR = 1800
+_MAX_PUBLICATION_YEAR = 2200
+_MAX_CITATION_RANGE_SPAN = 20
 
 _PAREN_NUMERIC_CITATION_RE = re.compile(
-    r"[（(]\s*((?:\[[0-9,\s;–—、，·\-]+\]\s*)+)\s*[）)]"
+    r"[（(]\s*((?:\[[0-9,\s;；–—、，·\-]+\]\s*)+)\s*[）)]"
 )
 _PAREN_PLACEHOLDER_CITATION_RE = re.compile(
     r"[（(]\s*(?:\[[A-Za-z][A-Za-z0-9,\s;、，]*\]\s*)+\s*[）)]"
@@ -115,6 +120,326 @@ _REF_HEADING_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+_FENCE_OPEN_RE = re.compile(
+    r"^[ \t]{0,3}(?P<fence>`{3,}|~{3,})[^\r\n]*(?:\r?\n|$)",
+    re.MULTILINE,
+)
+_INDENTED_CODE_LINE_RE = re.compile(r"^(?: {4}|\t).*?(?:\n|$)", re.MULTILINE)
+_CURRENCY_AMOUNT_RE = re.compile(
+    r"-?(?:\d{1,3}(?:[,\u00a0\u202f]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?|\.\d+)"
+)
+_CURRENCY_CITATION_RE = re.compile(r"\s*\[\d+(?:\s*(?:[,;、，·；\s]|[-–—])\s*\d+)*\]")
+_CURRENCY_AFTER_AMOUNT_RE = re.compile(
+    r"(?:"
+    r"\s*usd\b"
+    r"|\s+(?:us\s+dollars?|dollars?|million|billion|trillion)\b"
+    r"|\s*(?:k|m|mn|mm|b|bn|t)(?=[\s.,;:!?，。；：！？\[]|$)"
+    r"|\s*/[a-z][a-z0-9._-]*(?=[\s.,;:!?，。；：！？\[]|$)"
+    r"|\s*\[\d+(?:\s*(?:[,;、，·；\s]|[-–—])\s*\d+)*\]"
+    r"|\s*(?:美元|美金|元)"
+    r"|(?=[,.;:!?，。；：！？](?:\s|$))"
+    r"|$"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _has_immediate_math_close(content: str, index: int, end: int) -> bool:
+    """Return whether optional citation suffixes end at a closing dollar."""
+
+    cursor = index
+    while cursor < end:
+        citation = _CURRENCY_CITATION_RE.match(content, cursor, end)
+        if citation is None:
+            break
+        cursor = citation.end()
+    return cursor < end and content[cursor] == "$"
+
+
+def _is_escaped(content: str, index: int) -> bool:
+    """Return whether the character at ``index`` is preceded by odd slashes."""
+
+    slash_count = 0
+    cursor = index - 1
+    while cursor >= 0 and content[cursor] == "\\":
+        slash_count += 1
+        cursor -= 1
+    return slash_count % 2 == 1
+
+
+def _run_length(content: str, index: int, character: str, end: int) -> int:
+    cursor = index
+    while cursor < end and content[cursor] == character:
+        cursor += 1
+    return cursor - index
+
+
+def _find_backtick_close(
+    content: str,
+    start: int,
+    run_length: int,
+    end: int,
+) -> int | None:
+    cursor = start
+    while cursor < end:
+        if content[cursor] != "`":
+            cursor += 1
+            continue
+        run = _run_length(content, cursor, "`", end)
+        if run == run_length and not _is_escaped(content, cursor):
+            return cursor
+        cursor += run
+    return None
+
+
+def _find_dollar_close(
+    content: str,
+    start: int,
+    delimiter_length: int,
+    end: int,
+) -> int | None:
+    cursor = start
+    while cursor < end:
+        if content[cursor] != "$":
+            cursor += 1
+            continue
+        run = _run_length(content, cursor, "$", end)
+        if (
+            run == delimiter_length
+            and not _is_escaped(content, cursor)
+            and not (
+                delimiter_length == 1 and cursor > start and content[cursor - 1] == "$"
+            )
+        ):
+            if delimiter_length != 1:
+                return cursor
+
+            # Match remark-math's conservative single-dollar boundaries. A
+            # closing delimiter cannot follow whitespace. If an otherwise
+            # valid opener appears before a close, abandon the earlier pair;
+            # this prevents ``$5 million ... $x$`` from swallowing prose.
+            previous = content[cursor - 1] if cursor > 0 else ""
+            following = content[cursor + 1] if cursor + 1 < end else ""
+            can_close = bool(previous and not previous.isspace())
+            can_open = bool(following and not following.isspace())
+            if can_close:
+                return cursor
+            if can_open:
+                return None
+        cursor += run
+    return None
+
+
+def _looks_like_currency_dollar(content: str, index: int, end: int) -> bool:
+    """Return whether a single dollar starts a likely currency amount.
+
+    The Markdown math grammar cannot distinguish every monetary value from an
+    equation beginning with a number. We only classify common amount surfaces
+    (``$5 million``, ``$5 [1]``, ``$5 USD`` and punctuation/end-of-sentence
+    forms) as currency; algebraic forms such as ``$5 + x$`` remain protected.
+    """
+
+    if index + 1 >= end:
+        return False
+    amount = _CURRENCY_AMOUNT_RE.match(content, index + 1, end)
+    if amount is None:
+        return False
+    after = amount.end()
+    if _has_immediate_math_close(content, after, end):
+        return False
+    suffix = _CURRENCY_AFTER_AMOUNT_RE.match(content, after, end)
+    if suffix is None:
+        return False
+    return not _has_immediate_math_close(content, suffix.end(), end)
+
+
+def _find_sequence_close(
+    content: str,
+    start: int,
+    delimiter: str,
+    end: int,
+) -> int | None:
+    cursor = content.find(delimiter, start, end)
+    while cursor >= 0:
+        if not _is_escaped(content, cursor):
+            return cursor
+        cursor = content.find(delimiter, cursor + len(delimiter), end)
+    return None
+
+
+def _scan_inline_protected_ranges(
+    content: str,
+    start: int,
+    end: int,
+) -> list[tuple[int, int]]:
+    """Find inline code and common math delimiters in one un-fenced span."""
+
+    ranges: list[tuple[int, int]] = []
+    cursor = start
+    while cursor < end:
+        if _is_escaped(content, cursor):
+            cursor += 1
+            continue
+
+        if content[cursor] == "`":
+            run_length = _run_length(content, cursor, "`", end)
+            close = _find_backtick_close(content, cursor + run_length, run_length, end)
+            if close is not None:
+                ranges.append((cursor, close + run_length))
+                cursor = close + run_length
+                continue
+            cursor += run_length
+            continue
+
+        if content.startswith("$$", cursor):
+            if _run_length(content, cursor, "$", end) == 2:
+                close = _find_dollar_close(content, cursor + 2, 2, end)
+                if close is not None:
+                    ranges.append((cursor, close + 2))
+                    cursor = close + 2
+                    continue
+            cursor += 2
+            continue
+
+        if content[cursor] == "$":
+            if _run_length(content, cursor, "$", end) == 1:
+                if _looks_like_currency_dollar(content, cursor, end):
+                    cursor += 1
+                    continue
+                following = content[cursor + 1] if cursor + 1 < end else ""
+                close = (
+                    _find_dollar_close(content, cursor + 1, 1, end)
+                    if following and not following.isspace()
+                    else None
+                )
+                if close is not None and "\n" not in content[cursor + 1 : close]:
+                    ranges.append((cursor, close + 1))
+                    cursor = close + 1
+                    continue
+            cursor += 1
+            continue
+
+        if content.startswith(r"\(", cursor):
+            close = _find_sequence_close(content, cursor + 2, r"\)", end)
+            if close is not None:
+                ranges.append((cursor, close + 2))
+                cursor = close + 2
+                continue
+
+        if content.startswith(r"\[", cursor):
+            close = _find_sequence_close(content, cursor + 2, r"\]", end)
+            if close is not None:
+                ranges.append((cursor, close + 2))
+                cursor = close + 2
+                continue
+
+        cursor += 1
+
+    return ranges
+
+
+def _protected_markdown_ranges(content: str) -> list[tuple[int, int]]:
+    """Return fenced-code, inline-code, and math ranges in source order."""
+
+    fences: list[tuple[int, int]] = []
+    for opening in _FENCE_OPEN_RE.finditer(content):
+        if fences and opening.start() < fences[-1][1]:
+            continue
+        fence = opening.group("fence")
+        assert fence is not None
+        character = fence[0]
+        length = len(fence)
+        closing_re = re.compile(
+            rf"^[ \t]{{0,3}}{re.escape(character)}{{{length},}}[ \t]*(?:\r?\n|$)",
+            re.MULTILINE,
+        )
+        closing = closing_re.search(content, opening.end())
+        fences.append((opening.start(), closing.end() if closing else len(content)))
+
+    blocks = list(fences)
+    for indented in _INDENTED_CODE_LINE_RE.finditer(content):
+        if any(start <= indented.start() < end for start, end in fences):
+            continue
+        blocks.append((indented.start(), indented.end()))
+    blocks.sort()
+
+    ranges = list(blocks)
+    cursor = 0
+    for block_start, block_end in blocks:
+        if cursor < block_start:
+            ranges.extend(_scan_inline_protected_ranges(content, cursor, block_start))
+        cursor = max(cursor, block_end)
+    if cursor < len(content):
+        ranges.extend(_scan_inline_protected_ranges(content, cursor, len(content)))
+
+    return sorted(ranges)
+
+
+def _mask_protected_markdown(content: str) -> str:
+    """Mask protected spans while preserving offsets and line boundaries."""
+
+    masked = list(content)
+    for start, end in _protected_markdown_ranges(content):
+        masked[start:end] = [
+            "\n" if character == "\n" else "\r" if character == "\r" else "\x00"
+            for character in content[start:end]
+        ]
+    return "".join(masked)
+
+
+def _substitute_unprotected(
+    pattern: re.Pattern[str],
+    replacement: str | Callable[[re.Match[str]], str],
+    content: str,
+) -> str:
+    """Apply one regex only outside protected Markdown spans."""
+
+    masked = _mask_protected_markdown(content)
+    pieces: list[str] = []
+    cursor = 0
+    for match in pattern.finditer(masked):
+        pieces.append(content[cursor : match.start()])
+        pieces.append(
+            replacement(match) if callable(replacement) else match.expand(replacement)
+        )
+        cursor = match.end()
+    pieces.append(content[cursor:])
+    return "".join(pieces)
+
+
+def iter_citation_matches(markdown: str) -> Iterator[re.Match[str]]:
+    """Yield citation regex matches outside code and math spans."""
+
+    yield from _CITATION_RE.finditer(_mask_protected_markdown(markdown))
+
+
+def replace_citation_matches(
+    markdown: str,
+    replacement: str | Callable[[re.Match[str]], str],
+) -> str:
+    """Replace citation tokens outside code and math spans."""
+
+    return _substitute_unprotected(_CITATION_RE, replacement, markdown)
+
+
+class MalformedCitationError(ValueError):
+    """Raised when a numeric citation token has an invalid range surface."""
+
+
+def _is_year_bracket(surface: str) -> bool:
+    """Return whether *surface* is a bounded publication-year bracket."""
+
+    match = _YEAR_BRACKET_RE.fullmatch(surface.strip())
+    if match is None:
+        return False
+    start = int(match.group(1))
+    end = int(match.group(2) or match.group(1))
+    return (
+        _MIN_PUBLICATION_YEAR <= start <= _MAX_PUBLICATION_YEAR
+        and _MIN_PUBLICATION_YEAR <= end <= _MAX_PUBLICATION_YEAR
+        and (match.group(2) is None or start <= end)
+    )
+
 
 # ---------------------------------------------------------------------------
 # 1. parse_citation_numbers
@@ -124,29 +449,39 @@ _REF_HEADING_RE = re.compile(
 def parse_citation_numbers(text: str) -> list[int]:
     """Parse citation content like ``"1, 3-5, 7"`` into ``[1, 3, 4, 5, 7]``.
 
-    Supported separators: comma, semicolon, CJK comma (U+3001 / U+FF0C),
-    middle dot (U+00B7), whitespace.
+    Supported separators: comma, semicolon (ASCII / full-width), CJK comma
+    (U+3001 / U+FF0C), and middle dot (U+00B7), with optional whitespace.
     Supported range delimiters: hyphen-minus, en-dash (U+2013), em-dash (U+2014).
 
     Returns an empty list if *text* looks like a year (1800-2200) or is empty.
+
+    Raises
+    ------
+    MalformedCitationError
+        If a range is descending, incomplete, or exceeds the bounded span.
     """
     text = text.strip()
     if not text:
         return []
 
-    # Quick bail-out: if the entire text is a single 4-digit year in the
-    # 1800-2200 range, or a year range, treat it as NOT a citation.
-    year_match = _YEAR_BRACKET_RE.fullmatch(f"[{text}]")
-    if year_match:
+    # A bounded year is prose metadata, not a citation token. Four-digit
+    # values outside the publication-year range remain ordinary numbers and
+    # are therefore validated against the reference map.
+    if _is_year_bracket(f"[{text}]"):
         return []
 
     # Normalise separators to commas for uniform splitting.
-    normalised = re.sub(r"[;、，·]+", ",", text)
+    normalised = re.sub(r"[;；、，·]+", ",", text)
     # Normalise range delimiters to a standard hyphen.
     normalised = re.sub(r"[–—]", "-", normalised)
+    # Remove whitespace around a range dash before treating remaining
+    # whitespace as a list separator (``[1 2]`` is a supported surface).
+    normalised = re.sub(r"\s*-\s*", "-", normalised)
 
-    # Split by comma (possibly surrounded by whitespace).
-    parts: list[str] = [p.strip() for p in normalised.split(",") if p.strip()]
+    # Split by comma or whitespace between numeric items.
+    parts: list[str] = [
+        part for part in re.split(r"\s*,\s*|\s+(?=\d)", normalised.strip()) if part
+    ]
 
     numbers: list[int] = []
     for part in parts:
@@ -154,25 +489,36 @@ def parse_citation_numbers(text: str) -> list[int]:
         range_match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", part)
         if range_match:
             start, end = int(range_match.group(1)), int(range_match.group(2))
-            # Reject year-like ranges.
-            if 1800 <= start <= 2200 and 1800 <= end <= 2200:
-                continue
             if start > end:
-                start, end = end, start
+                raise MalformedCitationError(
+                    f"citation range must be ascending: {part}"
+                )
             span = end - start + 1
-            if span > 20:
-                # Unreasonably large range – skip.
-                continue
+            if span > _MAX_CITATION_RANGE_SPAN:
+                raise MalformedCitationError(
+                    "citation range exceeds "
+                    f"{_MAX_CITATION_RANGE_SPAN} references: {part}"
+                )
             numbers.extend(range(start, end + 1))
         elif part.isdigit():
             val = int(part)
-            # Skip year-like single values.
-            if 1800 <= val <= 2200:
-                continue
             numbers.append(val)
-        # else: ignore non-numeric fragments silently
+        elif any(character.isdigit() or character == "-" for character in part):
+            raise MalformedCitationError(f"malformed citation token: {part}")
+        # Non-numeric fragments are ignored for backwards compatibility.
 
     return numbers
+
+
+def iter_citation_number_groups(markdown: str) -> Iterator[list[int]]:
+    """Yield parsed citation number groups while ignoring protected spans."""
+
+    for match in iter_citation_matches(markdown):
+        if _is_year_bracket(match.group(0)):
+            continue
+        numbers = parse_citation_numbers(match.group(1))
+        if numbers:
+            yield numbers
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +572,7 @@ def renumber_citations_by_first_use(
     def _replace_token(match: re.Match[str]) -> str:
         inner = match.group(1)
         # If the inner text is a year, leave it alone.
-        if _YEAR_BRACKET_RE.fullmatch(match.group(0)):
+        if _is_year_bracket(match.group(0)):
             return match.group(0)
 
         nums = parse_citation_numbers(inner)
@@ -238,7 +584,7 @@ def renumber_citations_by_first_use(
         # Rebuild the bracket content, collapsing to comma-separated.
         return "[" + ",".join(str(n) for n in remapped) + "]"
 
-    renumbered = _CITATION_RE.sub(_replace_token, markdown)
+    renumbered = replace_citation_matches(markdown, _replace_token)
 
     # Build the reference mapping list in new-number order.
     mappings: list[dict[str, Any]] = []
@@ -254,6 +600,7 @@ def renumber_citations_by_first_use(
                 "venue": paper_info.get("venue", ""),
                 "year": paper_info.get("year", ""),
                 "doi": paper_info.get("doi", ""),
+                "url": paper_info.get("url", ""),
             }
         )
 
@@ -275,14 +622,22 @@ def normalize_citation_surface(content: str) -> str:
         inner = re.sub(r"\]\s*\[", ",", str(match.group(1)).strip())
         return inner
 
-    content = _PAREN_NUMERIC_CITATION_RE.sub(_unwrap_numeric_citation, content)
-    content = _PAREN_PLACEHOLDER_CITATION_RE.sub("", content)
-    content = _PLACEHOLDER_CITATION_RE.sub("", content)
-    content = re.sub(r"（\s*([A-Za-z]{1,3})\s*）", "", content)
-    content = re.sub(r"\(\s*([A-Za-z]{1,3})\s*\)", "", content)
-    content = re.sub(r"[ \t]{2,}", " ", content)
-    content = re.sub(r"\s+([，,。；;：:])", r"\1", content)
-    content = re.sub(r"([。！？])([A-Za-z\u4e00-\u9fff])", r"\1 \2", content)
+    content = _substitute_unprotected(
+        _PAREN_NUMERIC_CITATION_RE, _unwrap_numeric_citation, content
+    )
+    content = _substitute_unprotected(_PAREN_PLACEHOLDER_CITATION_RE, "", content)
+    content = _substitute_unprotected(_PLACEHOLDER_CITATION_RE, "", content)
+    content = _substitute_unprotected(
+        re.compile(r"（\s*([A-Za-z]{1,3})\s*）"), "", content
+    )
+    content = _substitute_unprotected(
+        re.compile(r"\(\s*([A-Za-z]{1,3})\s*\)"), "", content
+    )
+    content = _substitute_unprotected(re.compile(r"[ \t]{2,}"), " ", content)
+    content = _substitute_unprotected(re.compile(r"\s+([，,。；;：:])"), r"\1", content)
+    content = _substitute_unprotected(
+        re.compile(r"([。！？])([A-Za-z\u4e00-\u9fff])"), r"\1 \2", content
+    )
     return content.strip()
 
 
@@ -298,7 +653,8 @@ def strip_reference_block(markdown: str) -> str:
     The heading itself is removed.  If there is no references block the
     original text is returned unchanged.
     """
-    match = _REF_HEADING_RE.search(markdown)
+    masked = _mask_protected_markdown(markdown)
+    match = _REF_HEADING_RE.search(masked)
     if match is None:
         return markdown
 
@@ -310,15 +666,20 @@ def strip_reference_block(markdown: str) -> str:
     )
 
     # Search for the next heading after the references heading.
-    rest = markdown[match.end() :]
+    rest = masked[match.end() :]
     next_heading = re.search(rf"^#{{{1},{heading_level}}}\s+\S", rest, re.MULTILINE)
 
-    if next_heading is not None:
-        match.end() + next_heading.start()
-    else:
-        len(markdown)
+    prefix = markdown[:start].rstrip()
+    if next_heading is None:
+        return prefix + "\n"
 
-    return markdown[:start].rstrip() + "\n"
+    end = match.end() + next_heading.start()
+    suffix = markdown[end:].lstrip()
+    if not prefix:
+        return suffix
+    if not suffix:
+        return prefix + "\n"
+    return f"{prefix}\n\n{suffix}"
 
 
 # ---------------------------------------------------------------------------
@@ -327,14 +688,58 @@ def strip_reference_block(markdown: str) -> str:
 
 # Matches reference-like blocks inside a single section: lines starting with
 # [N] followed by author/title text, or a "参考文献"/"References" sub-heading.
-_SECTION_REF_LINE_RE = re.compile(
-    r"^\s*\[\d+\]\s+.+,.+\".+\"," r"",
-    re.MULTILINE,
+_SECTION_REF_PREFIX_RE = re.compile(r"^\s*\[\d+\]\s+(?P<body>\S.+?)\s*$")
+_SECTION_REF_QUOTED_TITLE_RE = re.compile(
+    r"^[^,，\n]{1,160}[,，]\s*[\"“][^\"”\n]+[\"”]\s*[,，]"
+)
+_SECTION_REF_AUTHOR_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’.\-]*"
+    r"(?:\s+(?:[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’.\-]*|et\s+al\.?)){0,8}"
+    r"|[\u4e00-\u9fff]{2,12}(?:等)?"
+    r")\s*[,.;，；。]"
+)
+_SECTION_REF_STRONG_MARKER_RE = re.compile(
+    r"(?:"
+    r"(?<!\d)(?:18\d{2}|19\d{2}|20\d{2}|21\d{2}|2200)(?!\d)"
+    r"|https?://"
+    r"|\bdoi\s*:?\s*10\.\d{4,9}/"
+    r"|\b10\.\d{4,9}/\S+"
+    r"|\barxiv\s*:"
+    r")",
+    re.IGNORECASE,
+)
+_SECTION_REF_NARRATIVE_VERB_RE = re.compile(
+    r"(?:"
+    r"\b(?:proposes?|proposed|finds?|found|shows?|showed|demonstrates?|"
+    r"demonstrated|reports?|reported|argues?|argued)\b"
+    r"|提出|认为|发现|表明|证明|指出|报道"
+    r")",
+    re.IGNORECASE,
 )
 _SECTION_REF_HEADING_RE = re.compile(
     r"^#{1,4}\s*(?:references?|bibliography|参考文献|引用文献)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
+
+
+def _looks_like_section_reference_line(line: str) -> bool:
+    match = _SECTION_REF_PREFIX_RE.fullmatch(line)
+    if match is None:
+        return False
+    body = str(match.group("body"))
+    if _SECTION_REF_QUOTED_TITLE_RE.match(body):
+        return True
+    if _SECTION_REF_STRONG_MARKER_RE.search(body) is None:
+        return False
+    leading_segment = re.split(r"[,.;，；。]", body, maxsplit=1)[0]
+    if _SECTION_REF_NARRATIVE_VERB_RE.search(leading_segment):
+        return False
+    if _SECTION_REF_AUTHOR_PREFIX_RE.match(body) is None:
+        return False
+    punctuation_count = len(re.findall(r"[,.;，；。]", body))
+    has_link_marker = bool(re.search(r"https?://|doi\s*:|arxiv\s*:", body, re.I))
+    return punctuation_count >= (2 if has_link_marker else 3)
 
 
 def strip_section_reference_block(content: str) -> str:
@@ -347,22 +752,25 @@ def strip_section_reference_block(content: str) -> str:
     and everything after it.
     """
     # 1. Strip trailing reference sub-heading and everything after it.
-    match = _SECTION_REF_HEADING_RE.search(content)
+    masked_content = _mask_protected_markdown(content)
+    match = _SECTION_REF_HEADING_RE.search(masked_content)
     if match is not None:
         content = content[: match.start()].rstrip()
+        masked_content = _mask_protected_markdown(content)
 
     # 2. Strip trailing block of consecutive [N] reference lines.
     lines = content.split("\n")
+    masked_lines = masked_content.split("\n")
     # Walk backwards to find where the reference block starts.
     ref_start = len(lines)
     for i in range(len(lines) - 1, -1, -1):
-        stripped = lines[i].strip()
+        stripped = masked_lines[i].strip()
         if not stripped:
             # Allow blank lines inside the reference block.
             if ref_start == i + 1:
                 continue  # trailing blank line
             break
-        if _SECTION_REF_LINE_RE.match(stripped):
+        if _looks_like_section_reference_line(stripped):
             ref_start = i
         else:
             break

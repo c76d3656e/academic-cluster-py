@@ -19,10 +19,14 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..services.citation_utils import (
+    iter_citation_number_groups,
     normalize_citation_surface,
+    parse_citation_numbers,
+    replace_citation_matches,
     strip_body_structure_leakage,
     strip_meta_commentary,
     strip_prompt_leakage,
+    strip_reference_block,
     strip_revision_commentary,
     strip_section_reference_block,
 )
@@ -155,6 +159,7 @@ def build_reference_map(
                 "year": _paper_year(paper),
                 "venue": str(paper.get("journal") or paper.get("venue") or ""),
                 "doi": str(paper.get("doi") or ""),
+                "url": str(paper.get("url") or paper.get("pdf_url") or ""),
             }
         )
         if len(references) >= limit:
@@ -172,12 +177,8 @@ def validate_citations(
 
     cited: set[int] = set()
     invalid: set[int] = set()
-    for match in re.finditer(r"\[(\d+(?:\s*,\s*\d+)*)\]", text):
-        raw_numbers = match.group(1).split(",")
-        if len(raw_numbers) == 1 and 1900 <= int(raw_numbers[0]) <= 2099:
-            continue
-        for raw_number in raw_numbers:
-            number = int(raw_number.strip())
+    for numbers in iter_citation_number_groups(text):
+        for number in numbers:
             if 1 <= number <= reference_count:
                 cited.add(number)
             else:
@@ -590,8 +591,8 @@ def _remap_citation_numbers(
     """Apply the final first-use numbering to one persisted section."""
 
     def replace(match: re.Match[str]) -> str:
-        raw_numbers = [int(value.strip()) for value in match.group(1).split(",")]
-        if len(raw_numbers) == 1 and 1900 <= raw_numbers[0] <= 2099:
+        raw_numbers = parse_citation_numbers(match.group(1))
+        if not raw_numbers:
             return match.group(0)
         mapped = [
             number_map.get(number, number if keep_unmapped else None)
@@ -600,7 +601,7 @@ def _remap_citation_numbers(
         mapped = [number for number in mapped if number is not None]
         return "[" + ",".join(map(str, dict.fromkeys(mapped))) + "]" if mapped else ""
 
-    return re.sub(r"\[(\d+(?:\s*,\s*\d+)*)\]", replace, text)
+    return replace_citation_matches(text, replace)
 
 
 def _clean_section_output(value: Any) -> str:
@@ -1168,7 +1169,7 @@ async def _finalize_node(state: AgentState) -> dict[str, Any]:
     if state.final_review:
         snapshot = {
             "final_review": state.final_review,
-            "body_markdown": state.final_review,
+            "body_markdown": strip_reference_block(state.final_review).rstrip(),
             "references": state.final_references,
             "abstract": state.abstract,
             "outline": state.outline,

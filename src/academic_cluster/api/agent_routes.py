@@ -12,8 +12,10 @@ from sqlalchemy import text
 
 from ..services.agent_runtime import (
     AgentAlreadyRunningError,
+    AgentCancellationTimeoutError,
     AgentCheckpointNotFoundError,
     AgentNotRunningError,
+    AgentQueueFullError,
     AgentRuntimeUnavailableError,
     get_agent_run_manager,
     resolve_agent_targets,
@@ -142,6 +144,8 @@ async def _start_managed_agent(
         ) from error
     except AgentCheckpointNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except AgentQueueFullError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
     except AgentRuntimeUnavailableError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -279,17 +283,21 @@ async def pause_agent(
     """暂停当前执行并等待其持久化 interrupted 状态。"""
 
     await _verify_project_access(project_id, current_user, db)
-    execution = await db.get_latest_agent_execution(project_id)
     try:
-        await get_agent_run_manager().cancel(project_id)
+        execution_id = await get_agent_run_manager().cancel(project_id)
     except AgentNotRunningError as error:
         raise HTTPException(status_code=409, detail="Agent not running") from error
-    if not execution:
-        raise HTTPException(status_code=409, detail="Agent execution not found")
+    except AgentCancellationTimeoutError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if not execution_id:
+        execution = await db.get_latest_agent_execution(project_id)
+        if not execution:
+            raise HTTPException(status_code=409, detail="Agent execution not found")
+        execution_id = str(execution["id"])
     return {
         "message": "Agent paused",
         "project_id": project_id,
-        "execution_id": str(execution["id"]),
+        "execution_id": execution_id,
     }
 
 

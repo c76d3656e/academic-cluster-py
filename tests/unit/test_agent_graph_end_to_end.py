@@ -216,4 +216,7 @@ async def test_compiled_production_graph_runs_all_phases(
     ]
     assert database.project_statuses[-1] == "completed"
     assert database.final_snapshots[0]["node_name"] == "final_review_artifact"
+    snapshot = database.final_snapshots[0]["state_snapshot"]
+    assert "## References" in snapshot["final_review"]
+    assert "## References" not in snapshot["body_markdown"]
     assert database.outlines[0]["active_section_ids"] == ["planning", "tools"]

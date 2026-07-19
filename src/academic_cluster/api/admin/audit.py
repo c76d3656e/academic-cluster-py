@@ -29,6 +29,7 @@ class AuditLogItem(BaseModel):
 
     id: str
     user_id: str
+    user_email: str | None = None
     action: str
     resource_type: str | None = None
     resource_id: str | None = None
@@ -92,8 +93,10 @@ async def get_audit_logs(
         result = await session.execute(
             text(f"""
                 SELECT ua.id, ua.user_id, ua.action, ua.resource_type,
-                       ua.resource_id, ua.details, ua.ip_address, ua.created_at
+                       ua.resource_id, ua.details, ua.ip_address, ua.created_at,
+                       u.email AS user_email
                 FROM user_activities ua
+                LEFT JOIN users u ON u.id = ua.user_id
                 {where_clause}
                 ORDER BY ua.created_at DESC
                 LIMIT :limit OFFSET :skip
@@ -115,6 +118,7 @@ async def get_audit_logs(
             AuditLogItem(
                 id=str(row[0]),
                 user_id=str(row[1]),
+                user_email=row[8],
                 action=row[2],
                 resource_type=row[3],
                 resource_id=str(row[4]) if row[4] else None,

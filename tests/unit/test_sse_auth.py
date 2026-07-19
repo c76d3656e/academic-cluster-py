@@ -74,3 +74,30 @@ async def test_sse_accepts_authorized_header(
     )
 
     assert response.media_type == "text/event-stream"
+
+
+@pytest.mark.asyncio
+async def test_sse_replaces_old_events_for_a_slow_consumer() -> None:
+    manager = sse.SSEManager(max_queue_events=1, max_connections_per_project=2)
+    queue = await manager.connect("project-1")
+
+    await manager.send_progress("project-1", "research", "running", progress=0.1)
+    await manager.send_progress("project-1", "analysis", "running", progress=0.8)
+
+    event = queue.get_nowait()
+    assert event["type"] == "progress"
+    assert event["data"]["node"] == "analysis"
+
+    await manager.send_error("project-1", "provider unavailable")
+    await manager.send_progress("project-1", "finalize", "running", progress=0.9)
+    terminal = queue.get_nowait()
+    assert terminal["type"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_sse_enforces_per_project_connection_limit() -> None:
+    manager = sse.SSEManager(max_queue_events=2, max_connections_per_project=1)
+    await manager.connect("project-1")
+
+    with pytest.raises(sse.SSEConnectionLimitError):
+        await manager.connect("project-1")

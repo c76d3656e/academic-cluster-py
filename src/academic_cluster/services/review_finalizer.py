@@ -14,10 +14,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .citation_utils import (
-    _CITATION_RE,
-    _YEAR_BRACKET_RE,
+    iter_citation_number_groups,
     normalize_citation_surface,
-    parse_citation_numbers,
     renumber_citations_by_first_use,
     strip_reference_block,
 )
@@ -46,10 +44,8 @@ def citation_reference_numbers(
 ) -> set[int]:
     """Return citation numbers used in markdown, excluding year-like brackets."""
     numbers: set[int] = set()
-    for match in _CITATION_RE.finditer(markdown):
-        if _YEAR_BRACKET_RE.fullmatch(match.group(0)):
-            continue
-        for number in parse_citation_numbers(match.group(1)):
+    for group in iter_citation_number_groups(markdown):
+        for number in group:
             if max_reference_count is None or 1 <= number <= max_reference_count:
                 numbers.add(number)
     return numbers

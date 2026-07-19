@@ -10,8 +10,10 @@
 import asyncio
 import contextlib
 import json
+import random
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -26,11 +28,13 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from pydantic import ConfigDict
 
+from .concurrency import BoundedFifoGate
+
 logger = structlog.get_logger()
 
 _rr_counter = 0
-_llm_queue_semaphore: asyncio.Semaphore | None = None
-_llm_queue_capacity = 0
+_llm_request_gate: BoundedFifoGate | None = None
+_llm_request_gate_config: tuple[int, int, float] | None = None
 
 _THINK_BLOCK_RE = re.compile(
     r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL
@@ -319,23 +323,44 @@ class AuditedChatModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=response)])
 
 
-def _get_llm_queue_semaphore() -> asyncio.Semaphore:
-    """Build a process-local queue gate from enabled provider capacity.
+def _get_llm_request_gate() -> tuple[BoundedFifoGate, float]:
+    """Return the explicit LLM capacity boundary configured by the operator.
 
-    容量 = 所有 provider 总 slots × 并发管道倍数（默认 3 倍），
-    避免跨 pipeline 竞争导致死锁。
+    Provider RPM is a rate budget, not a measure of safe open connections.  The
+    application therefore uses an independently configured in-flight capacity
+    plus a bounded FIFO queue. LiteLLM remains responsible for provider RPM,
+    TPM, cooldown, and failover after work is admitted here.
     """
-    global _llm_queue_semaphore, _llm_queue_capacity
 
-    from .provider_pool import get_llm_available_slots
+    global _llm_request_gate, _llm_request_gate_config
 
-    base = get_llm_available_slots(default=10)
-    capacity = max(10, base * 3)  # 总 slot × 3 倍余量，容纳多个 pipeline
-    if _llm_queue_semaphore is None or capacity != _llm_queue_capacity:
-        _llm_queue_capacity = capacity
-        _llm_queue_semaphore = asyncio.Semaphore(capacity)
-        logger.info("LLM queue capacity resolved", capacity=capacity, base_slots=base)
-    return _llm_queue_semaphore
+    from ..config import get_settings
+
+    settings = get_settings()
+    config = (
+        settings.llm_max_concurrent_requests,
+        settings.llm_max_queued_requests,
+        settings.llm_queue_wait_timeout_seconds,
+    )
+    if _llm_request_gate is None or config != _llm_request_gate_config:
+        _llm_request_gate = BoundedFifoGate(capacity=config[0], max_waiters=config[1])
+        _llm_request_gate_config = config
+        logger.info(
+            "LLM request gate configured",
+            capacity=config[0],
+            max_waiters=config[1],
+            queue_wait_timeout_seconds=config[2],
+        )
+    return _llm_request_gate, config[2]
+
+
+@asynccontextmanager
+async def _llm_request_slot() -> AsyncIterator[None]:
+    """Acquire the bounded LLM queue without consuming provider call timeout."""
+
+    gate, wait_timeout = _get_llm_request_gate()
+    async with gate.slot(timeout=wait_timeout):
+        yield
 
 
 # 轮询计数器
@@ -412,7 +437,7 @@ async def ainvoke_with_callbacks(
 
     通过 LiteLLM Router 发出实际 HTTP 请求，由 Router 处理：
     - 多端点加权路由（simple-shuffle）
-    - 失败自动重试 + 故障转移（Router num_retries=3）
+    - 有界重试 + 故障转移（Router num_retries=1）
     - RPM/TPM 限速
     - 不健康端点 cooldown（allowed_fails=3, cooldown_time=60s）
 
@@ -514,16 +539,15 @@ async def ainvoke_with_callbacks(
     try:
         if pool is not None:
             messages = _messages_to_openai(input)
-            semaphore = _get_llm_queue_semaphore()
             router = pool.router
             router_kwargs = {**bound_kwargs, **kwargs}
             router_kwargs.pop("config", None)
 
-            max_retries = 3
+            max_retries = 2
             last_timeout_error = None
             for attempt in range(max_retries):
                 try:
-                    async with semaphore:
+                    async with _llm_request_slot():
                         # 使用 asyncio.wait 替代 wait_for——wait_for 无法取消 httpx
                         invoke_task = asyncio.create_task(
                             router.acompletion(
@@ -554,7 +578,7 @@ async def ainvoke_with_callbacks(
                 except TimeoutError as te:
                     last_timeout_error = te
                     if attempt < max_retries - 1:
-                        wait_s = 5 * (attempt + 1)
+                        wait_s = 1.0 + random.uniform(0.0, 0.5)
                         logger.warning(
                             "LLM call timed out, retrying",
                             attempt=attempt + 1,
@@ -579,8 +603,7 @@ async def ainvoke_with_callbacks(
             response = sanitize_llm_response(response)
         else:
             # Fallback: 直接使用 llm.ainvoke()（测试环境未初始化 pool 时）
-            semaphore = _get_llm_queue_semaphore()
-            async with semaphore:
+            async with _llm_request_slot():
                 invoke_task = asyncio.create_task(
                     llm.ainvoke(input, config=config, **kwargs)
                 )

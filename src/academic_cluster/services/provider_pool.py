@@ -70,7 +70,10 @@ class LiteLLMPool:
         self._router = Router(
             model_list=self._model_list,
             routing_strategy="simple-shuffle",
-            num_retries=3,
+            # The audited client owns the request-level retry budget. Keep a
+            # single Router retry for provider failover without multiplying a
+            # transient outage into nested retry storms.
+            num_retries=1,
             timeout=300,
             retry_after=2,
             enable_pre_call_checks=True,

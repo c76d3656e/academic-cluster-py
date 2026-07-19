@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart LR
-    UI["Vue 前端"] -->|"Bearer HTTP / SSE"| API["FastAPI API"]
+    UI["React/Vite 前端"] -->|"Bearer HTTP / SSE"| API["FastAPI API"]
     API --> RM["唯一 AgentRunManager"]
     RM --> G["LangGraph Agent graph"]
     G --> RT["Research Agent"]

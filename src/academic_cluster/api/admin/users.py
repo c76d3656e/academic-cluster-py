@@ -196,6 +196,9 @@ async def change_user_role(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
+    if user_id == admin["id"] and body.role != "admin":
+        raise HTTPException(status_code=400, detail="不能降低自己的管理员权限")
+
     await db.set_user_role(user_id, body.role)
 
     await db.log_activity(

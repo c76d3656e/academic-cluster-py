@@ -387,10 +387,19 @@ class DatabaseService:
         async with self.session() as session:
             result = await session.execute(
                 text(f"""
-                    SELECT *
-                    FROM evidence_cards
-                    WHERE {" AND ".join(conditions)}
-                    ORDER BY created_at ASC, id ASC
+                    SELECT ec.*,
+                           COALESCE(NULLIF(TRIM(p.source), ''), 'unknown')
+                               AS source_api,
+                           p.title,
+                           p.authors,
+                           EXTRACT(YEAR FROM p.publication_date)::INTEGER AS year,
+                           p.journal,
+                           p.doi,
+                           p.url
+                    FROM evidence_cards ec
+                    JOIN papers p ON p.id = ec.paper_id
+                    WHERE {" AND ".join(f"ec.{condition}" for condition in conditions)}
+                    ORDER BY ec.created_at ASC, ec.id ASC
                 """),  # nosec B608 - conditions are fixed internal fragments
                 params,
             )
@@ -1197,6 +1206,26 @@ class DatabaseService:
                     WHERE token_hash = :token_hash
                       AND is_revoked = FALSE
                       AND expires_at > NOW()
+                """),
+                {"token_hash": token_hash},
+            )
+            row = result.fetchone()
+
+        if not row:
+            return None
+        return _convert_uuid_fields(dict(row._mapping))
+
+    async def consume_refresh_token(self, token_hash: str) -> dict[str, Any] | None:
+        """Atomically revoke and return one valid refresh token."""
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    UPDATE refresh_tokens
+                    SET is_revoked = TRUE
+                    WHERE token_hash = :token_hash
+                      AND is_revoked = FALSE
+                      AND expires_at > NOW()
+                    RETURNING *
                 """),
                 {"token_hash": token_hash},
             )

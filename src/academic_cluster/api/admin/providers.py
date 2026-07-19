@@ -139,6 +139,16 @@ class ReloadResult(BaseModel):
     message: str
 
 
+class ProviderDeleteResponse(BaseModel):
+    """Deleted provider identity and resulting runtime pool size."""
+
+    id: str
+    kind: str
+    display_name: str
+    reloaded: int = 0
+    message: str
+
+
 # =============================================================================
 # 辅助函数
 # =============================================================================
@@ -383,24 +393,61 @@ async def update_provider(
     return _row_to_provider(row)
 
 
-@router.delete("/{provider_id}")
+@router.delete("/{provider_id}", response_model=ProviderDeleteResponse)
 async def delete_provider(
     provider_id: str,
     admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-) -> dict[str, str]:
-    """删除 Provider"""
+) -> ProviderDeleteResponse:
+    """Delete one provider, audit the action and refresh runtime routing."""
     async with db.session() as session:
         result = await session.execute(
-            text("DELETE FROM provider_registry WHERE id = :id RETURNING id"),
+            text("""
+                DELETE FROM provider_registry
+                WHERE id = :id
+                RETURNING id, kind, display_name
+            """),
             {"id": provider_id},
         )
-        if not result.fetchone():
+        deleted = result.fetchone()
+        if not deleted:
             raise HTTPException(status_code=404, detail="Provider 不存在")
 
-    logger.info("Provider deleted", provider_id=provider_id)
-    await _reload_runtime_pools()
-    return {"message": "删除成功"}
+    deleted_id = str(deleted[0])
+    kind = str(deleted[1])
+    display_name = str(deleted[2])
+    reloaded = await _reload_runtime_pools()
+
+    try:
+        await db.log_activity(
+            user_id=str(admin["id"]),
+            action="provider.delete",
+            resource_type="provider",
+            resource_id=deleted_id,
+            details={"kind": kind, "display_name": display_name},
+        )
+    except Exception as error:
+        # Deletion is already committed; an audit outage must not turn the
+        # successful operation into a misleading 500 response.
+        logger.warning(
+            "Failed to persist provider deletion audit",
+            provider_id=deleted_id,
+            error=str(error),
+        )
+
+    logger.info(
+        "Provider deleted",
+        provider_id=deleted_id,
+        kind=kind,
+        runtime_providers=reloaded,
+    )
+    return ProviderDeleteResponse(
+        id=deleted_id,
+        kind=kind,
+        display_name=display_name,
+        reloaded=reloaded,
+        message="删除成功",
+    )
 
 
 @router.post("/{provider_id}/test", response_model=HealthTestResponse)

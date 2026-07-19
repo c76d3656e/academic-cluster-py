@@ -36,6 +36,7 @@ env/
 
 # Environment variables
 .env
+.env.bak
 .env.local
 .env.*.local
 
@@ -91,8 +92,10 @@ frontend/node_modules/
 
 # Temporary/debug scripts (root level)
 check_*.py
+tmp_*.py
 test_repair.py
 e2e_*.txt
+last_e2e_pid.txt
 write_review_llm_calls.json
 
 # Screenshots and images (root level)
@@ -102,6 +105,7 @@ write_review_llm_calls.json
 tests/screenshots/
 
 # Tool caches
+.serena/
 .playwright-mcp/
 .external_refs/
 .claude/
@@ -113,3 +117,4 @@ data/*.json
 
 # Claude memory
 .claude/
+.ace-tool/

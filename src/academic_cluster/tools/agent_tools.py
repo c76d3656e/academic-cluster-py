@@ -407,27 +407,31 @@ async def cluster_and_evaluate_coverage(
         # 2. 社区检测
         from ..tools.clustering import build_hybrid_graph, community_detection
 
-        hybrid_graph = build_hybrid_graph(
-            knn_edges=knn_edges,
-            kg_relations=[],
-            kg_entities=[],
-            evidence_cards=[],
-            core_paper_ids=paper_ids,
-            weights={
-                "knn": 0.80,
-                "kg_relation": 0.10,
-                "shared_entity": 0.05,
-                "evidence": 0.0,
-                "quality": 0.05,
-            },
-        )
+        def build_clusters() -> list[dict[str, Any]]:
+            """Keep NetworkX/Leiden CPU work off the shared ASGI event loop."""
 
-        clusters = community_detection(
-            graph=hybrid_graph,
-            algorithm="leiden",
-            resolution=1.0,
-            seed=42,
-        )
+            hybrid_graph = build_hybrid_graph(
+                knn_edges=knn_edges,
+                kg_relations=[],
+                kg_entities=[],
+                evidence_cards=[],
+                core_paper_ids=paper_ids,
+                weights={
+                    "knn": 0.80,
+                    "kg_relation": 0.10,
+                    "shared_entity": 0.05,
+                    "evidence": 0.0,
+                    "quality": 0.05,
+                },
+            )
+            return community_detection(
+                graph=hybrid_graph,
+                algorithm="leiden",
+                resolution=1.0,
+                seed=42,
+            )
+
+        clusters = await asyncio.to_thread(build_clusters)
 
         # 3. 分析每一个社区
         covered_aspects: list[str] = []
@@ -664,7 +668,11 @@ async def extract_knowledge_graph(
         len(fresh_papers),
     )
 
-    semaphore = asyncio.Semaphore(20)
+    from ..config import get_settings
+
+    # Per-run fan-out stays below the global LLM gate so one large project
+    # cannot enqueue dozens of requests ahead of another admitted project.
+    semaphore = asyncio.Semaphore(get_settings().agent_max_per_run_llm_requests)
 
     async def _work_one(
         paper: dict[str, Any],
@@ -1023,13 +1031,15 @@ async def write_section(
         if number <= 0:
             continue
         title = str(reference.get("title") or "")[:120]
+        authors = str(reference.get("authors") or "").strip()[:240]
         year = str(reference.get("year") or "")
         abstract = str(reference.get("abstract") or "")[:900]
         claims = reference.get("evidence_claims") or []
         claim_lines = "\n".join(
             f"    - evidence: {str(claim)[:400]}" for claim in claims[:3]
         )
-        source = f"  [{number}] {title} ({year})"
+        author_prefix = f"{authors}. " if authors else ""
+        source = f"  [{number}] {author_prefix}{title} ({year})"
         if abstract:
             source += f"\n    abstract: {abstract}"
         if claim_lines:
@@ -1052,6 +1062,8 @@ async def write_section(
 请撰写该章节正文。要求：
 - 学术论文风格，语言严谨客观
 - 使用 [N] 格式引用
+- 叙事引用必须写出可用引用中提供的第一作者，例如“王伟[7]提出”或“Smith等[7]发现”；禁止使用“[7]提出/认为/发现”作为句子开头
+- 如果引用没有作者信息，改写为“已有研究提出……[N]”，不得臆造作者
 - 只基于对应编号提供的摘要与证据陈述论点，不得虚构来源内容
 - 每个主要论点后给出至少一个有效引用
 - 不要输出章节标题，直接输出正文
@@ -1091,7 +1103,8 @@ async def revise_section(
     """根据评审反馈修订章节。返回修订后的正文。"""
     from ..services.llm_client import ainvoke_with_callbacks, create_llm
 
-    prompt = f"""修订以下章节正文。保持引用编号 [N] 不变。直接输出修订后正文。
+    prompt = f"""修订以下章节正文。保持引用编号 [N] 不变，并保留已有作者与引用的绑定。
+禁止使用“[N]提出/认为/发现”作为句子开头；缺少作者信息时改写为“已有研究提出……[N]”。直接输出修订后正文。
 
 原始正文：{section_text[:30000]}
 

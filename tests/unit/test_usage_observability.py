@@ -8,6 +8,10 @@ from langchain_openai import ChatOpenAI
 
 from academic_cluster.api.admin.providers import get_provider_pricing
 from academic_cluster.api.console.usage import get_usage_calls, get_usage_trend
+from academic_cluster.services.concurrency import (
+    BoundedFifoGate,
+    ConcurrencyQueueFullError,
+)
 from academic_cluster.services.llm_client import (
     AuditedChatModel,
     ainvoke_with_callbacks,
@@ -74,8 +78,8 @@ async def test_ainvoke_persists_execution_scoped_llm_call(monkeypatch):
         fake_get_provider_pricing,
     )
     monkeypatch.setattr(
-        "academic_cluster.services.llm_client._get_llm_queue_semaphore",
-        lambda: __import__("asyncio").Semaphore(1),
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (BoundedFifoGate(capacity=1, max_waiters=1), 1.0),
     )
 
     project_token = push_current_project("project-1")
@@ -113,8 +117,8 @@ async def test_agent_llm_call_uses_execution_and_task_local_phase(monkeypatch):
         lambda: db,
     )
     monkeypatch.setattr(
-        "academic_cluster.services.llm_client._get_llm_queue_semaphore",
-        lambda: asyncio.Semaphore(1),
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (BoundedFifoGate(capacity=1, max_waiters=1), 1.0),
     )
 
     project_token = push_current_project("project-agent")
@@ -159,8 +163,8 @@ async def test_audited_chat_model_preserves_async_execution_audit(monkeypatch):
         lambda: db,
     )
     monkeypatch.setattr(
-        "academic_cluster.services.llm_client._get_llm_queue_semaphore",
-        lambda: asyncio.Semaphore(1),
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (BoundedFifoGate(capacity=1, max_waiters=1), 1.0),
     )
 
     project_token = push_current_project("project-agent")
@@ -245,8 +249,8 @@ async def test_bound_tools_reach_router_and_return_structured_tool_calls(monkeyp
         lambda: SimpleNamespace(router=_Router()),
     )
     monkeypatch.setattr(
-        "academic_cluster.services.llm_client._get_llm_queue_semaphore",
-        lambda: asyncio.Semaphore(1),
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (BoundedFifoGate(capacity=1, max_waiters=1), 1.0),
     )
 
     project_token = push_current_project("project-agent")
@@ -343,8 +347,8 @@ async def test_router_response_resolves_the_actual_deployment_alias(
         fake_get_provider_pricing,
     )
     monkeypatch.setattr(
-        "academic_cluster.services.llm_client._get_llm_queue_semaphore",
-        lambda: asyncio.Semaphore(1),
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (BoundedFifoGate(capacity=1, max_waiters=1), 1.0),
     )
 
     project_token = push_current_project("project-agent")
@@ -412,8 +416,8 @@ async def test_parent_cancellation_drains_provider_task(monkeypatch, use_pool):
         )
 
     monkeypatch.setattr(
-        "academic_cluster.services.llm_client._get_llm_queue_semaphore",
-        lambda: asyncio.Semaphore(1),
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (BoundedFifoGate(capacity=1, max_waiters=1), 1.0),
     )
 
     outer = asyncio.create_task(
@@ -449,14 +453,49 @@ async def test_timeout_cancels_and_drains_fallback_task(monkeypatch):
         unavailable_pool,
     )
     monkeypatch.setattr(
-        "academic_cluster.services.llm_client._get_llm_queue_semaphore",
-        lambda: asyncio.Semaphore(1),
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (BoundedFifoGate(capacity=1, max_waiters=1), 1.0),
     )
 
     with pytest.raises(TimeoutError):
         await ainvoke_with_callbacks(_TimeoutLlm(), "timeout", timeout=0.01)
 
     assert cancelled.is_set()
+
+
+async def test_llm_gate_rejects_overload_before_a_second_provider_call(monkeypatch):
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class _BlockingLlm:
+        _provider_alias = "test-provider"
+
+        async def ainvoke(self, input, config=None, **kwargs):
+            del input, config, kwargs
+            started.set()
+            await release.wait()
+            return _FakeResponse()
+
+    def unavailable_pool():
+        raise RuntimeError("pool unavailable")
+
+    gate = BoundedFifoGate(capacity=1, max_waiters=0)
+    monkeypatch.setattr(
+        "academic_cluster.services.provider_pool.get_llm_pool",
+        unavailable_pool,
+    )
+    monkeypatch.setattr(
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (gate, 1.0),
+    )
+
+    first = asyncio.create_task(ainvoke_with_callbacks(_BlockingLlm(), "first"))
+    await started.wait()
+    with pytest.raises(ConcurrencyQueueFullError):
+        await ainvoke_with_callbacks(_BlockingLlm(), "second")
+
+    release.set()
+    await first
 
 
 async def test_ainvoke_records_error_call(monkeypatch):
@@ -469,8 +508,8 @@ async def test_ainvoke_records_error_call(monkeypatch):
         "academic_cluster.services.database.get_database", fake_get_database
     )
     monkeypatch.setattr(
-        "academic_cluster.services.llm_client._get_llm_queue_semaphore",
-        lambda: __import__("asyncio").Semaphore(1),
+        "academic_cluster.services.llm_client._get_llm_request_gate",
+        lambda: (BoundedFifoGate(capacity=1, max_waiters=1), 1.0),
     )
 
     project_token = push_current_project("project-1")

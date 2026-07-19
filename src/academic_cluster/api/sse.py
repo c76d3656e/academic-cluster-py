@@ -5,6 +5,7 @@ SSE (Server-Sent Events) 实时推送服务
 """
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncGenerator
 
@@ -20,20 +21,49 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
-class SSEManager:
-    """SSE 连接管理器"""
+class SSEConnectionLimitError(RuntimeError):
+    """Raised when a project exceeds its bounded SSE connection count."""
 
-    def __init__(self) -> None:
+
+class SSEManager:
+    """SSE connection manager with bounded slow-consumer backpressure."""
+
+    def __init__(
+        self,
+        *,
+        max_queue_events: int | None = None,
+        max_connections_per_project: int | None = None,
+    ) -> None:
+        from ..config import get_settings
+
+        settings = get_settings()
+        self._max_queue_events = (
+            settings.sse_max_queue_events
+            if max_queue_events is None
+            else max_queue_events
+        )
+        self._max_connections_per_project = (
+            settings.sse_max_connections_per_project
+            if max_connections_per_project is None
+            else max_connections_per_project
+        )
+        if self._max_queue_events < 1:
+            raise ValueError("max_queue_events must be at least one")
+        if self._max_connections_per_project < 1:
+            raise ValueError("max_connections_per_project must be at least one")
         self._connections: dict[str, list[asyncio.Queue[dict[str, object]]]] = {}
 
     async def connect(self, project_id: str) -> asyncio.Queue[dict[str, object]]:
-        """创建新的 SSE 连接"""
-        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        """Create a bounded SSE connection or reject a connection flood."""
 
-        if project_id not in self._connections:
-            self._connections[project_id] = []
+        connections = self._connections.setdefault(project_id, [])
+        if len(connections) >= self._max_connections_per_project:
+            raise SSEConnectionLimitError("Too many SSE connections for this project")
+        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue(
+            maxsize=self._max_queue_events
+        )
 
-        self._connections[project_id].append(queue)
+        connections.append(queue)
 
         logger.info("SSE client connected", project_id=project_id)
         return queue
@@ -43,7 +73,10 @@ class SSEManager:
     ) -> None:
         """断开 SSE 连接"""
         if project_id in self._connections:
-            self._connections[project_id].remove(queue)
+            try:
+                self._connections[project_id].remove(queue)
+            except ValueError:
+                return
             if not self._connections[project_id]:
                 del self._connections[project_id]
 
@@ -68,14 +101,34 @@ class SSEManager:
             "data": data,
         }
 
-        for queue in self._connections[project_id]:
-            await queue.put(event)
+        dropped = 0
+        for queue in list(self._connections[project_id]):
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                # Progress is lossy by design: a slow browser only needs the
+                # newest state, except that an already queued terminal/error
+                # event must survive a later progress update.
+                previous: dict[str, object] | None = None
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    previous = queue.get_nowait()
+                if (
+                    event_type == "progress"
+                    and previous is not None
+                    and previous.get("type") in {"error", "complete"}
+                ):
+                    queue.put_nowait(previous)
+                    dropped += 1
+                    continue
+                queue.put_nowait(event)
+                dropped += 1
 
         logger.debug(
             "SSE event sent",
             project_id=project_id,
             event_type=event_type,
             clients=len(self._connections[project_id]),
+            dropped_slow_consumer_events=dropped,
         )
 
     async def send_progress(
@@ -122,10 +175,12 @@ def get_sse_manager() -> SSEManager:
 async def sse_generator(
     project_id: str,
     request: Request,
+    queue: asyncio.Queue[dict[str, object]] | None = None,
 ) -> AsyncGenerator[str, None]:
     """SSE 事件生成器"""
     manager = get_sse_manager()
-    queue = await manager.connect(project_id)
+    if queue is None:
+        queue = await manager.connect(project_id)
 
     try:
         # 发送连接成功事件
@@ -188,8 +243,14 @@ async def stream_events(
     if project.get("user_id") != user["id"] and user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Access denied")
 
+    manager = get_sse_manager()
+    try:
+        queue = await manager.connect(project_id)
+    except SSEConnectionLimitError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
+
     return StreamingResponse(
-        sse_generator(project_id, request),
+        sse_generator(project_id, request, queue),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

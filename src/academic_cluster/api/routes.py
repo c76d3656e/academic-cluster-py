@@ -4,6 +4,7 @@ API 路由定义
 
 import re
 import uuid
+from datetime import date
 from typing import Any
 
 import structlog
@@ -13,8 +14,10 @@ from sqlalchemy import text
 
 from ..services.agent_runtime import (
     AgentAlreadyRunningError,
+    AgentCancellationTimeoutError,
     AgentCheckpointNotFoundError,
     AgentNotRunningError,
+    AgentQueueFullError,
     AgentRuntimeUnavailableError,
     get_agent_run_manager,
     resolve_agent_targets,
@@ -128,6 +131,35 @@ class ProjectListResponse(BaseModel):
 
     projects: list[ProjectListItem]
     total: int
+
+
+class ProjectSourcePaperResponse(BaseModel):
+    """One project-owned paper exposed by the source ledger."""
+
+    id: str
+    title: str
+    authors: list[Any] | str = Field(default_factory=list)
+    year: int | str | date | None = None
+    journal: str | None = None
+    doi: str | None = None
+    url: str | None = None
+    citation_count: int = 0
+
+
+class ProjectSourceSummaryResponse(BaseModel):
+    """Project papers grouped by their persisted academic source."""
+
+    source: str
+    count: int
+    papers: list[ProjectSourcePaperResponse]
+
+
+class ProjectSourcesResponse(BaseModel):
+    """Complete source-ledger response for one authorized project."""
+
+    project_id: str
+    total: int
+    sources: list[ProjectSourceSummaryResponse]
 
 
 # =============================================================================
@@ -416,6 +448,57 @@ async def get_project_progress(
     return {"execution_id": str(execution["id"]), "nodes": nodes}
 
 
+@router.get(
+    "/projects/{project_id}/sources",
+    response_model=ProjectSourcesResponse,
+)
+async def get_project_sources(
+    project_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: DatabaseService = Depends(get_database),
+) -> dict[str, Any]:
+    """Return project-scoped paper provenance grouped by academic source."""
+
+    project = await db.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if (
+        project.get("user_id") != current_user["id"]
+        and current_user.get("role") != "admin"
+    ):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    papers = await db.get_project_papers(project_id, limit=500)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for paper in papers:
+        source = str(paper.get("source") or "unknown").strip().lower()
+        grouped.setdefault(source, []).append(
+            {
+                "id": str(paper.get("id") or ""),
+                "title": str(paper.get("title") or "Untitled"),
+                "authors": paper.get("authors") or [],
+                "year": paper.get("year") or paper.get("publication_date"),
+                "journal": paper.get("journal"),
+                "doi": paper.get("doi"),
+                "url": paper.get("url"),
+                "citation_count": int(paper.get("citation_count") or 0),
+            }
+        )
+
+    return {
+        "project_id": project_id,
+        "total": len(papers),
+        "sources": [
+            {
+                "source": source,
+                "count": len(source_papers),
+                "papers": source_papers[:20],
+            }
+            for source, source_papers in sorted(grouped.items())
+        ],
+    }
+
+
 # =============================================================================
 # Pipeline 路由
 # =============================================================================
@@ -466,6 +549,8 @@ async def _schedule_pipeline_agent(
         ) from error
     except AgentCheckpointNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    except AgentQueueFullError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
     except AgentRuntimeUnavailableError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
@@ -499,18 +584,22 @@ async def pause_pipeline(
 ) -> dict[str, str]:
     """暂停 Agent，并等待执行记录写为 interrupted。"""
     await _get_authorized_pipeline_project(project_id, current_user, db)
-    execution = await db.get_latest_agent_execution(project_id)
     logger.info("Pausing agent", project_id=project_id)
     try:
-        await get_agent_run_manager().cancel(project_id)
+        execution_id = await get_agent_run_manager().cancel(project_id)
     except AgentNotRunningError as error:
         raise HTTPException(status_code=409, detail="Agent not running") from error
-    if not execution:
-        raise HTTPException(status_code=409, detail="Agent execution not found")
+    except AgentCancellationTimeoutError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if not execution_id:
+        execution = await db.get_latest_agent_execution(project_id)
+        if not execution:
+            raise HTTPException(status_code=409, detail="Agent execution not found")
+        execution_id = str(execution["id"])
     return {
         "message": "Agent paused",
         "project_id": project_id,
-        "execution_id": str(execution["id"]),
+        "execution_id": execution_id,
     }
 
 

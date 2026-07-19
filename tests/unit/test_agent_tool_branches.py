@@ -541,6 +541,7 @@ async def test_section_tools_preserve_reference_prompt_and_content_blocks(
                     {
                         "number": 2,
                         "title": "Reliable Recovery",
+                        "authors": "Ada Lovelace, Grace Hopper",
                         "year": 2025,
                         "abstract": "Recovery evidence.",
                         "evidence_claims": ["Checkpoints recover safely."],
@@ -559,8 +560,12 @@ async def test_section_tools_preserve_reference_prompt_and_content_blocks(
     assert section == "Grounded analysis with evidence [2]."
     assert revised == "Revised grounded analysis [2]."
     write_prompt = str(captured_messages[0][1].content)
-    assert "[2] Reliable Recovery" in write_prompt
+    assert "[2] Ada Lovelace, Grace Hopper. Reliable Recovery" in write_prompt
     assert "Checkpoints recover safely." in write_prompt
+    assert "禁止使用“[7]提出/认为/发现”" in write_prompt
+    revision_prompt = str(captured_messages[1][1].content)
+    assert "保留已有作者与引用的绑定" in revision_prompt
+    assert "已有研究提出……[N]" in revision_prompt
 
 
 @pytest.mark.asyncio

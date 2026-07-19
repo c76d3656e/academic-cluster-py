@@ -1,10 +1,13 @@
 """Administration API for runtime feature flags that are actually consumed."""
 
-from fastapi import APIRouter, HTTPException
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
 from ...services.database import get_database
+from ..dependencies import require_admin
 
 router = APIRouter(prefix="/pipeline-config")
 
@@ -99,7 +102,9 @@ def _validate_value(config_type: str, value: str) -> str:
 
 
 @router.get("/features")
-async def get_features() -> dict[str, bool]:
+async def get_features(
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, bool]:
     """Return public UI feature flags."""
 
     await _ensure_defaults()
@@ -113,7 +118,9 @@ async def get_features() -> dict[str, bool]:
 
 
 @router.get("", response_model=list[PipelineConfigItem])
-async def list_pipeline_config() -> list[PipelineConfigItem]:
+async def list_pipeline_config(
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> list[PipelineConfigItem]:
     """List supported runtime feature flags."""
 
     await _ensure_defaults()
@@ -143,6 +150,7 @@ async def list_pipeline_config() -> list[PipelineConfigItem]:
 async def update_pipeline_config(
     key: str,
     body: PipelineConfigUpdate,
+    _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, str]:
     """Update a supported feature flag."""
 
@@ -167,7 +175,9 @@ async def update_pipeline_config(
 
 
 @router.post("/reset")
-async def reset_pipeline_config() -> dict[str, str]:
+async def reset_pipeline_config(
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, str]:
     """Reset supported feature flags to defaults."""
 
     await _ensure_defaults()

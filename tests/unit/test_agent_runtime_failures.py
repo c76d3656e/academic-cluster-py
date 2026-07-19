@@ -521,6 +521,102 @@ async def test_cancel_and_project_deletion_manage_active_tasks() -> None:
 
 
 @pytest.mark.asyncio
+async def test_admission_queue_is_bounded_and_runs_projects_in_arrival_order(
+    monkeypatch: pytest.MonkeyPatch,
+    healthy_checkpoint: None,
+) -> None:
+    del healthy_checkpoint
+    manager = agent_runtime.AgentRunManager(
+        max_concurrent_runs=1,
+        max_queued_runs=1,
+        queue_wait_timeout_seconds=30,
+    )
+    db = _Database()
+    started: list[str] = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def controlled_run(**kwargs: Any) -> None:
+        project_id = str(kwargs["project"]["id"])
+        started.append(project_id)
+        if project_id == "project-1":
+            first_started.set()
+            await release_first.wait()
+
+    monkeypatch.setattr(manager, "_run", controlled_run)
+    first = _project()
+    second = {**_project(), "id": "project-2"}
+    third = {**_project(), "id": "project-3"}
+
+    await manager.start(project=first, target_papers=5, target_words=2000, db=db)
+    await first_started.wait()
+    await manager.start(project=second, target_papers=5, target_words=2000, db=db)
+
+    with pytest.raises(agent_runtime.AgentQueueFullError):
+        await manager.start(project=third, target_papers=5, target_words=2000, db=db)
+
+    assert started == ["project-1"]
+    release_first.set()
+    await manager.wait("project-1")
+    await manager.wait("project-2")
+    assert started == ["project-1", "project-2"]
+
+
+@pytest.mark.asyncio
+async def test_immediate_cancel_persists_execution_interruption_before_task_starts(
+    healthy_checkpoint: None,
+) -> None:
+    del healthy_checkpoint
+    manager = agent_runtime.AgentRunManager()
+    db = _Database()
+
+    execution_id = await manager.start(
+        project=_project(), target_papers=5, target_words=2000, db=db
+    )
+    # The returned task has not yielded to the event loop yet. This exercises
+    # the historical create_task/cancel race that left a pending DB row alive.
+    assert await manager.cancel("project-1") == execution_id
+
+    assert db.execution_updates[-1][1] == "interrupted"
+    assert db.project_updates[-1] == ("project-1", "interrupted")
+    assert not manager.is_running("project-1")
+
+
+@pytest.mark.asyncio
+async def test_admission_quota_prevents_one_user_from_filling_global_queue(
+    monkeypatch: pytest.MonkeyPatch,
+    healthy_checkpoint: None,
+) -> None:
+    del healthy_checkpoint
+    manager = agent_runtime.AgentRunManager(
+        max_concurrent_runs=1,
+        max_queued_runs=2,
+        max_admitted_runs_per_user=1,
+    )
+    db = _Database()
+    release = asyncio.Event()
+
+    async def blocking_run(**_kwargs: Any) -> None:
+        await release.wait()
+
+    monkeypatch.setattr(manager, "_run", blocking_run)
+    first = {**_project(), "user_id": "user-1"}
+    same_owner = {**_project(), "id": "project-2", "user_id": "user-1"}
+    other_owner = {**_project(), "id": "project-3", "user_id": "user-2"}
+
+    await manager.start(project=first, target_papers=5, target_words=2000, db=db)
+    with pytest.raises(agent_runtime.AgentQueueFullError, match="this user"):
+        await manager.start(
+            project=same_owner, target_papers=5, target_words=2000, db=db
+        )
+    await manager.start(project=other_owner, target_papers=5, target_words=2000, db=db)
+
+    release.set()
+    await manager.wait("project-1")
+    await manager.wait("project-3")
+
+
+@pytest.mark.asyncio
 async def test_shutdown_and_singleton_close_cancel_all_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

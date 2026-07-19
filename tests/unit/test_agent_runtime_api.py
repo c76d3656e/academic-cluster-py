@@ -20,6 +20,7 @@ class _FakeManager:
         self.start_calls: list[dict[str, Any]] = []
         self.cancel_calls: list[str] = []
         self.error: Exception | None = None
+        self.cancel_execution_id = "cancelled-execution"
 
     async def start(self, **kwargs: Any) -> str:
         if self.error is not None:
@@ -27,10 +28,11 @@ class _FakeManager:
         self.start_calls.append(kwargs)
         return "existing-execution" if kwargs["resume"] else "new-execution"
 
-    async def cancel(self, project_id: str) -> None:
+    async def cancel(self, project_id: str) -> str:
         if self.error is not None:
             raise self.error
         self.cancel_calls.append(project_id)
+        return self.cancel_execution_id
 
 
 class _FakeDB:
@@ -42,6 +44,7 @@ class _FakeDB:
         self.project_statuses: list[tuple[str, str]] = []
         self.saved_projects: list[dict[str, Any]] = []
         self.projects_for_list: list[dict[str, Any]] = []
+        self.project_papers: list[dict[str, Any]] = []
 
     async def get_project(self, project_id: str) -> dict[str, Any] | None:
         del project_id
@@ -75,6 +78,12 @@ class _FakeDB:
 
     async def update_project_status(self, project_id: str, status: str) -> None:
         self.project_statuses.append((project_id, status))
+
+    async def get_project_papers(
+        self, project_id: str, *, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        del project_id
+        return self.project_papers[:limit]
 
 
 def test_removed_legacy_surfaces_are_not_registered() -> None:
@@ -177,6 +186,51 @@ async def test_project_surfaces_return_only_canonical_public_statuses() -> None:
 
 
 @pytest.mark.asyncio
+async def test_project_sources_are_owner_scoped_and_group_real_papers() -> None:
+    db = _FakeDB(_project())
+    db.project_papers = [
+        {
+            "id": "paper-1",
+            "source": "arxiv",
+            "title": "Agent Observability",
+            "authors": [{"name": "A. Researcher"}],
+            "year": 2026,
+            "doi": "10.1000/example",
+            "url": "https://arxiv.org/abs/1234",
+            "citation_count": 12,
+        },
+        {
+            "id": "paper-2",
+            "source": "arxiv",
+            "title": "Reliable Workflows",
+            "citation_count": 4,
+        },
+        {"id": "paper-3", "source": "pubmed", "title": "Clinical Agents"},
+    ]
+
+    response = await routes.get_project_sources(
+        "project-1",
+        current_user={"id": "user-1", "role": "user"},
+        db=db,  # type: ignore[arg-type]
+    )
+
+    assert response["total"] == 3
+    assert [(item["source"], item["count"]) for item in response["sources"]] == [
+        ("arxiv", 2),
+        ("pubmed", 1),
+    ]
+    assert response["sources"][0]["papers"][0]["doi"] == "10.1000/example"
+
+    with pytest.raises(HTTPException) as caught:
+        await routes.get_project_sources(
+            "project-1",
+            current_user={"id": "other-user", "role": "user"},
+            db=db,  # type: ignore[arg-type]
+        )
+    assert caught.value.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_both_start_aliases_delegate_to_the_same_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -259,7 +313,7 @@ async def test_pause_aliases_check_access_and_delegate_to_manager(
     manager = _FakeManager()
     _install_manager(monkeypatch, manager)
     db = _FakeDB(_project())
-    db.latest_execution = {"id": "execution-1", "status": "running"}
+    db.latest_execution = {"id": "stale-execution", "status": "running"}
     user = {"id": "user-1", "role": "user"}
 
     agent_response = await agent_routes.pause_agent(
@@ -273,8 +327,8 @@ async def test_pause_aliases_check_access_and_delegate_to_manager(
         db=db,  # type: ignore[arg-type]
     )
     assert manager.cancel_calls == ["project-1", "project-1"]
-    assert agent_response["execution_id"] == "execution-1"
-    assert pipeline_response["execution_id"] == "execution-1"
+    assert agent_response["execution_id"] == "cancelled-execution"
+    assert pipeline_response["execution_id"] == "cancelled-execution"
 
     with pytest.raises(HTTPException) as caught:
         await routes.pause_pipeline(

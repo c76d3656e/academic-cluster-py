@@ -1,6 +1,9 @@
 import pytest
 
-from academic_cluster.services.review_finalizer import finalize_review_markdown
+from academic_cluster.services.review_finalizer import (
+    citation_reference_numbers,
+    finalize_review_markdown,
+)
 
 
 def test_finalize_review_markdown_uses_first_appearance_reference_mapping():
@@ -98,4 +101,25 @@ def test_finalize_rejects_unknown_title_citation():
             sections=[{"title": "Body"}],
             section_bodies=["Supported claim [1]."],
             paper_metadata_map={1: {"paper_id": "paper-1", "title": "Known paper"}},
+        )
+
+
+def test_citation_reference_numbers_ignores_code_and_math_regions():
+    markdown = (
+        "```python\nprotected = refs[99]\n```\n`inline[98]` "
+        "$math[97]$ $$display[96]$$ "
+        r"\(latex[95]\) \[display[94]\] "
+        "Visible citation [3]."
+    )
+
+    assert citation_reference_numbers(markdown) == {3}
+
+
+def test_finalize_review_rejects_malformed_citation_range():
+    with pytest.raises(ValueError, match="citation range exceeds"):
+        finalize_review_markdown(
+            review_title="Review",
+            sections=[{"title": "Body"}],
+            section_bodies=["A valid citation [1] cannot hide [2-50]."],
+            paper_metadata_map={1: {"paper_id": "paper-1", "title": "Known"}},
         )

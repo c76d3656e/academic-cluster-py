@@ -247,7 +247,11 @@ async def generate_evidence_cards_batch(
     if cluster_topics is None:
         cluster_topics = {}
 
-    max_concurrency = max(1, min(int(concurrency or 10), len(papers) or 1))
+    if concurrency is None:
+        from ..config import get_settings
+
+        concurrency = get_settings().agent_max_per_run_llm_requests
+    max_concurrency = max(1, min(int(concurrency), len(papers) or 1))
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _bounded_generate(

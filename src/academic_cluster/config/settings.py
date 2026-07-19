@@ -74,6 +74,24 @@ class Settings(BaseSettings):
     embedding_api_key: str | None = None
     embedding_providers_json: str | None = None
 
+    # Backpressure boundaries for the single checkpoint-owning Agent runtime.
+    # These are deliberately explicit capacities rather than inferred from RPM:
+    # requests/minute cannot describe provider connection concurrency.
+    agent_max_concurrent_runs: int = Field(default=2, ge=1, le=64)
+    agent_max_queued_runs: int = Field(default=32, ge=0, le=10000)
+    agent_max_admitted_runs_per_user: int = Field(default=2, ge=1, le=64)
+    agent_max_per_run_llm_requests: int = Field(default=4, ge=1, le=64)
+    agent_queue_wait_timeout_seconds: float = Field(default=900.0, gt=0, le=86400)
+    agent_cancel_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
+    llm_max_concurrent_requests: int = Field(default=8, ge=1, le=1024)
+    llm_max_queued_requests: int = Field(default=64, ge=0, le=10000)
+    llm_queue_wait_timeout_seconds: float = Field(default=120.0, gt=0, le=3600)
+    embedding_max_concurrent_requests: int = Field(default=4, ge=1, le=1024)
+    embedding_max_queued_requests: int = Field(default=32, ge=0, le=10000)
+    embedding_queue_wait_timeout_seconds: float = Field(default=120.0, gt=0, le=3600)
+    sse_max_queue_events: int = Field(default=128, ge=1, le=10000)
+    sse_max_connections_per_project: int = Field(default=20, ge=1, le=10000)
+
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_db: str = "academic_cluster"
