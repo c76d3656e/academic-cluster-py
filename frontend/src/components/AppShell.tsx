@@ -42,6 +42,7 @@ const adminNav = [
   { to: '/admin/overview', label: '管理概览', icon: ShieldCheck },
   { to: '/admin/users', label: '用户与权限', icon: Users },
   { to: '/admin/providers', label: 'Provider', icon: Server },
+  { to: '/admin/sources', label: '信息源', icon: BookOpen },
   { to: '/admin/projects', label: '全局项目', icon: Database },
   { to: '/admin/usage', label: '全局用量', icon: Activity },
   { to: '/admin/audit', label: '审计日志', icon: ListChecks },

@@ -23,7 +23,9 @@ from datetime import datetime, timezone
 
 BASE_URL = os.getenv("E2E_BASE_URL", "http://localhost:8000")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@cluster.local")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Admin123!")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+if not ADMIN_PASSWORD:
+    raise RuntimeError("ADMIN_PASSWORD is required for E2E tests")
 TIMEOUT = int(os.getenv("E2E_TIMEOUT", "1800"))
 POLL_INTERVAL = int(os.getenv("E2E_POLL_INTERVAL", "30"))
 

@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     redis_db: int = 0
 
     semantic_scholar_api_key: str | None = None
-    pubmed_email: str = "user@example.com"
+    pubmed_email: str = ""
     pubmed_api_key: str | None = None
 
     jwt_secret_key: str = "change-me-jwt-secret-in-production"

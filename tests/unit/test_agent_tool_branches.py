@@ -231,6 +231,7 @@ async def test_coverage_tool_uses_model_scoped_knn_and_bounds_llm_score(
             "k": 8,
             "threshold": 0.3,
             "model_name": "embedding-v2",
+            "dimensions": 1024,
         }
     ]
     assert hybrid_calls[0]["core_paper_ids"] == [

@@ -11,6 +11,7 @@ const apiMocks = vi.hoisted(() => ({
   changeRole: vi.fn(),
   toggleUser: vi.fn(),
   providers: vi.fn(),
+  createProvider: vi.fn(),
   deleteProvider: vi.fn(),
   toggleProvider: vi.fn(),
   testProvider: vi.fn(),
@@ -19,6 +20,13 @@ const apiMocks = vi.hoisted(() => ({
   providerUsage: vi.fn(),
   recentCalls: vi.fn(),
   audit: vi.fn(),
+  pipelineConfig: vi.fn(),
+  updatePipelineConfig: vi.fn(),
+  resetPipelineConfig: vi.fn(),
+  sources: vi.fn(),
+  updateSource: vi.fn(),
+  appendSource: vi.fn(),
+  clearSource: vi.fn(),
 }))
 
 vi.mock('../lib/api', () => ({
@@ -106,6 +114,146 @@ describe('AdminPage user management', () => {
     expect(screen.getByText(/已有调用记录不会被删除/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '删除 Provider' }))
     await waitFor(() => expect(apiMocks.deleteProvider).toHaveBeenCalledWith('provider-1'))
+  })
+
+  it('creates a rerank provider through the registry contract', async () => {
+    apiMocks.providers.mockResolvedValue({ providers: [], total: 0 })
+    apiMocks.createProvider.mockResolvedValue({
+      id: 'rerank-1',
+      kind: 'rerank',
+      display_name: 'Academic Reranker',
+      base_url: 'https://rerank.example/v1/rerank',
+      model: 'rerank-model',
+      is_enabled: true,
+      priority: 100,
+      rpm_limit: 20,
+      health_status: 'unknown',
+      failure_count: 0,
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin/providers']}>
+          <Routes>
+            <Route path="/admin/:section" element={<AdminPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(await screen.findByRole('button', { name: '新增 Provider' }))
+    await user.selectOptions(screen.getByLabelText('类型'), 'rerank')
+    await user.type(screen.getByLabelText('名称'), 'Academic Reranker')
+    await user.type(screen.getByLabelText('Base URL'), 'https://rerank.example/v1/rerank')
+    await user.type(screen.getByLabelText('模型'), 'rerank-model')
+    const rpm = screen.getByLabelText('RPM')
+    await user.clear(rpm)
+    await user.type(rpm, '20')
+    await user.click(screen.getByRole('button', { name: '保存 Provider' }))
+
+    await waitFor(() =>
+      expect(apiMocks.createProvider).toHaveBeenCalledWith({
+        kind: 'rerank',
+        display_name: 'Academic Reranker',
+        base_url: 'https://rerank.example/v1/rerank',
+        model: 'rerank-model',
+        api_key: '',
+        rpm_limit: 20,
+        is_enabled: true,
+      }),
+    )
+  })
+
+  it('renders choice policies and resets the runtime configuration', async () => {
+    apiMocks.pipelineConfig.mockResolvedValue([
+      {
+        key: 'rerank.failure_mode',
+        value: 'passthrough',
+        label: 'Rerank 失败语义',
+        description: 'Failure semantics',
+        group: 'Rerank',
+        type: 'choice',
+        options: ['passthrough', 'fail'],
+      },
+    ])
+    apiMocks.resetPipelineConfig.mockResolvedValue({ message: 'reset' })
+    apiMocks.updatePipelineConfig.mockResolvedValue({ key: 'rerank.failure_mode', value: 'fail' })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin/pipeline-config']}>
+          <Routes>
+            <Route path="/admin/:section" element={<AdminPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.selectOptions(await screen.findByLabelText('Rerank 失败语义'), 'fail')
+    await waitFor(() =>
+      expect(apiMocks.updatePipelineConfig).toHaveBeenCalledWith('rerank.failure_mode', 'fail'),
+    )
+    await user.click(screen.getByRole('button', { name: '恢复默认值' }))
+    await waitFor(() => expect(apiMocks.resetPipelineConfig).toHaveBeenCalled())
+  })
+
+  it('shows academic source requirements and appends a Semantic Scholar key', async () => {
+    apiMocks.sources.mockResolvedValue({
+      sources: [
+        {
+          key: 'semantic_scholar',
+          label: 'Semantic Scholar',
+          description: 'Metadata search',
+          authentication: 'Optional API Key',
+          rate_limit_hint: '1 req/s',
+          configuration_keys: ['semantic_scholar_api_key'],
+        },
+        {
+          key: 'arxiv',
+          label: 'arXiv',
+          description: 'Preprints',
+          authentication: 'No authentication',
+          rate_limit_hint: '1 req / 3 seconds',
+          configuration_keys: [],
+        },
+      ],
+      configs: [
+        {
+          key: 'semantic_scholar_api_key',
+          label: 'Semantic Scholar API Key',
+          description: 'Supports multiple keys',
+          is_set: true,
+          is_enabled: true,
+          key_count: 2,
+          value_source: 'db',
+          is_secret: true,
+          supports_multiple: true,
+        },
+      ],
+    })
+    apiMocks.appendSource.mockResolvedValue({})
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin/sources']}>
+          <Routes>
+            <Route path="/admin/:section" element={<AdminPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('Semantic Scholar')).toBeInTheDocument()
+    expect(screen.getByText('arXiv')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Semantic Scholar API Key'), 'new-key')
+    await user.click(screen.getByRole('button', { name: '追加' }))
+    await waitFor(() => expect(apiMocks.appendSource).toHaveBeenCalledWith('semantic_scholar_api_key', 'new-key'))
   })
 
   it('shows both LLM and embedding calls in the global usage details', async () => {

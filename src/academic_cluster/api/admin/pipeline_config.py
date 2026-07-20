@@ -1,32 +1,19 @@
-"""Administration API for runtime feature flags that are actually consumed."""
+"""Administrator API for TOML-defined, persistent runtime policy."""
 
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from ...services.database import get_database
+from ...services.runtime_policy import config_definitions, validate_config_value
 from ..dependencies import require_admin
 
 router = APIRouter(prefix="/pipeline-config")
 
-DEFAULT_CONFIG: dict[str, dict[str, str]] = {
-    "ui.show_usage": {
-        "value": "false",
-        "label": "显示调用明细",
-        "description": (
-            "开启后用户可在项目详情页查看 LLM 调用明细，并在控制台查看个人用量页面"
-        ),
-        "group": "系统",
-        "type": "bool",
-    }
-}
-
 
 async def init_pipeline_config_table() -> None:
-    """Create the feature-flag table used by the frontend."""
-
     db = get_database()
     async with db.session() as session:
         await session.execute(
@@ -45,17 +32,16 @@ async def init_pipeline_config_table() -> None:
 
 
 async def _ensure_defaults() -> None:
-    """Upsert supported flags and remove keys from the deleted legacy graph."""
+    """Seed TOML metadata while preserving administrator-owned values."""
 
     db = get_database()
     async with db.session() as session:
-        for key, config in DEFAULT_CONFIG.items():
+        for key, config in config_definitions().items():
             await session.execute(
                 text("""
                     INSERT INTO pipeline_config (
                         key, value, label, description, group_name, value_type
-                    )
-                    VALUES (:key, :value, :label, :description, :group, :value_type)
+                    ) VALUES (:key, :value, :label, :description, :group, :value_type)
                     ON CONFLICT (key) DO UPDATE SET
                         label = EXCLUDED.label,
                         description = EXCLUDED.description,
@@ -64,16 +50,13 @@ async def _ensure_defaults() -> None:
                 """),
                 {
                     "key": key,
-                    "value": config["value"],
-                    "label": config["label"],
-                    "description": config["description"],
-                    "group": config["group"],
-                    "value_type": config["type"],
+                    "value": str(config["value"]),
+                    "label": str(config["label"]),
+                    "description": str(config["description"]),
+                    "group": str(config["group"]),
+                    "value_type": str(config["type"]),
                 },
             )
-        await session.execute(
-            text("DELETE FROM pipeline_config WHERE key NOT LIKE 'ui.%'")
-        )
 
 
 class PipelineConfigItem(BaseModel):
@@ -83,37 +66,27 @@ class PipelineConfigItem(BaseModel):
     description: str = ""
     group: str = ""
     type: str = "string"
+    minimum: float | None = None
+    maximum: float | None = None
+    options: list[str] = Field(default_factory=list)
 
 
 class PipelineConfigUpdate(BaseModel):
     value: str
 
 
-def _validate_value(config_type: str, value: str) -> str:
-    normalized = value.strip().lower()
-    if config_type == "bool":
-        if normalized not in {"true", "false"}:
-            raise HTTPException(
-                status_code=422,
-                detail="Boolean feature flags accept only 'true' or 'false'",
-            )
-        return normalized
-    return value
-
-
 @router.get("/features")
 async def get_features(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, bool]:
-    """Return public UI feature flags."""
-
     await _ensure_defaults()
     db = get_database()
     async with db.session() as session:
-        result = await session.execute(
-            text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'")
-        )
-        rows = result.fetchall()
+        rows = (
+            await session.execute(
+                text("SELECT key, value FROM pipeline_config WHERE key LIKE 'ui.%'")
+            )
+        ).fetchall()
     return {str(row[0]).removeprefix("ui."): row[1] == "true" for row in rows}
 
 
@@ -121,18 +94,18 @@ async def get_features(
 async def list_pipeline_config(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> list[PipelineConfigItem]:
-    """List supported runtime feature flags."""
-
     await _ensure_defaults()
+    definitions = config_definitions()
     db = get_database()
     async with db.session() as session:
-        result = await session.execute(
-            text(
-                "SELECT key, value, label, description, group_name, value_type "
-                "FROM pipeline_config ORDER BY group_name, key"
+        rows = (
+            await session.execute(
+                text("""
+                    SELECT key, value, label, description, group_name, value_type
+                    FROM pipeline_config ORDER BY group_name, key
+                """)
             )
-        )
-        rows = result.fetchall()
+        ).fetchall()
     return [
         PipelineConfigItem(
             key=str(row[0]),
@@ -141,8 +114,12 @@ async def list_pipeline_config(
             description=str(row[3]),
             group=str(row[4]),
             type=str(row[5]),
+            minimum=definitions[str(row[0])].get("minimum"),
+            maximum=definitions[str(row[0])].get("maximum"),
+            options=list(definitions[str(row[0])].get("options") or []),
         )
         for row in rows
+        if str(row[0]) in definitions
     ]
 
 
@@ -150,45 +127,87 @@ async def list_pipeline_config(
 async def update_pipeline_config(
     key: str,
     body: PipelineConfigUpdate,
-    _admin: dict[str, Any] = Depends(require_admin),
-) -> dict[str, str]:
-    """Update a supported feature flag."""
-
+    admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    definitions = config_definitions()
+    definition = definitions.get(key)
+    if definition is None:
+        raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
+    try:
+        value = validate_config_value(definition, body.value)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     db = get_database()
     async with db.session() as session:
-        result = await session.execute(
-            text("SELECT value_type FROM pipeline_config WHERE key = :key"),
-            {"key": key},
-        )
-        row = result.fetchone()
-        if not row or key not in DEFAULT_CONFIG:
+        row = (
+            await session.execute(
+                text("SELECT key FROM pipeline_config WHERE key = :key"),
+                {"key": key},
+            )
+        ).fetchone()
+        if row is None:
             raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
-        value = _validate_value(str(row[0]), body.value)
         await session.execute(
             text(
-                "UPDATE pipeline_config "
-                "SET value = :value, updated_at = NOW() WHERE key = :key"
+                "UPDATE pipeline_config SET value = :value, updated_at = NOW() WHERE key = :key"
             ),
             {"key": key, "value": value},
         )
-    return {"key": key, "value": value, "message": "配置已更新"}
+    await db.log_activity(
+        user_id=str(admin["id"]),
+        action="runtime_policy.update",
+        resource_type="pipeline_config",
+        resource_id=key,
+        details={"value": value},
+    )
+    result: dict[str, Any] = {
+        "key": key,
+        "value": value,
+        "message": "Configuration updated",
+    }
+    if key == "embedding.target_dimensions":
+        target_dimensions = int(value)
+        async with db.session() as session:
+            dimensions = (
+                await session.execute(
+                    text("SELECT DISTINCT dimensions FROM embeddings ORDER BY dimensions")
+                )
+            ).fetchall()
+        existing_dimensions = sorted(
+            {
+                int(row[0])
+                for row in dimensions
+                if isinstance(row[0], int) and not isinstance(row[0], bool)
+            }
+        )
+        result.update(
+            existing_dimensions=existing_dimensions,
+            reindex_required=bool(
+                existing_dimensions and existing_dimensions != [target_dimensions]
+            ),
+        )
+    return result
 
 
 @router.post("/reset")
 async def reset_pipeline_config(
-    _admin: dict[str, Any] = Depends(require_admin),
+    admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, str]:
-    """Reset supported feature flags to defaults."""
-
     await _ensure_defaults()
     db = get_database()
     async with db.session() as session:
-        for key, config in DEFAULT_CONFIG.items():
+        for key, config in config_definitions().items():
             await session.execute(
                 text(
-                    "UPDATE pipeline_config "
-                    "SET value = :value, updated_at = NOW() WHERE key = :key"
+                    "UPDATE pipeline_config SET value = :value, updated_at = NOW() WHERE key = :key"
                 ),
-                {"key": key, "value": config["value"]},
+                {"key": key, "value": str(config["value"])},
             )
-    return {"message": "所有配置已重置为默认值"}
+    await db.log_activity(
+        user_id=str(admin["id"]),
+        action="runtime_policy.reset",
+        resource_type="pipeline_config",
+        resource_id="all",
+        details={},
+    )
+    return {"message": "All runtime policy values were reset"}

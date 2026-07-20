@@ -31,6 +31,7 @@ logger = structlog.get_logger()
 _FALLBACK_EVIDENCE_LIMITATION = (
     "LLM evidence card extraction did not return a usable card for this paper."
 )
+MAX_SEARCH_RESULTS_PER_SOURCE = 100
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
@@ -240,15 +241,27 @@ async def search_papers(
     """搜索学术论文。在多个学术数据源（Semantic Scholar, arXiv, PubMed, Crossref, OpenAlex）上并发搜索。
     论文自动存入数据库。返回搜索结果统计和 top-5 论文标题。
     只返回 ~500 tokens 的摘要，不是完整的论文 JSON。"""
+    from ..services.runtime_policy import get_runtime_policy
     from ..tools.academic_search import search_all_sources
 
-    sources = ["semantic_scholar", "arxiv", "pubmed", "crossref", "openalex"]
+    policy = await get_runtime_policy()
 
     results = await search_all_sources(
         query=query,
-        limit_per_source=max(1, min(limit_per_source, 20)),
-        sources=sources,
+        limit_per_source=max(
+            1,
+            min(
+                limit_per_source,
+                policy.results_per_source,
+                MAX_SEARCH_RESULTS_PER_SOURCE,
+            ),
+        ),
+        sources=list(policy.enabled_sources),
     )
+    from ..services.rerank_service import rerank_papers
+
+    rerank = await rerank_papers(query, results, policy=policy)
+    results = rerank.papers
 
     from ..services.observability import (
         get_current_execution,
@@ -305,6 +318,12 @@ async def search_papers(
         "year_range": f"{min(years.keys())}-{max(years.keys())}"
         if years
         else "unknown",
+        "rerank": {
+            "applied": rerank.applied,
+            "provider": rerank.provider_name,
+            "model": rerank.model_name,
+            "error": rerank.error,
+        },
     }
     logger.info(
         "search_papers completed",
@@ -397,11 +416,15 @@ async def cluster_and_evaluate_coverage(
         from ..services.vector_store import get_vector_store
 
         vector_store = get_vector_store()
+        from ..services.runtime_policy import get_runtime_policy
+
+        policy = await get_runtime_policy()
         knn_edges = await vector_store.get_knn_graph(
             paper_ids=paper_ids,
-            k=8,
-            threshold=0.3,
+            k=policy.knn_neighbors,
+            threshold=policy.knn_similarity_threshold,
             model_name=embedding_model,
+            dimensions=policy.embedding_target_dimensions,
         )
 
         # 2. 社区检测
@@ -658,7 +681,10 @@ async def extract_knowledge_graph(
             }
         )
 
-    processing_limit = 80
+    from ..services.runtime_policy import get_runtime_policy
+
+    policy = await get_runtime_policy()
+    processing_limit = policy.analysis_processing_limit
     truncated_count = max(0, len(fresh_papers) - processing_limit)
     fresh_papers = fresh_papers[:processing_limit]
 
@@ -681,10 +707,10 @@ async def extract_knowledge_graph(
             result = await asyncio.wait_for(
                 extract_kg_from_papers_batch(
                     [paper],
-                    max_entities_per_paper=8,
-                    max_relations_per_paper=8,
+                    max_entities_per_paper=policy.kg_entities_per_paper,
+                    max_relations_per_paper=policy.kg_relations_per_paper,
                 ),
-                timeout=300,
+                timeout=policy.kg_timeout_seconds,
             )
             return (
                 result.get("entities", []),
@@ -824,10 +850,18 @@ async def generate_evidence(
             default=str,
         )
 
+    from ..services.runtime_policy import get_runtime_policy
+
+    policy = await get_runtime_policy()
+    evidence_limit = policy.evidence_processing_limit
     logger.info("Evidence: %d skip, %d new", len(all_papers) - len(fresh), len(fresh))
     try:
         cards = await asyncio.wait_for(
-            generate_evidence_cards_batch(fresh[:80]), timeout=900
+            generate_evidence_cards_batch(
+                fresh[:evidence_limit],
+                timeout_s=int(policy.provider_request_timeout_seconds),
+            ),
+            timeout=policy.evidence_timeout_seconds,
         )
         saved = 0
         save_failures = 0
@@ -1070,6 +1104,9 @@ async def write_section(
 
 只输出正文文本，不要 JSON。"""
 
+    from ..services.runtime_policy import get_runtime_policy
+
+    policy = await get_runtime_policy()
     llm = create_llm(temperature=0.7, max_tokens=None)
     result = await asyncio.wait_for(
         ainvoke_with_callbacks(
@@ -1078,9 +1115,12 @@ async def write_section(
                 SystemMessage(content="你是学术综述写作专家。直接输出章节正文。"),
                 HumanMessage(content=prompt),
             ],
-            timeout=300,
+            timeout=policy.provider_request_timeout_seconds,
         ),
-        timeout=360,
+        timeout=(
+            policy.provider_request_timeout_seconds
+            + policy.provider_timeout_grace_seconds
+        ),
     )
     content = result.content
     if isinstance(content, list):
@@ -1111,6 +1151,9 @@ async def revise_section(
 修订指令：{revision_instructions[:5000]}"""
 
     try:
+        from ..services.runtime_policy import get_runtime_policy
+
+        policy = await get_runtime_policy()
         llm = create_llm(temperature=0.4, max_tokens=None)
         result = await asyncio.wait_for(
             ainvoke_with_callbacks(
@@ -1119,9 +1162,12 @@ async def revise_section(
                     SystemMessage(content="直接输出修订后正文。"),
                     HumanMessage(content=prompt),
                 ],
-                timeout=300,
+                timeout=policy.provider_request_timeout_seconds,
             ),
-            timeout=360,
+            timeout=(
+                policy.provider_request_timeout_seconds
+                + policy.provider_timeout_grace_seconds
+            ),
         )
         content = result.content
         if isinstance(content, list):

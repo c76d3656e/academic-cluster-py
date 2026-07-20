@@ -2063,6 +2063,10 @@ h3 {
 .provider-logo-embedding {
   background: var(--sage-deep);
 }
+.provider-logo-rerank {
+  color: var(--coral-deep);
+  background: color-mix(in srgb, var(--coral) 18%, var(--paper));
+}
 .provider-card-heading > div:nth-child(2) {
   min-width: 0;
   flex: 1;
@@ -2209,6 +2213,26 @@ h3 {
   gap: 10px;
   max-width: 900px;
 }
+.config-groups { display: grid; gap: 22px; max-width: 900px; }
+.config-group > h2 { margin: 0 0 9px; color: var(--ink-2); font-size: 14px; }
+.config-source-options { display: grid; gap: 6px; }
+.config-source-options label { display: flex; align-items: center; gap: 7px; color: var(--ink-2); font: 10px var(--font-mono); }
+.config-source-options input { accent-color: var(--sage-deep); }
+.config-select-control { display: flex; align-items: center; gap: 8px; }
+.config-select-control .native-select { min-width: 180px; }
+.source-catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.source-catalog-card .ui-card-content { display: grid; gap: 12px; }
+.source-catalog-description { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.6; }
+.source-catalog-meta { display: grid; gap: 5px; color: var(--ink-3); font: 11px var(--font-mono); }
+.source-config-section { margin-top: 28px; }
+.source-config-list { display: grid; gap: 10px; }
+.source-config-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .9fr); gap: 20px; align-items: center; }
+.source-config-title { display: flex; align-items: center; gap: 9px; }
+.source-config-title h3 { margin: 0; font-size: 14px; }
+.source-config-row p { margin: 6px 0; color: var(--ink-2); font-size: 12px; }
+.source-config-row small { color: var(--ink-3); font: 10px var(--font-mono); }
+.source-config-control { display: grid; gap: 8px; }
+.source-config-actions { display: flex; justify-content: flex-end; gap: 7px; }
 .config-row {
   display: flex;
   align-items: center;
@@ -3188,6 +3212,8 @@ h3 {
   .config-control {
     width: 100%;
   }
+  .source-catalog-grid { grid-template-columns: 1fr; }
+  .source-config-row { grid-template-columns: 1fr; }
   .auth-layout {
     display: block;
     width: min(100% - 28px, 450px);

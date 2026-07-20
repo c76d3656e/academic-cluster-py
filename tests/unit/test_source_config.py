@@ -115,3 +115,20 @@ async def test_append_source_config_value_merges_existing_effective_keys(monkeyp
     )
 
     assert db.upserts[-1]["value_enc"] == "env-a,env-b,new-c"
+
+
+def test_academic_source_catalog_exposes_auth_and_rate_limit_contracts():
+    catalog = {item["key"]: item for item in source_config.list_academic_sources()}
+
+    assert set(catalog) == {
+        "semantic_scholar",
+        "pubmed",
+        "openalex",
+        "crossref",
+        "arxiv",
+    }
+    assert catalog["semantic_scholar"]["configuration_keys"] == [
+        "semantic_scholar_api_key"
+    ]
+    assert "pubmed_email" in catalog["crossref"]["configuration_keys"]
+    assert catalog["arxiv"]["configuration_keys"] == []

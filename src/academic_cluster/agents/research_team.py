@@ -132,7 +132,13 @@ async def run_research(
         {papers: list[dict], total_found: int, relevant_count: int, coverage_assessment: str}
     """
     del model_name  # Backward-compatible argument; Provider Pool owns routing.
-    agent = create_research_agent(temperature=0.3)
+    from ..services.runtime_policy import get_runtime_policy
+
+    policy = await get_runtime_policy()
+    agent = create_research_agent(
+        temperature=0.3,
+        max_search_calls=policy.max_search_calls,
+    )
 
     supplemental = supplemental_queries or []
     supplemental_block = (

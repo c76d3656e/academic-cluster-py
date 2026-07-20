@@ -45,6 +45,8 @@ logger = structlog.get_logger()
 
 PHASES = ("research", "analysis", "writing", "peer_review")
 TERMINAL_PHASE = "finalize"
+MINIMUM_REVIEW_BODY_RATIO = 0.40
+MINIMUM_REVIEW_BODY_TOLERANCE = 0.05
 
 
 class AgentState(BaseModel):
@@ -58,6 +60,8 @@ class AgentState(BaseModel):
     target_papers: int = Field(default=50, ge=1, le=500)
     target_words: int = Field(default=12000, ge=1000, le=100000)
     quality_threshold: float = Field(default=75.0, ge=0.0, le=100.0)
+    minimum_body_ratio: float = Field(default=0.40, ge=0.1, le=1.0)
+    minimum_body_tolerance: float = Field(default=0.05, ge=0.0, le=0.25)
 
     current_phase: str = "supervisor"
     status: str = "created"
@@ -626,8 +630,16 @@ def _word_units(text: str) -> int:
     return cjk_count + len(re.findall(r"\b[\w'-]+\b", non_cjk, flags=re.UNICODE))
 
 
-def _minimum_review_word_units(target_words: int) -> int:
-    return min(target_words, max(300, math.ceil(target_words * 0.40)))
+def _minimum_review_word_units(
+    target_words: int,
+    *,
+    minimum_ratio: float = MINIMUM_REVIEW_BODY_RATIO,
+    tolerance: float = MINIMUM_REVIEW_BODY_TOLERANCE,
+) -> int:
+    """Return the accepted review-body floor with a bounded length tolerance."""
+
+    tolerated_minimum = math.ceil(target_words * minimum_ratio * (1 - tolerance))
+    return min(target_words, max(300, tolerated_minimum))
 
 
 def _relevance_tokens(value: Any) -> set[str]:
@@ -724,6 +736,7 @@ async def _write_new_sections(
     references: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     from ..services.citation_planner import plan_review_citations
+    from ..services.runtime_policy import get_runtime_policy
     from ..services.section_evidence_planner import plan_section_evidence
     from ..tools.agent_tools import write_section
 
@@ -740,11 +753,12 @@ async def _write_new_sections(
     clusters = state.coverage.get("clusters") or []
     if not isinstance(clusters, list):
         clusters = []
+    policy = await get_runtime_policy()
     citation_plans = plan_review_citations(
         plans,
         planner_papers,
         clusters,
-        section_reference_target=min(18, len(references)),
+        section_reference_target=min(policy.max_references_per_section, len(references)),
         core_reference_count=min(30, len(references)),
     )
     _filtered_plans, evidence_plans = plan_section_evidence(
@@ -757,8 +771,8 @@ async def _write_new_sections(
             for paper in planner_papers
         },
         clusters=clusters,
-        max_references_per_section=min(18, len(references)),
-        min_references_per_section=min(8, len(references)),
+        max_references_per_section=min(policy.max_references_per_section, len(references)),
+        min_references_per_section=min(policy.min_references_per_section, len(references)),
     )
     semaphore = asyncio.Semaphore(3)
 
@@ -975,7 +989,11 @@ async def _writing_node(state: AgentState) -> dict[str, Any]:
         actual_word_units = sum(
             _word_units(str(section.get("content") or "")) for section in sections
         )
-        required_word_units = _minimum_review_word_units(state.target_words)
+        required_word_units = _minimum_review_word_units(
+            state.target_words,
+            minimum_ratio=state.minimum_body_ratio,
+            tolerance=state.minimum_body_tolerance,
+        )
         if actual_word_units < required_word_units:
             raise RuntimeError(
                 "generated review body is below required minimum: "
@@ -1309,6 +1327,9 @@ async def run_agent_graph(
     from ..services.database import get_database
 
     db = get_database()
+    from ..services.runtime_policy import get_runtime_policy
+
+    policy = await get_runtime_policy(db)
     graph = await compile_agent_graph()
     config = _thread_config(project_id, execution_id)
     input_data: AgentState | None
@@ -1325,6 +1346,11 @@ async def run_agent_graph(
             target_papers=target_papers,
             target_words=target_words,
             quality_threshold=quality_threshold,
+            minimum_body_ratio=policy.minimum_body_ratio,
+            minimum_body_tolerance=policy.minimum_body_tolerance,
+            max_phase_attempts=policy.max_phase_attempts,
+            max_research_rounds=policy.max_research_rounds,
+            max_revision_attempts=policy.max_revision_attempts,
         )
 
     await db.update_project_status(project_id, "running:agent:supervisor")

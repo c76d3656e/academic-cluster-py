@@ -354,8 +354,15 @@ class DatabaseService:
         paper_ids: list[str],
         *,
         model_name: str = "bge-m3",
+        dimensions: int | None = None,
     ) -> set[str]:
-        """Return project-input paper IDs that already have an embedding."""
+        """Return papers with an embedding in the requested model space.
+
+        A model name alone is not a stable vector-space identity: an operator
+        may reconfigure the same model to emit a different dimension.  Treating
+        the old row as reusable would otherwise leave a project without usable
+        vectors after an embedding-dimension migration.
+        """
 
         if not paper_ids:
             return set()
@@ -366,8 +373,13 @@ class DatabaseService:
                     FROM embeddings
                     WHERE paper_id = ANY(:paper_ids)
                       AND model_name = :model_name
+                      AND (:dimensions IS NULL OR dimensions = :dimensions)
                 """),
-                {"paper_ids": paper_ids, "model_name": model_name},
+                {
+                    "paper_ids": paper_ids,
+                    "model_name": model_name,
+                    "dimensions": dimensions,
+                },
             )
             return {str(row[0]) for row in result.fetchall()}
 

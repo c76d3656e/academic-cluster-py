@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS provider_registry (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    kind            VARCHAR(20) NOT NULL,
+    kind            VARCHAR(20) NOT NULL,           -- llm / embedding / rerank
     display_name    VARCHAR(100) NOT NULL,
     base_url        TEXT NOT NULL,
     model           VARCHAR(200),

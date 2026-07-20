@@ -72,14 +72,16 @@ CREATE TABLE IF NOT EXISTS embeddings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     paper_id UUID REFERENCES papers(id) ON DELETE CASCADE,
     model_name VARCHAR(100) NOT NULL,
-    vector vector(1024),
-    dimensions INTEGER NOT NULL DEFAULT 1024,
+    vector vector,
+    dimensions INTEGER NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(paper_id, model_name)
 );
 
--- Create HNSW index for fast vector search
-CREATE INDEX IF NOT EXISTS idx_embeddings_vector ON embeddings USING hnsw (vector vector_cosine_ops);
+-- The vector column is intentionally dimension-flexible; exact similarity
+-- queries are narrowed with this lookup index before pairwise comparison.
+CREATE INDEX IF NOT EXISTS idx_embeddings_lookup
+    ON embeddings (model_name, dimensions, paper_id);
 
 -- Clusters table
 CREATE TABLE IF NOT EXISTS clusters (
@@ -402,7 +404,7 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status);
 
 CREATE TABLE IF NOT EXISTS provider_registry (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    kind            VARCHAR(20) NOT NULL,           -- llm / embedding
+    kind            VARCHAR(20) NOT NULL,           -- llm / embedding / rerank
     display_name    VARCHAR(100) NOT NULL,
     base_url        TEXT NOT NULL,
     model           VARCHAR(200),
@@ -601,7 +603,7 @@ $$;
 
 -- Function for KNN vector search
 CREATE OR REPLACE FUNCTION search_similar_papers(
-    query_embedding vector(1024),
+    query_embedding vector,
     match_count INTEGER DEFAULT 10,
     match_threshold FLOAT DEFAULT 0.5
 )

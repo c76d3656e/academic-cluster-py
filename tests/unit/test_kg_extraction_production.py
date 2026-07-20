@@ -168,7 +168,7 @@ async def test_extract_batch_builds_bounded_prompt_and_parses_content_blocks(
 
     assert result == {"entities": [{"name": "Agent"}]}
     messages, kwargs = calls[0]
-    assert kwargs == {"max_retries": 3, "temperature": 0.1, "timeout": 300}
+    assert kwargs == {"temperature": 0.1}
     prompt = str(messages[1].content)
     assert "ID: paper-1" in prompt
     assert "Title: Agent paper" in prompt

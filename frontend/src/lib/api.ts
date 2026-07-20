@@ -312,6 +312,7 @@ export interface ProviderInfo {
   last_health_check?: string | null
   input_price_per_m?: number
   output_price_per_m?: number
+  metadata?: Record<string, unknown> | null
 }
 
 export interface AdminProject extends Project {
@@ -323,6 +324,29 @@ export interface AdminProject extends Project {
 export interface ApiFeatures {
   show_usage?: boolean
   [key: string]: boolean | undefined
+}
+
+export interface SourceConfigInfo {
+  key: string
+  label: string
+  description: string
+  value?: string | null
+  is_set: boolean
+  key_count: number
+  is_enabled: boolean
+  value_source: 'env' | 'db' | string
+  is_secret: boolean
+  supports_multiple: boolean
+  updated_at?: string | null
+}
+
+export interface AcademicSourceInfo {
+  key: string
+  label: string
+  description: string
+  authentication: string
+  rate_limit_hint: string
+  configuration_keys: string[]
 }
 
 function normalizeStatus(value: unknown): PipelineStatus {
@@ -505,6 +529,7 @@ export const adminApi = {
     is_enabled?: boolean
     priority?: number
     rpm_limit?: number
+    metadata?: Record<string, unknown>
   }) {
     const { data } = await api.post<ProviderInfo>('/admin/providers', payload)
     return data
@@ -562,15 +587,37 @@ export const adminApi = {
     return data as { logs: AuditLog[]; total: number }
   },
   async sources() {
-    const { data } = await api.get('/admin/sources')
-    return data.configs as Array<Record<string, unknown>>
+    const { data } = await api.get<{ configs: SourceConfigInfo[]; sources: AcademicSourceInfo[] }>('/admin/sources')
+    return data
+  },
+  async updateSource(key: string, value: string, is_enabled = true) {
+    const { data } = await api.put<SourceConfigInfo>(`/admin/sources/${key}`, { value, is_enabled })
+    return data
+  },
+  async appendSource(key: string, value: string) {
+    const { data } = await api.post<SourceConfigInfo>(`/admin/sources/${key}/append`, { value })
+    return data
+  },
+  async clearSource(key: string) {
+    const { data } = await api.delete<SourceConfigInfo>(`/admin/sources/${key}`)
+    return data
   },
   async pipelineConfig() {
     const { data } = await api.get('/admin/pipeline-config')
     return data as Array<Record<string, unknown>>
   },
   async updatePipelineConfig(key: string, value: string) {
-    await api.put(`/admin/pipeline-config/${key}`, { value })
+    const { data } = await api.put<{
+      key: string
+      value: string
+      reindex_required?: boolean
+      existing_dimensions?: number[]
+    }>(`/admin/pipeline-config/${key}`, { value })
+    return data
+  },
+  async resetPipelineConfig() {
+    const { data } = await api.post('/admin/pipeline-config/reset')
+    return data
   },
 }
 

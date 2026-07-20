@@ -1,11 +1,15 @@
 import {
   Activity,
   AlertTriangle,
+  BookOpen,
   Database,
   Gauge,
   ListChecks,
+  ListFilter,
   Plus,
   RefreshCw,
+  RotateCcw,
+  Save,
   Server,
   Trash2,
   ToggleLeft,
@@ -15,7 +19,14 @@ import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { adminApi, apiErrorMessage, type LlmCall, type ProviderInfo, type User } from '../lib/api'
+import {
+  adminApi,
+  apiErrorMessage,
+  type LlmCall,
+  type ProviderInfo,
+  type SourceConfigInfo,
+  type User,
+} from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { formatCost, formatDate, formatDuration, formatNumber, statusTone } from '../lib/pipeline'
 import {
@@ -40,6 +51,7 @@ export function AdminPage() {
   const { section = 'overview' } = useParams()
   if (section === 'users') return <AdminUsers />
   if (section === 'providers') return <AdminProviders />
+  if (section === 'sources') return <AdminSources />
   if (section === 'projects') return <AdminProjects />
   if (section === 'usage') return <AdminUsage />
   if (section === 'audit') return <AdminAudit />
@@ -489,6 +501,9 @@ function AdminProviders() {
         <button className={kind === 'embedding' ? 'segment-active' : ''} onClick={() => setKind('embedding')}>
           Embedding
         </button>
+        <button className={kind === 'rerank' ? 'segment-active' : ''} onClick={() => setKind('rerank')}>
+          Rerank
+        </button>
       </div>
       <div className="provider-grid">
         {providers.map((provider) => (
@@ -496,7 +511,7 @@ function AdminProviders() {
             <CardContent>
               <div className="provider-card-heading">
                 <div className={`provider-logo provider-logo-${provider.kind}`}>
-                  {provider.kind === 'llm' ? 'L' : 'E'}
+                  {provider.kind === 'llm' ? 'L' : provider.kind === 'embedding' ? 'E' : 'R'}
                 </div>
                 <div>
                   <h3>{provider.display_name}</h3>
@@ -582,6 +597,120 @@ function AdminProviders() {
   )
 }
 
+function AdminSources() {
+  const client = useQueryClient()
+  const query = useQuery({ queryKey: ['admin-sources'], queryFn: adminApi.sources })
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+
+  async function mutate(
+    config: SourceConfigInfo,
+    action: 'replace' | 'append' | 'clear',
+  ) {
+    const value = (drafts[config.key] ?? '').trim()
+    try {
+      if (action === 'clear') {
+        await adminApi.clearSource(config.key)
+      } else if (action === 'append') {
+        if (!value) return toast.error('请输入需要追加的值')
+        await adminApi.appendSource(config.key, value)
+      } else {
+        if (!value) return toast.error('请输入配置值')
+        await adminApi.updateSource(config.key, value)
+      }
+      setDrafts((current) => ({ ...current, [config.key]: '' }))
+      await client.invalidateQueries({ queryKey: ['admin-sources'] })
+      toast.success(action === 'clear' ? '信息源配置已清除' : '信息源配置已保存')
+    } catch (error) {
+      toast.error(apiErrorMessage(error))
+    }
+  }
+
+  const configs = query.data?.configs ?? []
+  const byKey = new Map(configs.map((config) => [config.key, config]))
+  return (
+    <div className="admin-page">
+      <SectionHeader
+        eyebrow="ACADEMIC SOURCES"
+        title="信息源配置"
+        detail="认证信息加密保存；检索源开关在运行配置中统一控制。"
+      />
+      <div className="source-catalog-grid">
+        {(query.data?.sources ?? []).map((source) => {
+          const dependencies = source.configuration_keys.map((key) => byKey.get(key)).filter(Boolean) as SourceConfigInfo[]
+          const ready = dependencies.length === 0 || dependencies.every((config) => config.is_set && config.is_enabled)
+          return (
+            <Card className="source-catalog-card" key={source.key}>
+              <CardContent>
+                <div className="provider-card-heading">
+                  <div className="provider-logo provider-logo-rerank"><BookOpen size={17} /></div>
+                  <div>
+                    <h3>{source.label}</h3>
+                    <p>{source.authentication}</p>
+                  </div>
+                  <Badge tone={ready ? 'success' : 'neutral'}>{ready ? '就绪' : '待配置'}</Badge>
+                </div>
+                <p className="source-catalog-description">{source.description}</p>
+                <div className="source-catalog-meta">
+                  <span>{source.rate_limit_hint}</span>
+                  <span>{dependencies.length ? dependencies.map((config) => config.label).join(' · ') : '无需配置'}</span>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+      <section className="admin-section source-config-section">
+        <SectionHeader eyebrow="CREDENTIALS" title="认证与联系信息" />
+        <div className="source-config-list">
+          {configs.map((config) => (
+            <Card key={config.key}>
+              <CardContent>
+                <div className="source-config-row">
+                  <div>
+                    <div className="source-config-title">
+                      <h3>{config.label}</h3>
+                      <Badge tone={config.is_set && config.is_enabled ? 'success' : 'neutral'}>
+                        {config.is_set && config.is_enabled ? '已配置' : '未配置'}
+                      </Badge>
+                    </div>
+                    <p>{config.description}</p>
+                    <small>{config.value_source === 'db' ? '数据库覆盖' : '环境变量'}{config.supports_multiple ? ` · ${config.key_count} 个有效 Key` : ''}</small>
+                  </div>
+                  <div className="source-config-control">
+                    <Input
+                      aria-label={config.label}
+                      type={config.is_secret ? 'password' : 'email'}
+                      value={drafts[config.key] ?? ''}
+                      onChange={(event) => setDrafts((current) => ({ ...current, [config.key]: event.target.value }))}
+                      placeholder={config.supports_multiple ? '输入一个或多个 Key（逗号分隔）' : config.is_secret ? '输入新的密钥' : 'name@example.org'}
+                    />
+                    <div className="source-config-actions">
+                      {config.supports_multiple && (
+                        <Button variant="soft" size="sm" onClick={() => void mutate(config, 'append')}>
+                          <Plus size={14} />
+                          追加
+                        </Button>
+                      )}
+                      <Button variant="outline" size="sm" onClick={() => void mutate(config, 'replace')}>
+                        <Save size={14} />
+                        保存
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => void mutate(config, 'clear')}>
+                        <Trash2 size={14} />
+                        清除
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 function ProviderForm({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState({
     kind: 'llm',
@@ -604,43 +733,49 @@ function ProviderForm({ onCreated }: { onCreated: () => void }) {
       <CardContent>
         <div className="form-grid">
           <div className="field-group">
-            <Label>类型</Label>
+            <Label htmlFor="provider-kind">类型</Label>
             <select
+              id="provider-kind"
               className="native-select"
               value={form.kind}
               onChange={(event) => setForm({ ...form, kind: event.target.value })}
             >
               <option value="llm">LLM</option>
               <option value="embedding">Embedding</option>
+              <option value="rerank">Rerank</option>
             </select>
           </div>
           <div className="field-group">
-            <Label>名称</Label>
+            <Label htmlFor="provider-name">名称</Label>
             <Input
+              id="provider-name"
               value={form.display_name}
               onChange={(event) => setForm({ ...form, display_name: event.target.value })}
               placeholder="例如：local-qwen"
             />
           </div>
           <div className="field-group field-span-2">
-            <Label>Base URL</Label>
+            <Label htmlFor="provider-base-url">Base URL</Label>
             <Input
+              id="provider-base-url"
               value={form.base_url}
               onChange={(event) => setForm({ ...form, base_url: event.target.value })}
-              placeholder="https://provider.example/v1"
+              placeholder={form.kind === 'rerank' ? 'https://provider.example/v1/rerank' : 'https://provider.example/v1'}
             />
           </div>
           <div className="field-group">
-            <Label>模型</Label>
+            <Label htmlFor="provider-model">模型</Label>
             <Input
+              id="provider-model"
               value={form.model}
               onChange={(event) => setForm({ ...form, model: event.target.value })}
               placeholder="model-name"
             />
           </div>
           <div className="field-group">
-            <Label>RPM</Label>
+            <Label htmlFor="provider-rpm">RPM</Label>
             <Input
+              id="provider-rpm"
               type="number"
               min="1"
               value={form.rpm_limit}
@@ -648,8 +783,9 @@ function ProviderForm({ onCreated }: { onCreated: () => void }) {
             />
           </div>
           <div className="field-group field-span-2">
-            <Label>API Key</Label>
+            <Label htmlFor="provider-api-key">API Key</Label>
             <Input
+              id="provider-api-key"
               type="password"
               value={form.api_key}
               onChange={(event) => setForm({ ...form, api_key: event.target.value })}
@@ -924,22 +1060,50 @@ function AdminConfig() {
   const query = useQuery({ queryKey: ['admin-config'], queryFn: adminApi.pipelineConfig })
   async function update(key: string, value: string) {
     try {
-      await adminApi.updatePipelineConfig(key, value)
+      const result = await adminApi.updatePipelineConfig(key, value)
       await client.invalidateQueries({ queryKey: ['admin-config'] })
-      toast.success('配置已更新')
+      if (result.reindex_required) {
+        toast.warning(`维度已更新；现有 ${result.existing_dimensions?.join('、') || '旧'} 维向量需要重新生成。`)
+      } else {
+        toast.success('配置已更新')
+      }
     } catch (error) {
       toast.error(apiErrorMessage(error))
     }
   }
+  async function reset() {
+    try {
+      await adminApi.resetPipelineConfig()
+      await client.invalidateQueries({ queryKey: ['admin-config'] })
+      toast.success('运行配置已恢复默认值')
+    } catch (error) {
+      toast.error(apiErrorMessage(error))
+    }
+  }
+  const groups = (query.data ?? []).reduce<Record<string, Array<Record<string, unknown>>>>((result, item) => {
+    const group = String(item.group || '其他')
+    result[group] = [...(result[group] ?? []), item]
+    return result
+  }, {})
   return (
     <div className="admin-page">
       <SectionHeader
         eyebrow="RUNTIME POLICY"
         title="运行配置"
         detail="仅管理员可修改；公开 features 读取由后端单独提供。"
+        action={
+          <Button variant="outline" onClick={() => void reset()}>
+            <RotateCcw size={15} />
+            恢复默认值
+          </Button>
+        }
       />
-      <div className="config-list">
-        {(query.data ?? []).map((item) => (
+      <div className="config-groups">
+        {Object.entries(groups).map(([group, items]) => (
+          <section className="config-group" key={group}>
+            <h2>{group}</h2>
+            <div className="config-list">
+        {items.map((item) => (
           <Card key={String(item.key)}>
             <CardContent>
               <div className="config-row">
@@ -957,8 +1121,50 @@ function AdminConfig() {
                       <span />
                       <strong>{String(item.value) === 'true' ? '开启' : '关闭'}</strong>
                     </button>
+                  ) : String(item.type) === 'sources' ? (
+                    <div className="config-source-options" role="group" aria-label={String(item.label || item.key)}>
+                      {(Array.isArray(item.options) ? item.options : []).map((option) => {
+                        let selected = false
+                        try { selected = JSON.parse(String(item.value)).includes(option) } catch { selected = false }
+                        return (
+                          <label key={String(option)}>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => {
+                                let values: string[] = []
+                                try { values = JSON.parse(String(item.value)) } catch { values = [] }
+                                const next = selected ? values.filter((value) => value !== option) : [...values, String(option)]
+                                if (next.length) void update(String(item.key), JSON.stringify(next))
+                              }}
+                            />
+                            {String(option)}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  ) : String(item.type) === 'choice' ? (
+                    <label className="config-select-control">
+                      <ListFilter size={15} />
+                      <select
+                        className="native-select"
+                        aria-label={String(item.label || item.key)}
+                        value={String(item.value)}
+                        onChange={(event) => void update(String(item.key), event.target.value)}
+                      >
+                        {(Array.isArray(item.options) ? item.options : []).map((option) => (
+                          <option key={String(option)} value={String(option)}>
+                            {String(option)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   ) : (
                     <Input
+                      type={String(item.type) === 'integer' || String(item.type) === 'number' ? 'number' : 'text'}
+                      min={typeof item.minimum === 'number' ? item.minimum : undefined}
+                      max={typeof item.maximum === 'number' ? item.maximum : undefined}
+                      step={String(item.type) === 'integer' ? 1 : 'any'}
                       defaultValue={String(item.value)}
                       onBlur={(event) => void update(String(item.key), event.target.value)}
                     />
@@ -967,6 +1173,9 @@ function AdminConfig() {
               </div>
             </CardContent>
           </Card>
+        ))}
+            </div>
+          </section>
         ))}
       </div>
     </div>

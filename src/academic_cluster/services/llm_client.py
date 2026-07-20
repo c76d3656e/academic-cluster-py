@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from hashlib import sha256
+from types import SimpleNamespace
 from typing import Any
 
 import structlog
@@ -31,6 +32,28 @@ from pydantic import ConfigDict
 from .concurrency import BoundedFifoGate
 
 logger = structlog.get_logger()
+
+
+def _default_routing_policy() -> SimpleNamespace:
+    """Return TOML defaults for compatibility clients outside the provider pool."""
+
+    from .runtime_policy import config_definitions
+
+    definitions = config_definitions()
+    return SimpleNamespace(
+        provider_request_timeout_seconds=float(
+            definitions["provider.request_timeout_seconds"]["value"]
+        ),
+        provider_timeout_retries=int(
+            definitions["provider.timeout_retries"]["value"]
+        ),
+        provider_timeout_grace_seconds=float(
+            definitions["provider.timeout_grace_seconds"]["value"]
+        ),
+        provider_retry_delay_seconds=float(
+            definitions["provider.retry_delay_seconds"]["value"]
+        ),
+    )
 
 _rr_counter = 0
 _llm_request_gate: BoundedFifoGate | None = None
@@ -398,6 +421,9 @@ def create_llm(
     _rr_counter = (_rr_counter + 1) % len(deployments)
     deployment = deployments[_rr_counter]
     params = deployment["litellm_params"]
+    routing_policy = pool.routing_policy
+    if routing_policy is None:
+        raise RuntimeError("LLM pool is missing its runtime routing policy")
 
     # 始终使用 provider 自身配置的模型名（不同 provider 模型不通用）
     litellm_model = params["model"]
@@ -409,7 +435,7 @@ def create_llm(
         api_key=params["api_key"],
         base_url=params.get("api_base"),
         max_tokens=max_tokens,  # type: ignore[call-arg]
-        timeout=300,  # 单次 HTTP 请求超时 5 分钟——匹配 KG task timeout
+        timeout=routing_policy.provider_request_timeout_seconds,
     )
     # 在 llm 对象上附加 provider 别名和路由分组名，供 ainvoke_with_callbacks 读取
     model_info = deployment.get("model_info", {}) or {}
@@ -419,7 +445,10 @@ def create_llm(
     llm._provider_alias = model_info.get("provider_alias", "") or deployment.get(  # type: ignore[attr-defined]
         "model_name", ""
     )
-    llm._provider_rpm_limit = int(params.get("rpm") or 10)  # type: ignore[attr-defined]
+    llm._provider_rpm_limit = int(  # type: ignore[attr-defined]
+        params.get("rpm") or routing_policy.provider_default_rpm
+    )
+    llm._routing_policy = routing_policy  # type: ignore[attr-defined]
     llm._requested_model = actual_model  # type: ignore[attr-defined]
     llm._upstream_model = actual_model  # type: ignore[attr-defined]
     llm._api_base_url = params.get("api_base")  # type: ignore[attr-defined]
@@ -430,7 +459,11 @@ def create_llm(
 
 
 async def ainvoke_with_callbacks(
-    llm: Any, input: Any, config: Any = None, timeout: float = 300.0, **kwargs: Any
+    llm: Any,
+    input: Any,
+    config: Any = None,
+    timeout: float | None = None,
+    **kwargs: Any,
 ) -> Any:
     """
     包装 LLM 调用，手动追踪 token 用量和持久化到 DB。
@@ -459,6 +492,14 @@ async def ainvoke_with_callbacks(
 
     start_time = _time.monotonic()
     base_llm, bound_kwargs = _unwrap_bound_llm(llm)
+    routing_policy = getattr(base_llm, "_routing_policy", None)
+    if routing_policy is None:
+        routing_policy = _default_routing_policy()
+    effective_timeout = float(
+        timeout
+        if timeout is not None
+        else routing_policy.provider_request_timeout_seconds
+    )
     project_id = get_current_project()
     execution_id = get_current_execution()
     agent_phase = get_current_agent_phase()
@@ -512,7 +553,7 @@ async def ainvoke_with_callbacks(
                 input_preview=_preview_value(input),
                 request_metadata={
                     "node_name": node_name,
-                    "timeout_s": timeout,
+                    "timeout_s": effective_timeout,
                     "temperature": _temperature,
                     "max_tokens": _max_tokens,
                     "provider_alias": provider_alias,
@@ -543,7 +584,7 @@ async def ainvoke_with_callbacks(
             router_kwargs = {**bound_kwargs, **kwargs}
             router_kwargs.pop("config", None)
 
-            max_retries = 2
+            max_retries = routing_policy.provider_timeout_retries
             last_timeout_error = None
             for attempt in range(max_retries):
                 try:
@@ -555,13 +596,17 @@ async def ainvoke_with_callbacks(
                                 messages=messages,
                                 temperature=_temperature,
                                 max_tokens=_max_tokens,
-                                timeout=timeout,
+                                timeout=effective_timeout,
                                 frequency_penalty=0.5,
                                 **router_kwargs,
                             )
                         )
                         _done, _ = await asyncio.wait(
-                            [invoke_task], timeout=timeout + 60
+                            [invoke_task],
+                            timeout=(
+                                effective_timeout
+                                + routing_policy.provider_timeout_grace_seconds
+                            ),
                         )
                         if _done:
                             completed_task = invoke_task
@@ -572,13 +617,17 @@ async def ainvoke_with_callbacks(
                             await _cancel_and_wait(invoke_task)
                             invoke_task = None
                             raise TimeoutError(
-                                f"LLM call timed out after {timeout + 60}s"
+                                "LLM call timed out after "
+                                f"{effective_timeout + routing_policy.provider_timeout_grace_seconds}s"
                             )
                     break  # success
                 except TimeoutError as te:
                     last_timeout_error = te
                     if attempt < max_retries - 1:
-                        wait_s = 1.0 + random.uniform(0.0, 0.5)
+                        wait_s = (
+                            routing_policy.provider_retry_delay_seconds
+                            + random.uniform(0.0, 0.5)
+                        )
                         logger.warning(
                             "LLM call timed out, retrying",
                             attempt=attempt + 1,
@@ -607,7 +656,9 @@ async def ainvoke_with_callbacks(
                 invoke_task = asyncio.create_task(
                     llm.ainvoke(input, config=config, **kwargs)
                 )
-                _done, _ = await asyncio.wait([invoke_task], timeout=timeout)
+                _done, _ = await asyncio.wait(
+                    [invoke_task], timeout=effective_timeout
+                )
                 if _done:
                     completed_task = invoke_task
                     assert completed_task is not None
@@ -617,7 +668,9 @@ async def ainvoke_with_callbacks(
                 else:
                     await _cancel_and_wait(invoke_task)
                     invoke_task = None
-                    raise TimeoutError(f"LLM call timed out after {timeout}s")
+                    raise TimeoutError(
+                        f"LLM call timed out after {effective_timeout}s"
+                    )
 
     except asyncio.CancelledError:
         await _cancel_and_wait(invoke_task)
@@ -643,7 +696,11 @@ async def ainvoke_with_callbacks(
     except Exception as e:
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
         is_timeout = isinstance(e, asyncio.TimeoutError)
-        err_msg = f"LLM call timed out after {timeout}s" if is_timeout else str(e)
+        err_msg = (
+            f"LLM call timed out after {effective_timeout}s"
+            if is_timeout
+            else str(e)
+        )
         if db and call_id:
             try:
                 await db.finish_llm_call(
@@ -658,7 +715,12 @@ async def ainvoke_with_callbacks(
                     error=str(persist_error),
                     node=node_name,
                 )
-        logger.error(err_msg, node=node_name, timeout_s=timeout, elapsed_ms=elapsed_ms)
+        logger.error(
+            err_msg,
+            node=node_name,
+            timeout_s=effective_timeout,
+            elapsed_ms=elapsed_ms,
+        )
         raise
 
     elapsed_ms = int((_time.monotonic() - start_time) * 1000)

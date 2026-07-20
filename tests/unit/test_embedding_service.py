@@ -16,18 +16,23 @@ from academic_cluster.services.observability import (
     push_current_project,
 )
 
+DEFAULT_TEST_EMBEDDING_DIMENSIONS = 1024
+
 
 class _FakeDatabase:
     def __init__(self, existing: set[str]) -> None:
         self.existing = existing
+        self.requested_dimensions: int | None = None
 
     async def get_existing_embedding_paper_ids(
         self,
         paper_ids: list[str],
         *,
         model_name: str,
+        dimensions: int | None = None,
     ) -> set[str]:
         assert model_name == "embedding-provider"
+        self.requested_dimensions = dimensions
         return self.existing & set(paper_ids)
 
 
@@ -68,7 +73,7 @@ class _FakeVectorStore:
         model_name: str,
     ) -> None:
         self.paper_ids = paper_ids
-        assert embeddings == [[0.1] * embedding_service.EMBEDDING_DIMENSIONS]
+        assert embeddings == [[0.1] * DEFAULT_TEST_EMBEDDING_DIMENSIONS]
         assert model_name == "embedding-provider"
 
 
@@ -84,7 +89,7 @@ async def test_ensure_embeddings_only_generates_missing(
     async def fake_embedding_request(**kwargs: Any) -> Any:
         embedding_request.update(kwargs)
         return SimpleNamespace(
-            data=[{"embedding": [0.1] * embedding_service.EMBEDDING_DIMENSIONS}]
+            data=[{"embedding": [0.1] * DEFAULT_TEST_EMBEDDING_DIMENSIONS}]
         )
 
     fake_pool = SimpleNamespace(
@@ -118,6 +123,7 @@ async def test_ensure_embeddings_only_generates_missing(
 
     assert count == 2
     assert fake_store.paper_ids == ["p2"]
+    assert fake_db.requested_dimensions == DEFAULT_TEST_EMBEDDING_DIMENSIONS
     assert embedding_request == {
         "model": "embedding-provider",
         "input": ["Missing"],
@@ -128,7 +134,7 @@ async def test_ensure_embeddings_only_generates_missing(
 async def test_generate_embedding_accepts_litellm_model_items(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    expected = [0.1] * embedding_service.EMBEDDING_DIMENSIONS
+    expected = [0.1] * DEFAULT_TEST_EMBEDDING_DIMENSIONS
 
     async def fake_embedding_request(**kwargs: Any) -> Any:
         assert kwargs == {"model": "embedding-provider", "input": ["paper text"]}
@@ -155,7 +161,7 @@ async def test_generate_embedding_accepts_litellm_model_items(
 async def test_generate_embedding_persists_successful_provider_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    expected = [0.1] * embedding_service.EMBEDDING_DIMENSIONS
+    expected = [0.1] * DEFAULT_TEST_EMBEDDING_DIMENSIONS
     db = _AuditDatabase()
     primary = {
         "model_name": "embedding-provider",
@@ -276,15 +282,33 @@ async def test_generate_embedding_persists_provider_failure(
     "values",
     [
         [],
-        [0.1, 0.2],
-        [float("nan")] * embedding_service.EMBEDDING_DIMENSIONS,
-        [True] * embedding_service.EMBEDDING_DIMENSIONS,
+        [float("nan")] * DEFAULT_TEST_EMBEDDING_DIMENSIONS,
+        [True] * DEFAULT_TEST_EMBEDDING_DIMENSIONS,
         "not-a-vector",
     ],
 )
 def test_embedding_validation_rejects_incompatible_vectors(values: Any) -> None:
     with pytest.raises(RuntimeError):
         embedding_service._validated_embedding(values)
+
+
+def test_embedding_validation_explains_configured_dimension_mismatch() -> None:
+    with pytest.raises(RuntimeError, match="configured target is 1024") as error:
+        embedding_service._validated_embedding(
+            [0.1] * 4086,
+            expected_dimensions=1024,
+        )
+
+    assert "Set embedding.target_dimensions to 4086" in str(error.value)
+
+
+def test_embedding_validation_accepts_supported_high_dimension_vector() -> None:
+    vector = embedding_service._validated_embedding(
+        [0.1] * 4086,
+        expected_dimensions=4086,
+    )
+
+    assert len(vector) == 4086
 
 
 @pytest.mark.asyncio
@@ -311,6 +335,7 @@ async def test_embedding_failure_cancels_sibling_tasks(
         text: str,
         _timeout: float,
         _model_name: str,
+        _expected_dimensions: int | None = None,
     ) -> list[float]:
         if text == "fails":
             await sibling_started.wait()
@@ -320,7 +345,7 @@ async def test_embedding_failure_cancels_sibling_tasks(
             await asyncio.Event().wait()
         finally:
             sibling_cancelled.set()
-        return [0.1] * embedding_service.EMBEDDING_DIMENSIONS
+        return [0.1] * DEFAULT_TEST_EMBEDDING_DIMENSIONS
 
     monkeypatch.setattr(
         "academic_cluster.services.database.get_database",

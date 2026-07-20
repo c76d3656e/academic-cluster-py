@@ -68,6 +68,7 @@ class VectorStoreService:
         threshold: float = 0.5,
         *,
         model_name: str,
+        dimensions: int | None = None,
     ) -> list[dict[str, Any]]:
         """
         获取 KNN 图
@@ -90,6 +91,7 @@ class VectorStoreService:
                         FROM embeddings
                         WHERE paper_id = ANY(CAST(:paper_ids AS uuid[]))
                           AND model_name = :model_name
+                          AND (:dimensions IS NULL OR dimensions = :dimensions)
                           AND vector IS NOT NULL
                         ORDER BY paper_id, created_at DESC
                     )
@@ -110,6 +112,7 @@ class VectorStoreService:
                     "neighbor_count": k,
                     "threshold": threshold,
                     "model_name": model_name,
+                    "dimensions": dimensions,
                 },
             )
             rows = result.fetchall()

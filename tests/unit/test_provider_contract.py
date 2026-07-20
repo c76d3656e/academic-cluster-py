@@ -65,9 +65,9 @@ class _LegacyOnlyProviderSession:
     async def execute(self, statement: Any, params: Any = None) -> _Result:
         sql = str(statement)
         self.statements.append(sql)
-        supported_filter = "kind IN ('llm', 'embedding')" in sql
+        supported_filter = "kind IN ('llm', 'embedding', 'rerank')" in sql
         if "COUNT(*)" in sql:
-            return _Result(scalar_value=0 if supported_filter else 1)
+            return _Result(scalar_value=1 if supported_filter else 0)
         legacy_row = (
             "rerank",
             "legacy-reranker",
@@ -77,7 +77,7 @@ class _LegacyOnlyProviderSession:
             10,
             100,
         )
-        return _Result(rows=[] if supported_filter else [legacy_row])
+        return _Result(rows=[legacy_row] if supported_filter else [])
 
 
 class _RecordingSession:
@@ -135,13 +135,15 @@ def _provider_settings(api_key: str = "rotated-key") -> SimpleNamespace:
     )
 
 
-def test_provider_create_rejects_legacy_rerank_kind() -> None:
-    with pytest.raises(ValidationError):
-        ProviderCreateRequest(
-            kind="rerank",
-            display_name="legacy-reranker",
-            base_url="https://legacy.invalid",
-        )
+def test_provider_create_accepts_rerank_kind() -> None:
+    request = ProviderCreateRequest(
+        kind="rerank",
+        display_name="primary-reranker",
+        base_url="https://rerank.example/v1/rerank",
+        model="rerank-model",
+    )
+
+    assert request.kind == "rerank"
 
 
 @pytest.mark.parametrize(
@@ -264,7 +266,7 @@ async def test_single_provider_fallback_canonicalizes_prefixed_models(
     )
 
     async def _empty_registry() -> tuple[dict[str, list[dict[str, Any]]], bool]:
-        return {"llm": [], "embedding": []}, False
+        return {"llm": [], "embedding": [], "rerank": []}, False
 
     monkeypatch.setattr(
         provider_pool,
@@ -320,7 +322,7 @@ def test_litellm_router_enables_rate_checks_and_cooldowns(
     assert captured["disable_cooldowns"] is False
 
 
-async def test_provider_pool_ignores_legacy_rerank_only_registry(
+async def test_provider_pool_loads_rerank_only_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _LegacyOnlyProviderSession()
@@ -335,11 +337,15 @@ async def test_provider_pool_ignores_legacy_rerank_only_registry(
         registry_has_rows,
     ) = await provider_pool._load_enabled_provider_configs_from_db()
 
-    assert registry_has_rows is False
-    assert configs == {"llm": [], "embedding": []}
+    assert registry_has_rows is True
+    assert configs["llm"] == []
+    assert configs["embedding"] == []
+    assert configs["rerank"][0]["name"] == "legacy-reranker"
+    assert configs["rerank"][0]["model"] == "reranker"
     assert len(session.statements) == 2
     assert all(
-        "kind IN ('llm', 'embedding')" in statement for statement in session.statements
+        "kind IN ('llm', 'embedding', 'rerank')" in statement
+        for statement in session.statements
     )
 
 
@@ -357,7 +363,7 @@ async def test_production_init_clears_stale_pools_before_env_fallback(
     )
 
     async def _empty_registry() -> tuple[dict[str, list[dict[str, Any]]], bool]:
-        return {"llm": [], "embedding": []}, False
+        return {"llm": [], "embedding": [], "rerank": []}, False
 
     monkeypatch.setattr(provider_pool, "_llm_pool", stale_llm)
     monkeypatch.setattr(provider_pool, "_embedding_pool", stale_embedding)
@@ -375,7 +381,7 @@ async def test_production_init_clears_stale_pools_before_env_fallback(
     assert provider_pool._embedding_pool is None
 
 
-async def test_admin_listing_hides_rerank_even_when_requested() -> None:
+async def test_admin_listing_includes_rerank_when_requested() -> None:
     session = _RecordingSession()
 
     response = await list_providers(
@@ -386,7 +392,7 @@ async def test_admin_listing_hides_rerank_even_when_requested() -> None:
 
     assert response.total == 0
     sql, params = session.calls[0]
-    assert "kind IN ('llm', 'embedding')" in sql
+    assert "kind IN ('llm', 'embedding', 'rerank')" in sql
     assert "kind = :kind" in sql
     assert params == {"kind": "rerank"}
 
@@ -407,10 +413,24 @@ async def test_embedding_health_check_accepts_pgvector_compatible_response(
     )
 
 
+async def test_embedding_health_check_reports_configured_dimension_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _HttpResponse({"data": [{"embedding": [0.25] * 768}]})
+    monkeypatch.setattr("httpx.AsyncClient", lambda **_kwargs: _HttpClient(response))
+
+    with pytest.raises(RuntimeError, match="configured target is 1024") as error:
+        await provider_admin._test_embedding(
+            "https://embedding.example/v1",
+            "api-key",
+            "embedding-model",
+        )
+    assert "Set embedding.target_dimensions to 768" in str(error.value)
+
+
 @pytest.mark.parametrize(
     ("vector", "error"),
     [
-        ([0.25] * 3, "incompatible vector dimension"),
         ([float("nan")] + [0.25] * 1023, "non-finite values"),
         (["not-a-number"] + [0.25] * 1023, "non-numeric values"),
     ],
@@ -432,6 +452,21 @@ async def test_embedding_health_check_rejects_incompatible_vector(
             "api-key",
             "embedding-model",
         )
+
+
+async def test_rerank_health_check_accepts_ranked_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _HttpResponse(
+        {"results": [{"index": 0, "relevance_score": 0.99}]}
+    )
+    monkeypatch.setattr("httpx.AsyncClient", lambda **_kwargs: _HttpClient(response))
+
+    await provider_admin._test_rerank(
+        "https://rerank.example/v1",
+        "api-key",
+        "rerank-model",
+    )
 
 
 async def test_environment_seed_updates_and_reencrypts_legacy_row(

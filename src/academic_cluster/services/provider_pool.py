@@ -1,7 +1,7 @@
 """
 Provider Pool - 基于 LiteLLM Router 的多端点负载均衡
 
-LLM / Embedding 使用 LiteLLM Router（内置 RPM 限速、故障转移、加权轮询）。
+LLM / Embedding 使用 LiteLLM Router；rerank 使用同一 Registry 的 HTTP 路由配置。
 """
 
 import json
@@ -10,6 +10,12 @@ from typing import Any
 import structlog
 
 logger = structlog.get_logger()
+
+
+def _toml_default_rpm() -> int:
+    from .runtime_policy import config_definitions
+
+    return int(config_definitions()["provider.default_rpm"]["value"])
 
 
 def _normalize_openai_model(model: str) -> tuple[str, str]:
@@ -53,11 +59,17 @@ class LiteLLMPool:
     """
 
     def __init__(
-        self, service_name: str, model_list: list[dict[str, Any]], **router_kwargs: Any
+        self,
+        service_name: str,
+        model_list: list[dict[str, Any]],
+        *,
+        routing_policy: Any | None = None,
+        **router_kwargs: Any,
     ) -> None:
         self.service_name = service_name
         self._model_list = model_list
         self._router_kwargs = router_kwargs
+        self.routing_policy = routing_policy
         self._router: Any = None
 
     def _ensure_router(self) -> None:
@@ -67,18 +79,38 @@ class LiteLLMPool:
 
         from litellm import Router  # type: ignore[attr-defined]
 
+        if self.routing_policy is None:
+            from .runtime_policy import config_definitions
+
+            definitions = config_definitions()
+
+            def policy_value(key: str) -> str:
+                return str(definitions[key]["value"])
+
+            router_retries = int(policy_value("provider.router_retries"))
+            request_timeout = float(policy_value("provider.request_timeout_seconds"))
+            retry_after = float(policy_value("provider.retry_delay_seconds"))
+            allowed_failures = int(policy_value("provider.allowed_failures"))
+            cooldown_seconds = float(policy_value("provider.cooldown_seconds"))
+        else:
+            router_retries = self.routing_policy.provider_router_retries
+            request_timeout = self.routing_policy.provider_request_timeout_seconds
+            retry_after = self.routing_policy.provider_retry_delay_seconds
+            allowed_failures = self.routing_policy.provider_allowed_failures
+            cooldown_seconds = self.routing_policy.provider_cooldown_seconds
+
         self._router = Router(
             model_list=self._model_list,
             routing_strategy="simple-shuffle",
             # The audited client owns the request-level retry budget. Keep a
             # single Router retry for provider failover without multiplying a
             # transient outage into nested retry storms.
-            num_retries=1,
-            timeout=300,
-            retry_after=2,
+            num_retries=router_retries,
+            timeout=request_timeout,
+            retry_after=max(0, int(retry_after)),
             enable_pre_call_checks=True,
-            allowed_fails=3,
-            cooldown_time=60,
+            allowed_fails=allowed_failures,
+            cooldown_time=cooldown_seconds,
             disable_cooldowns=False,
             **self._router_kwargs,
         )
@@ -104,8 +136,13 @@ class LiteLLMPool:
         """获取所有部署配置"""
         return self._model_list
 
-    def get_total_rpm_limit(self, default_per_deployment: int = 10) -> int:
+    def get_total_rpm_limit(self, default_per_deployment: int | None = None) -> int:
         """Return the summed configured RPM budget for this pool."""
+        default_per_deployment = (
+            _toml_default_rpm()
+            if default_per_deployment is None
+            else default_per_deployment
+        )
         total = 0
         for deployment in self._model_list:
             params = deployment.get("litellm_params", {})
@@ -123,6 +160,7 @@ class LiteLLMPool:
 
 _llm_pool: LiteLLMPool | None = None
 _embedding_pool: LiteLLMPool | None = None
+_rerank_providers: list[dict[str, Any]] = []
 
 
 def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict[str, Any]]:
@@ -174,7 +212,7 @@ def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict[str
             )
             continue
 
-        raw_rpm_limit = item.get("rpm_limit", 10)
+        raw_rpm_limit = item.get("rpm_limit", _toml_default_rpm())
         raw_priority = item.get("priority", 100)
         if isinstance(raw_rpm_limit, bool) or isinstance(raw_priority, bool):
             logger.warning(
@@ -266,15 +304,16 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
             text("""
                 SELECT COUNT(*)
                 FROM provider_registry
-                WHERE kind IN ('llm', 'embedding')
+                WHERE kind IN ('llm', 'embedding', 'rerank')
             """)
         )
         registry_has_rows = bool(total_result.scalar() or 0)
         result = await session.execute(
             text("""
-                SELECT kind, display_name, base_url, model, api_key_enc, rpm_limit, priority
+                SELECT kind, display_name, base_url, model, api_key_enc,
+                       rpm_limit, priority, metadata
                 FROM provider_registry
-                WHERE kind IN ('llm', 'embedding')
+                WHERE kind IN ('llm', 'embedding', 'rerank')
                   AND is_enabled = true
                 ORDER BY kind, priority DESC, created_at ASC
             """)
@@ -284,6 +323,7 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
     configs: dict[str, list[dict[str, Any]]] = {
         "llm": [],
         "embedding": [],
+        "rerank": [],
     }
     for row in rows:
         kind = row[0]
@@ -306,33 +346,46 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
                 "model": row[3] or "",
                 "api_url": row[2] or "",
                 "api_key": api_key,
-                "rpm_limit": row[5] or 10,
+                "rpm_limit": row[5] or _toml_default_rpm(),
                 "priority": row[6] or 100,
+                "metadata": row[7] if len(row) > 7 and isinstance(row[7], dict) else {},
             }
         )
 
     return configs, registry_has_rows
 
 
-def _set_pools_from_configs(configs: dict[str, list[dict[str, Any]]]) -> int:
+def _set_pools_from_configs(
+    configs: dict[str, list[dict[str, Any]]],
+    routing_policy: Any | None = None,
+) -> int:
     """Replace runtime pools from normalized provider configs."""
-    global _llm_pool, _embedding_pool
+    global _llm_pool, _embedding_pool, _rerank_providers
 
     reloaded = 0
 
     llm_model_list = _parse_litellm_model_list(
         json.dumps(configs.get("llm", [])), "llm"
     )
-    _llm_pool = LiteLLMPool("llm", llm_model_list) if llm_model_list else None
+    _llm_pool = (
+        LiteLLMPool("llm", llm_model_list, routing_policy=routing_policy)
+        if llm_model_list
+        else None
+    )
     reloaded += len(llm_model_list)
 
     emb_model_list = _parse_litellm_model_list(
         json.dumps(configs.get("embedding", [])), "embedding"
     )
     _embedding_pool = (
-        LiteLLMPool("embedding", emb_model_list) if emb_model_list else None
+        LiteLLMPool("embedding", emb_model_list, routing_policy=routing_policy)
+        if emb_model_list
+        else None
     )
     reloaded += len(emb_model_list)
+
+    _rerank_providers = list(configs.get("rerank", []))
+    reloaded += len(_rerank_providers)
 
     return reloaded
 
@@ -354,12 +407,15 @@ def require_agent_provider_pools() -> None:
 async def reload_pools_from_db() -> int:
     """Hot reload runtime pools from enabled provider_registry rows."""
     configs, _ = await _load_enabled_provider_configs_from_db()
-    reloaded = _set_pools_from_configs(configs)
+    from .runtime_policy import get_runtime_policy
+
+    reloaded = _set_pools_from_configs(configs, await get_runtime_policy())
     logger.info(
         "Provider pools reloaded from DB",
         reloaded=reloaded,
         llm=len(configs.get("llm", [])),
         embedding=len(configs.get("embedding", [])),
+        rerank=len(configs.get("rerank", [])),
     )
     return reloaded
 
@@ -370,7 +426,7 @@ async def init_pools() -> None:
     provider_registry is the runtime source of truth once it has rows. Environment
     variables are only a bootstrap fallback for an empty registry.
     """
-    global _llm_pool, _embedding_pool
+    global _llm_pool, _embedding_pool, _rerank_providers
 
     from ..config import get_settings
 
@@ -378,6 +434,7 @@ async def init_pools() -> None:
     # production readiness when the current source contains no usable provider.
     _llm_pool = None
     _embedding_pool = None
+    _rerank_providers = []
     settings = get_settings()
 
     try:
@@ -389,12 +446,18 @@ async def init_pools() -> None:
         )
     else:
         if registry_has_rows:
-            reloaded = _set_pools_from_configs(db_configs)
+            from .runtime_policy import get_runtime_policy
+
+            reloaded = _set_pools_from_configs(
+                db_configs,
+                await get_runtime_policy(),
+            )
             logger.info(
                 "Provider pools initialized from DB",
                 reloaded=reloaded,
                 llm=len(db_configs.get("llm", [])),
                 embedding=len(db_configs.get("embedding", [])),
+                rerank=len(db_configs.get("rerank", [])),
             )
             if settings.is_production:
                 require_agent_provider_pools()
@@ -416,13 +479,17 @@ async def init_pools() -> None:
                     "model": litellm_model,
                     "api_key": settings.llm_api_key,
                     "api_base": _normalize_openai_api_base(base_url),
-                    "rpm": 10,
+                "rpm": _toml_default_rpm(),
                 },
                 "model_info": {"provider_alias": settings.llm_provider},
             }
         ]
     if llm_model_list:
-        _llm_pool = LiteLLMPool("llm", llm_model_list)
+        from .runtime_policy import get_runtime_policy
+
+        _llm_pool = LiteLLMPool(
+            "llm", llm_model_list, routing_policy=await get_runtime_policy()
+        )
 
     # --- Embedding Pool ---
     emb_model_list = _parse_litellm_model_list(
@@ -438,18 +505,23 @@ async def init_pools() -> None:
                     "model": litellm_model,
                     "api_key": settings.embedding_api_key,
                     "api_base": _normalize_openai_api_base(settings.embedding_api_url),
-                    "rpm": 10,
+                    "rpm": _toml_default_rpm(),
                 },
                 "model_info": {"provider_alias": settings.embedding_provider},
             }
         ]
     if emb_model_list:
-        _embedding_pool = LiteLLMPool("embedding", emb_model_list)
+        from .runtime_policy import get_runtime_policy
+
+        _embedding_pool = LiteLLMPool(
+            "embedding", emb_model_list, routing_policy=await get_runtime_policy()
+        )
 
     logger.info(
         "Provider pools initialized",
         llm=len(llm_model_list),
         embedding=len(emb_model_list),
+        rerank=len(_rerank_providers),
     )
     if settings.is_production:
         require_agent_provider_pools()
@@ -457,9 +529,10 @@ async def init_pools() -> None:
 
 async def close_pools() -> None:
     """关闭所有池"""
-    global _llm_pool, _embedding_pool
+    global _llm_pool, _embedding_pool, _rerank_providers
     _llm_pool = None
     _embedding_pool = None
+    _rerank_providers = []
     logger.info("Provider pools closed")
 
 
@@ -474,10 +547,10 @@ def get_llm_pool() -> LiteLLMPool:
     return _llm_pool
 
 
-def get_llm_available_slots(default: int = 10) -> int:
+def get_llm_available_slots(default: int | None = None) -> int:
     """Return the current LLM queue capacity derived from enabled providers."""
     if _llm_pool is None:
-        return max(1, default)
+        return max(1, default if default is not None else _toml_default_rpm())
     return _llm_pool.get_total_rpm_limit(default_per_deployment=default)
 
 
@@ -485,3 +558,9 @@ def get_embedding_pool() -> LiteLLMPool:
     if _embedding_pool is None:
         raise RuntimeError("Embedding pool not initialized. Call init_pools() first.")
     return _embedding_pool
+
+
+def get_rerank_providers() -> list[dict[str, Any]]:
+    """Return enabled rerank providers in configured priority order."""
+
+    return [dict(provider) for provider in _rerank_providers]

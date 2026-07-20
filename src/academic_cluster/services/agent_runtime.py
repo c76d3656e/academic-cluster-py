@@ -299,22 +299,33 @@ class AgentRunManager:
                 "Persistent Agent runtime lock is unavailable"
             )
 
+        if db is None:
+            from .database import get_database
+
+            db = get_database()
+
         project_id = str(project["id"])
         owner_id = str(project.get("user_id") or "anonymous")
         topic = str(project.get("query") or "")
         project_config = project.get("config") or {}
-        quality_threshold = _resolve_quality_threshold(project_config)
+        from .runtime_policy import get_runtime_policy
+
+        runtime_policy = await get_runtime_policy(db)
+        if not isinstance(project_config, dict) or "target_papers" not in project_config:
+            target_papers = runtime_policy.default_target_papers
+        if not isinstance(project_config, dict) or "target_words" not in project_config:
+            target_words = runtime_policy.default_target_words
+        quality_threshold = (
+            _resolve_quality_threshold(project_config)
+            if isinstance(project_config, dict) and "quality_threshold" in project_config
+            else runtime_policy.quality_threshold
+        )
         target_papers, target_words = resolve_agent_targets(
             {
                 "target_papers": target_papers,
                 "target_words": target_words,
             }
         )
-        if db is None:
-            from .database import get_database
-
-            db = get_database()
-
         async with self._lock:
             if not self._accepting:
                 raise AgentRuntimeUnavailableError("Agent runtime is shutting down")

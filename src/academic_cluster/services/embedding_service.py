@@ -15,7 +15,10 @@ from .concurrency import BoundedFifoGate
 
 logger = structlog.get_logger()
 
-EMBEDDING_DIMENSIONS = 1024
+# pgvector's unconstrained ``vector`` type can store up to 16,000 dimensions.
+# The runtime deliberately uses the dimension-flexible, exact-query path so an
+# administrator can change a model from 1024 to 4086 dimensions safely.
+MAX_PGVECTOR_DIMENSIONS = 16000
 _embedding_request_gate: BoundedFifoGate | None = None
 _embedding_request_gate_config: tuple[int, int, float] | None = None
 
@@ -153,8 +156,12 @@ def get_active_embedding_model() -> str:
     return model_name
 
 
-def _validated_embedding(values: Any) -> list[float]:
-    """Validate vectors before they can enter the fixed pgvector column."""
+def _validated_embedding(
+    values: Any,
+    *,
+    expected_dimensions: int | None = None,
+) -> list[float]:
+    """Validate vector shape against the administrator-selected target dimension."""
 
     if not isinstance(values, list):
         raise RuntimeError("embedding provider returned a non-list vector")
@@ -164,10 +171,18 @@ def _validated_embedding(values: Any) -> list[float]:
         embedding = [float(value) for value in values]
     except (TypeError, ValueError) as error:
         raise RuntimeError("embedding provider returned non-numeric values") from error
-    if len(embedding) != EMBEDDING_DIMENSIONS:
+    if not embedding or len(embedding) > MAX_PGVECTOR_DIMENSIONS:
         raise RuntimeError(
-            "embedding provider returned an incompatible vector dimension: "
-            f"{len(embedding)}/{EMBEDDING_DIMENSIONS}"
+            "embedding provider returned an unsupported vector dimension: "
+            f"{len(embedding)} (expected 1-{MAX_PGVECTOR_DIMENSIONS})"
+        )
+    if expected_dimensions is not None and len(embedding) != expected_dimensions:
+        raise RuntimeError(
+            "embedding dimension mismatch: configured target is "
+            f"{expected_dimensions}, but provider returned {len(embedding)}. "
+            f"Set embedding.target_dimensions to {len(embedding)} and regenerate "
+            "existing embeddings, or select a model that returns "
+            f"{expected_dimensions} dimensions."
         )
     if not all(math.isfinite(value) for value in embedding):
         raise RuntimeError("embedding provider returned non-finite values")
@@ -178,6 +193,7 @@ async def _generate_embedding(
     text: str,
     timeout: float,
     model_name: str,
+    expected_dimensions: int | None = None,
 ) -> list[float]:
     from .database import get_database
     from .observability import (
@@ -187,6 +203,12 @@ async def _generate_embedding(
     )
     from .provider_pool import get_embedding_pool
 
+    if expected_dimensions is None:
+        from .runtime_policy import config_definitions
+
+        expected_dimensions = int(
+            config_definitions()["embedding.target_dimensions"]["value"]
+        )
     pool = get_embedding_pool()
     deployment = _embedding_deployment(pool, model_name)
     project_id = get_current_project()
@@ -218,7 +240,7 @@ async def _generate_embedding(
                     "timeout_s": timeout,
                     "input_count": 1,
                     "input_characters": len(text),
-                    "dimensions": EMBEDDING_DIMENSIONS,
+                    "expected_dimensions": expected_dimensions,
                 },
                 status="running",
             )
@@ -280,7 +302,10 @@ async def _generate_embedding(
         else getattr(item, "embedding", None)
     )
     try:
-        embedding = _validated_embedding(values)
+        embedding = _validated_embedding(
+            values,
+            expected_dimensions=expected_dimensions,
+        )
     except RuntimeError as error:
         if db is not None:
             await _finish_embedding_audit(
@@ -330,7 +355,7 @@ async def ensure_paper_embeddings(
     *,
     model_name: str | None = None,
     concurrency: int | None = None,
-    timeout: float = 60.0,
+    timeout: float | None = None,
 ) -> int:
     """Ensure every supplied project paper has a persisted embedding."""
 
@@ -355,10 +380,16 @@ async def ensure_paper_embeddings(
     if not resolved_model:
         raise RuntimeError("embedding model name cannot be empty")
 
+    from .runtime_policy import get_runtime_policy
+
+    policy = await get_runtime_policy()
+    expected_dimensions = policy.embedding_target_dimensions
+    request_timeout = timeout or policy.provider_request_timeout_seconds
     db = get_database()
     existing = await db.get_existing_embedding_paper_ids(
         [paper_id for paper_id, _text in normalized],
         model_name=resolved_model,
+        dimensions=expected_dimensions,
     )
     missing = [
         (paper_id, text) for paper_id, text in normalized if paper_id not in existing
@@ -381,7 +412,10 @@ async def ensure_paper_embeddings(
             cached = await cache.get_embedding(paper_id, resolved_model)
             if cached:
                 try:
-                    return paper_id, _validated_embedding(cached)
+                    return paper_id, _validated_embedding(
+                        cached,
+                        expected_dimensions=expected_dimensions,
+                    )
                 except RuntimeError as error:
                     logger.warning(
                         "Ignoring invalid cached embedding",
@@ -389,7 +423,12 @@ async def ensure_paper_embeddings(
                         model_name=resolved_model,
                         error=str(error),
                     )
-            embedding = await _generate_embedding(text, timeout, resolved_model)
+            embedding = await _generate_embedding(
+                text,
+                request_timeout,
+                resolved_model,
+                expected_dimensions,
+            )
             await cache.set_embedding(paper_id, resolved_model, embedding)
             return paper_id, embedding
 

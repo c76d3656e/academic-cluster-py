@@ -74,7 +74,7 @@ async def test_search_links_only_current_project_and_records_audit(
     database = _FakeDatabase(newly_linked)
 
     async def fake_search(**kwargs: Any) -> list[dict[str, Any]]:
-        assert kwargs["limit_per_source"] == 20
+        assert kwargs["limit_per_source"] == 100
         return [
             {"id": "paper-1", "title": "Scoped paper", "year": 2025},
             {"id": "paper-1-copy", "title": "Scoped paper", "year": 2025},

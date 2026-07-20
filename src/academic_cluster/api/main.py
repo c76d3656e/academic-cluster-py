@@ -419,6 +419,71 @@ async def _ensure_observability_schema(db: Any) -> None:
             await session.execute(text(index_sql))
 
 
+async def _ensure_embedding_schema(db: Any) -> None:
+    """Make stored embeddings dimension-flexible and safe for exact KNN queries.
+
+    A dimension-flexible pgvector column accepts up to 16,000 dimensions. HNSW
+    cannot index such a column without fixing one dimension, which would break
+    administrator-controlled model changes. The runtime therefore uses exact
+    similarity queries and a B-tree lookup index for model/dimension filtering.
+    """
+
+    from sqlalchemy import text
+
+    async with db.session() as session:
+        await session.execute(
+            text(
+                "ALTER TABLE embeddings ALTER COLUMN vector TYPE vector "
+                "USING vector::vector"
+            )
+        )
+        await session.execute(
+            text("ALTER TABLE embeddings ADD COLUMN IF NOT EXISTS dimensions INTEGER")
+        )
+        await session.execute(
+            text(
+                "UPDATE embeddings SET dimensions = vector_dims(vector) "
+                "WHERE dimensions IS NULL AND vector IS NOT NULL"
+            )
+        )
+        await session.execute(
+            text(
+                "ALTER TABLE embeddings ALTER COLUMN dimensions DROP DEFAULT"
+            )
+        )
+        await session.execute(
+            text(
+                """
+                DROP INDEX IF EXISTS idx_embeddings_vector;
+                """
+            )
+        )
+        await session.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_embeddings_lookup "
+                "ON embeddings (model_name, dimensions, paper_id)"
+            )
+        )
+        await session.execute(
+            text("""
+                CREATE OR REPLACE FUNCTION search_similar_papers(
+                    query_embedding vector,
+                    match_count INTEGER DEFAULT 10,
+                    match_threshold DOUBLE PRECISION DEFAULT 0.5
+                ) RETURNS TABLE (paper_id UUID, similarity DOUBLE PRECISION)
+                LANGUAGE sql STABLE AS $$
+                    SELECT e.paper_id,
+                           1 - (e.vector <=> query_embedding) AS similarity
+                    FROM embeddings e
+                    WHERE vector_dims(e.vector) = vector_dims(query_embedding)
+                      AND 1 - (e.vector <=> query_embedding) > match_threshold
+                    ORDER BY e.vector <=> query_embedding
+                    LIMIT match_count
+                $$
+            """)
+        )
+
+
 async def _ensure_source_registry_schema(db: Any) -> None:
     """Create source_registry for existing databases."""
     from ..services.source_config import ensure_source_registry_schema
@@ -525,6 +590,7 @@ async def _initialize_application_services(settings: Any) -> None:
 
     try:
         await _ensure_observability_schema(db)
+        await _ensure_embedding_schema(db)
         await _ensure_evidence_card_schema(db)
         await _ensure_source_registry_schema(db)
         await _seed_providers(db, settings)

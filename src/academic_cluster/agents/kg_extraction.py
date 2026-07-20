@@ -439,9 +439,9 @@ def parse_kg_response(response: str) -> dict[str, Any]:
 
 async def _call_llm_with_retry(
     messages: list[Any],
-    max_retries: int = 3,
+    max_retries: int | None = None,
     temperature: float = 0.1,
-    timeout: float = 300,
+    timeout: float | None = None,
 ) -> Any:
     """带重试的 LLM 调用，超时 + 指数退避
 
@@ -452,9 +452,19 @@ async def _call_llm_with_retry(
     """
     from tenacity import retry, stop_after_attempt, wait_exponential
 
+    from ..services.runtime_policy import get_runtime_policy
+
+    policy = await get_runtime_policy()
+    attempts = max_retries or policy.provider_timeout_retries
+    request_timeout = timeout or policy.provider_request_timeout_seconds
+
     @retry(
-        stop=stop_after_attempt(max_retries),
-        wait=wait_exponential(multiplier=2, min=3, max=30),
+        stop=stop_after_attempt(attempts),
+        wait=wait_exponential(
+            multiplier=max(policy.provider_retry_delay_seconds, 0.01),
+            min=policy.provider_retry_delay_seconds,
+            max=policy.provider_timeout_grace_seconds,
+        ),
         reraise=True,
     )
     async def _call() -> Any:
@@ -463,7 +473,7 @@ async def _call_llm_with_retry(
         llm = create_llm(temperature=temperature, max_tokens=None)
         return await asyncio.wait_for(
             ainvoke_with_callbacks(llm, messages),
-            timeout=timeout,
+            timeout=request_timeout,
         )
 
     return await _call()
@@ -511,12 +521,7 @@ async def extract_kg_from_papers_batch(
         HumanMessage(content=prompt),
     ]
 
-    response = await _call_llm_with_retry(
-        messages,
-        max_retries=3,
-        temperature=0.1,
-        timeout=300,
-    )
+    response = await _call_llm_with_retry(messages, temperature=0.1)
 
     # LLM 响应 content 可能是 list（多模态格式）或 string
     raw_content = response.content

@@ -55,7 +55,7 @@ def _pricing_model_candidates(model_name: str | None) -> list[str]:
 class ProviderCreateRequest(BaseModel):
     """创建 Provider 请求"""
 
-    kind: str = Field(..., pattern="^(llm|embedding)$")
+    kind: str = Field(..., pattern="^(llm|embedding|rerank)$")
     display_name: str = Field(..., min_length=1, max_length=100)
     base_url: str = Field(..., min_length=1)
     model: str | None = None
@@ -206,7 +206,7 @@ async def list_providers(
     db: DatabaseService = Depends(get_database),
 ) -> ProviderListResponse:
     """列出所有 Provider"""
-    conditions = ["kind IN ('llm', 'embedding')"]
+    conditions = ["kind IN ('llm', 'embedding', 'rerank')"]
     params: dict[str, Any] = {}
 
     if kind:
@@ -500,6 +500,8 @@ async def test_provider(
             await _test_llm(base_url, api_key, test_model or model)
         elif kind == "embedding":
             await _test_embedding(base_url, api_key, test_model or model)
+        elif kind == "rerank":
+            await _test_rerank(base_url, api_key, test_model or model)
         else:
             raise ValueError(f"Unknown kind: {kind}")
 
@@ -534,6 +536,12 @@ async def test_provider(
         )
 
 
+async def _provider_health_timeout() -> float:
+    from ...services.runtime_policy import get_runtime_policy
+
+    return (await get_runtime_policy()).provider_request_timeout_seconds
+
+
 async def _test_llm(base_url: str, api_key: str, model: str) -> None:
     """测试 LLM 端点（发送最小请求）"""
     import httpx
@@ -543,7 +551,7 @@ async def _test_llm(base_url: str, api_key: str, model: str) -> None:
         url += "/v1"
     url += "/chat/completions"
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=await _provider_health_timeout()) as client:
         resp = await client.post(
             url,
             headers={
@@ -569,7 +577,7 @@ async def _test_embedding(base_url: str, api_key: str, model: str) -> None:
         url += "/v1"
     url += "/embeddings"
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=await _provider_health_timeout()) as client:
         resp = await client.post(
             url,
             headers={
@@ -589,8 +597,58 @@ async def _test_embedding(base_url: str, api_key: str, model: str) -> None:
             raise RuntimeError("embedding provider returned an invalid response")
 
         from ...services.embedding_service import _validated_embedding
+        from ...services.runtime_policy import get_runtime_policy
 
-        _validated_embedding(data[0].get("embedding"))
+        _validated_embedding(
+            data[0].get("embedding"),
+            expected_dimensions=(await get_runtime_policy()).embedding_target_dimensions,
+        )
+
+
+def _rerank_endpoint(base_url: str) -> str:
+    url = base_url.strip().rstrip("/")
+    if url.casefold().endswith("/rerank"):
+        return url
+    if not url.casefold().endswith("/v1"):
+        url += "/v1"
+    return url + "/rerank"
+
+
+async def _test_rerank(base_url: str, api_key: str, model: str) -> None:
+    """Test an OpenAI-compatible rerank endpoint with two small documents."""
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=await _provider_health_timeout()) as client:
+        resp = await client.post(
+            _rerank_endpoint(base_url),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "query": "academic retrieval",
+                "documents": ["academic retrieval", "unrelated document"],
+                "top_n": 2,
+                "return_documents": False,
+            },
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            payload = resp.json()
+        except ValueError as error:
+            raise RuntimeError("rerank provider returned invalid JSON") from error
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list) or not results:
+            raise RuntimeError("rerank provider returned an invalid response")
+        for item in results:
+            if not isinstance(item, dict) or not isinstance(item.get("index"), int):
+                raise RuntimeError("rerank provider returned an invalid result index")
+            score = item.get("relevance_score", item.get("score"))
+            if not isinstance(score, int | float):
+                raise RuntimeError("rerank provider returned an invalid relevance score")
 
 
 async def _update_health(

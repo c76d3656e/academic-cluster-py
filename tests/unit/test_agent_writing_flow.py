@@ -60,6 +60,11 @@ def test_section_source_ranking_does_not_mutate_shared_reference_map() -> None:
     assert [reference["paper_id"] for reference in references] == original_order
 
 
+def test_review_body_minimum_allows_five_percent_tolerance() -> None:
+    assert agent_graph._minimum_review_word_units(12000) == 4560
+    assert agent_graph._minimum_review_word_units(1000) == 380
+
+
 @pytest.mark.asyncio
 async def test_writing_renumbers_by_first_use_and_drops_uncited_references(
     monkeypatch: pytest.MonkeyPatch,

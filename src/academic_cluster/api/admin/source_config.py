@@ -10,6 +10,7 @@ from ...services.database import DatabaseService, get_database
 from ...services.source_config import (
     append_source_config_value,
     clear_source_config,
+    list_academic_sources,
     upsert_source_config,
 )
 from ...services.source_config import (
@@ -38,6 +39,7 @@ class SourceConfigItem(BaseModel):
 
 class SourceConfigListResponse(BaseModel):
     configs: list[SourceConfigItem]
+    sources: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class UpdateSourceConfigRequest(BaseModel):
@@ -62,7 +64,8 @@ async def list_source_configs(
 ) -> SourceConfigListResponse:
     configs = await list_source_configs_service(db)
     return SourceConfigListResponse(
-        configs=[SourceConfigItem(**item) for item in configs]
+        configs=[SourceConfigItem(**item) for item in configs],
+        sources=list_academic_sources(),
     )
 
 

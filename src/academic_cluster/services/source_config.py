@@ -30,6 +30,16 @@ class SourceDefinition:
     supports_multiple: bool = False
 
 
+@dataclass(frozen=True)
+class AcademicSource:
+    key: str
+    label: str
+    description: str
+    authentication: str
+    rate_limit_hint: str
+    configuration_keys: tuple[str, ...] = ()
+
+
 SOURCE_DEFINITIONS: tuple[SourceDefinition, ...] = (
     SourceDefinition(
         key="semantic_scholar_api_key",
@@ -53,6 +63,49 @@ SOURCE_DEFINITIONS: tuple[SourceDefinition, ...] = (
 )
 
 SOURCE_DEFINITION_BY_KEY = {item.key: item for item in SOURCE_DEFINITIONS}
+
+
+ACADEMIC_SOURCES: tuple[AcademicSource, ...] = (
+    AcademicSource(
+        key="semantic_scholar",
+        label="Semantic Scholar",
+        description="文献元数据、摘要、引文与参考文献检索。支持多个 API Key 池化。",
+        authentication="可选 API Key，支持逗号分隔多 Key",
+        rate_limit_hint="无 Key 约 1 req/s；每个 Key 独立限流槽位",
+        configuration_keys=("semantic_scholar_api_key",),
+    ),
+    AcademicSource(
+        key="pubmed",
+        label="PubMed / NCBI",
+        description="生命科学与医学文献检索；必须提供联系邮箱。",
+        authentication="联系邮箱必填；API Key 可选",
+        rate_limit_hint="无 Key 约 3 req/s；配置 Key 后约 10 req/s",
+        configuration_keys=("pubmed_email", "pubmed_api_key"),
+    ),
+    AcademicSource(
+        key="openalex",
+        label="OpenAlex",
+        description="开放学术作品检索；复用联系邮箱加入 polite pool。",
+        authentication="无需独立 Key；复用 PubMed 联系邮箱",
+        rate_limit_hint="polite pool 约 10 req/s",
+        configuration_keys=("pubmed_email",),
+    ),
+    AcademicSource(
+        key="crossref",
+        label="Crossref",
+        description="DOI、期刊与引用元数据检索；复用联系邮箱作为 User-Agent。",
+        authentication="无需独立 Key；复用 PubMed 联系邮箱",
+        rate_limit_hint="polite pool 约 5 req/s",
+        configuration_keys=("pubmed_email",),
+    ),
+    AcademicSource(
+        key="arxiv",
+        label="arXiv",
+        description="预印本文献检索，不需要账户或密钥。",
+        authentication="无需认证",
+        rate_limit_hint="约 1 request / 3 seconds",
+    ),
+)
 
 
 def _env_value(key: str) -> str | None:
@@ -200,6 +253,22 @@ async def list_source_configs(
         )
 
     return configs
+
+
+def list_academic_sources() -> list[dict[str, Any]]:
+    """Return the non-secret academic source capability catalog for the admin UI."""
+
+    return [
+        {
+            "key": source.key,
+            "label": source.label,
+            "description": source.description,
+            "authentication": source.authentication,
+            "rate_limit_hint": source.rate_limit_hint,
+            "configuration_keys": list(source.configuration_keys),
+        }
+        for source in ACADEMIC_SOURCES
+    ]
 
 
 async def upsert_source_config(
