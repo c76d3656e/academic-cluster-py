@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Awaitable, Callable
 
 from starlette.responses import JSONResponse
@@ -24,7 +25,21 @@ def _header_map(scope: Scope) -> dict[str, str]:
 def _client_ip(scope: Scope, settings: Settings) -> str:
     client = scope.get("client")
     peer = str(client[0]) if client else "unknown"
-    if peer not in settings.trusted_proxy_ip_list:
+    try:
+        peer_address = ipaddress.ip_address(peer)
+    except ValueError:
+        peer_address = None
+    trusted = False
+    for rule in settings.trusted_proxy_ip_list:
+        try:
+            if peer_address in ipaddress.ip_network(rule, strict=False):
+                trusted = True
+                break
+        except (TypeError, ValueError):
+            if peer == rule:
+                trusted = True
+                break
+    if not trusted:
         return peer
     forwarded = _header_map(scope).get("x-forwarded-for", "")
     return forwarded.split(",", 1)[0].strip() or peer
@@ -37,13 +52,44 @@ class RequestSecurityMiddleware:
         self.app = app
         self.settings = settings
 
-    async def _reject(self, scope: Scope, receive: Receive, send: Send, response: JSONResponse) -> None:
+    async def _reject(
+        self, scope: Scope, receive: Receive, send: Send, response: JSONResponse
+    ) -> None:
         await response(scope, receive, send)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         clear_tenant_context()
+
+        async def secure_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend(
+                    [
+                        (b"x-content-type-options", b"nosniff"),
+                        (b"x-frame-options", b"DENY"),
+                        (b"referrer-policy", b"no-referrer"),
+                        (
+                            b"permissions-policy",
+                            b"camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+                        ),
+                        (
+                            b"content-security-policy",
+                            b"default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+                        ),
+                    ]
+                )
+                if self.settings.is_production:
+                    headers.append(
+                        (
+                            b"strict-transport-security",
+                            b"max-age=31536000; includeSubDomains",
+                        )
+                    )
+                message["headers"] = headers
+            await send(message)
+
         try:
-            await self._handle(scope, receive, send)
+            await self._handle(scope, receive, secure_send)
         finally:
             clear_tenant_context()
 
@@ -69,6 +115,8 @@ class RequestSecurityMiddleware:
                 return
 
         path = str(scope.get("path") or "")
+        client_ip = _client_ip(scope, self.settings)
+        scope.setdefault("state", {})["client_ip"] = client_ip
         policies = {
             "/api/auth/login": self.settings.auth_login_rate_limit,
             "/api/auth/register": self.settings.auth_register_rate_limit,
@@ -77,7 +125,7 @@ class RequestSecurityMiddleware:
         if path in policies:
             try:
                 decision = await get_rate_limiter().check(
-                    f"{path}:{_client_ip(scope, self.settings)}",
+                    f"{path}:{client_ip}",
                     limit=policies[path],
                     window_seconds=self.settings.auth_rate_limit_window_seconds,
                 )

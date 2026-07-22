@@ -10,6 +10,7 @@ from typing import Any
 import structlog
 from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ..config import get_settings
 
@@ -447,9 +448,7 @@ async def _ensure_embedding_schema(db: Any) -> None:
             )
         )
         await session.execute(
-            text(
-                "ALTER TABLE embeddings ALTER COLUMN dimensions DROP DEFAULT"
-            )
+            text("ALTER TABLE embeddings ALTER COLUMN dimensions DROP DEFAULT")
         )
         await session.execute(
             text(
@@ -669,11 +668,18 @@ def create_app() -> FastAPI:
         description="学术论文聚类与综述生成系统",
         version="0.1.0",
         lifespan=lifespan,
+        docs_url=None if settings.is_production else "/docs",
+        redoc_url=None if settings.is_production else "/redoc",
+        openapi_url=None if settings.is_production else "/openapi.json",
     )
 
     from .security_middleware import RequestSecurityMiddleware
 
     app.add_middleware(RequestSecurityMiddleware, settings=settings)
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=settings.allowed_host_list,
+    )
 
     # CORS 配置
     # 安全修复: 生产环境不允许 allow_origins=["*"] + allow_credentials=True 的组合

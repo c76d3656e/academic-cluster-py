@@ -115,9 +115,9 @@ cp .env.example .env
 | --- | --- |
 | LLM | <code>LLM_MODEL</code>、<code>LLM_BASE_URL</code>、<code>LLM_API_KEY</code> |
 | Embedding | <code>EMBEDDING_MODEL</code>、<code>EMBEDDING_API_URL</code>、<code>EMBEDDING_API_KEY</code> |
-| PostgreSQL | <code>POSTGRES_HOST</code>、<code>POSTGRES_PORT</code>、<code>POSTGRES_DB</code>、<code>POSTGRES_USER</code>、<code>POSTGRES_PASSWORD</code> |
+| PostgreSQL | 管理迁移账号使用 <code>POSTGRES_USER</code>/<code>POSTGRES_PASSWORD</code>；应用必须使用独立的 <code>APP_POSTGRES_USER</code>/<code>APP_POSTGRES_PASSWORD</code> |
 | Redis | <code>REDIS_HOST</code>、<code>REDIS_PORT</code>、<code>REDIS_PASSWORD</code> |
-| 安全配置 | <code>JWT_SECRET_KEY</code>、<code>PROVIDER_ENCRYPTION_KEY</code> |
+| 安全配置 | <code>JWT_SECRET_KEY</code>、<code>PROVIDER_ENCRYPTION_KEY</code>、<code>ALLOWED_HOSTS</code> |
 
 <code>LLM_PROVIDERS_JSON</code> 与 <code>EMBEDDING_PROVIDERS_JSON</code> 可通过
 LiteLLM 配置多个 OpenAI-compatible endpoint，也可接入本地的
@@ -125,13 +125,15 @@ OpenAI-compatible 模型服务。设置 <code>ADMIN_PASSWORD</code> 后才会初
 在开发环境中留空会跳过管理员创建。
 
 生产环境请设置 <code>APP_ENV=production</code>，使用非占位的强密钥，并在重启之间
-保持 <code>PROVIDER_ENCRYPTION_KEY</code> 不变。
+保持 <code>PROVIDER_ENCRYPTION_KEY</code> 不变。公开注册默认关闭；仅在明确需要时设置
+<code>REGISTRATION_ENABLED=true</code>，并同时配置外部身份验证或邀请流程。
 
 ## Docker 启动
 
 ~~~powershell
 Copy-Item .env.example .env
-# 编辑 .env：至少设置 POSTGRES_PASSWORD、REDIS_PASSWORD、Provider 凭据；
+# 编辑 .env：至少设置 POSTGRES_PASSWORD、APP_POSTGRES_PASSWORD、
+# REDIS_PASSWORD 和 Provider 凭据；两个 PostgreSQL 密码必须不同。
 # 当 APP_ENV=production 时，还需要生产级安全配置。
 docker compose up -d --build
 Invoke-WebRequest http://localhost:8000/health
@@ -150,12 +152,13 @@ curl http://localhost:8000/health
 | --- | --- |
 | 前端 | <code>http://localhost:3000</code> |
 | 后端 API | <code>http://localhost:8000</code> |
-| OpenAPI | <code>http://localhost:8000/docs</code> |
+| OpenAPI | <code>http://localhost:8000/docs</code>，仅非生产环境启用 |
 | 健康检查 | <code>http://localhost:8000/health</code> |
 
 Docker Compose 会向后端容器注入 <code>POSTGRES_HOST=postgres</code> 和
-<code>POSTGRES_PORT=5432</code>。本地宿主进程使用 <code>.env</code> 中的
-PostgreSQL 外部端口，默认是 <code>5433</code>。
+<code>POSTGRES_PORT=5432</code>，并在应用启动前由一次性迁移容器创建无超级用户、
+无 <code>BYPASSRLS</code> 权限的应用角色并应用租户 RLS。本地宿主进程使用
+<code>.env</code> 中的 PostgreSQL 外部端口，默认是 <code>5433</code>。
 
 ## 本地开发
 
@@ -332,6 +335,12 @@ docs/             架构和契约规范
 ## 安全说明
 
 - 不要提交 <code>.env</code>、Provider 密钥、token 或生成的 benchmark 密钥。
+- Refresh Token 只通过 HttpOnly、SameSite Cookie 传输；前端不得把 Access Token
+  或 Refresh Token 写入 localStorage。
+- 项目和派生产物通过组织成员关系、请求级租户上下文和 PostgreSQL RLS 隔离；生产
+  应用账号不得使用 PostgreSQL 超级用户或 <code>BYPASSRLS</code>。
+- Provider 出站地址默认只允许 HTTPS 公网地址；本地私网 Provider 只能在非生产环境
+  通过显式开关启用，且 URL 变化必须同步轮换 API Key。
 - 集成测试必须使用可丢弃数据库。
 - 本地 LLM benchmark 是本地计算，不是确定性 replay；比较时应保留模型、prompt、
   fixture 和输出元数据。

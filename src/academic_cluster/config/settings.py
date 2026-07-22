@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_debug: bool = False
     cors_origins: str | None = None
+    allowed_hosts: str = "localhost,127.0.0.1"
     log_level: str = "INFO"
     max_request_body_bytes: int = Field(default=1_048_576, ge=16_384, le=16_777_216)
     max_project_config_bytes: int = Field(default=65_536, ge=1_024, le=1_048_576)
@@ -121,6 +122,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    refresh_cookie_name: str = "academic_cluster_refresh"
+    auth_allow_legacy_refresh_body: bool = False
 
     provider_encryption_key: str | None = None
     provider_allow_insecure_http: bool = False
@@ -159,6 +162,12 @@ class Settings(BaseSettings):
             value.strip()
             for value in (self.trusted_proxy_ips or "").split(",")
             if value.strip()
+        ]
+
+    @property
+    def allowed_host_list(self) -> list[str]:
+        return [
+            value.strip() for value in self.allowed_hosts.split(",") if value.strip()
         ]
 
     @property
@@ -221,11 +230,22 @@ class Settings(BaseSettings):
             insecure.append("provider_allow_insecure_http")
         if self.provider_allow_private_networks:
             insecure.append("provider_allow_private_networks")
+        if self.auth_allow_legacy_refresh_body:
+            insecure.append("auth_allow_legacy_refresh_body")
         if self.jwt_algorithm not in {"HS256", "HS384", "HS512"}:
             insecure.append("jwt_algorithm")
         origins = self.cors_origin_list
         if "*" in origins:
             insecure.append("cors_origins")
+        if (
+            not self.allowed_host_list
+            or "*" in self.allowed_host_list
+            or all(
+                host.casefold() in {"localhost", "127.0.0.1", "::1"}
+                for host in self.allowed_host_list
+            )
+        ):
+            insecure.append("allowed_hosts")
         if self.cors_origins and (
             not origins
             or any(

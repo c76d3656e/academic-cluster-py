@@ -19,7 +19,7 @@ class UserCreate(BaseModel):
     """用户注册请求"""
 
     email: EmailStr = Field(..., max_length=255)
-    password: str = Field(..., min_length=8, max_length=128)
+    password: str = Field(..., min_length=12, max_length=128)
     full_name: str | None = Field(None, max_length=255)
 
 
@@ -53,7 +53,6 @@ class TokenResponse(BaseModel):
     """Token 响应"""
 
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
 
 
@@ -64,16 +63,7 @@ class RefreshTokenRequest(BaseModel):
 
 
 class UserListResponse(BaseModel):
-    """用户列表响应"""
+    """管理员用户列表响应。"""
 
     users: list[UserResponse]
     total: int
-
-
-class SystemStatsResponse(BaseModel):
-    """系统统计响应"""
-
-    total_users: int
-    total_projects: int
-    total_papers: int
-    active_users: int

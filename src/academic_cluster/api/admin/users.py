@@ -8,7 +8,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from ...models.user import UserListResponse, UserResponse
 from ...services.auth import PasswordService, get_password_service
@@ -28,8 +28,8 @@ router = APIRouter(tags=["admin-users"])
 class AdminCreateUserRequest(BaseModel):
     """管理员创建用户请求"""
 
-    email: str = Field(..., min_length=5, max_length=255)
-    password: str = Field(..., min_length=8, max_length=128)
+    email: EmailStr = Field(..., max_length=255)
+    password: str = Field(..., min_length=12, max_length=128)
     full_name: str | None = Field(None, max_length=255)
     role: str = Field("user", pattern="^(user|admin)$")
 

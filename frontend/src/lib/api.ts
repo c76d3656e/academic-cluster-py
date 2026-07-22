@@ -5,24 +5,34 @@ const baseURL = import.meta.env.VITE_API_URL || '/api'
 export const api = axios.create({
   baseURL,
   timeout: 30_000,
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
 
 type RetryConfig = AxiosRequestConfig & { _retry?: boolean }
 
 export const SESSION_CLEARED_EVENT = 'academic-cluster:session-cleared'
+const SESSION_SYNC_KEY = 'academic-cluster:session-event'
 
 let refreshPromise: Promise<string> | null = null
+let currentAccessToken: string | null = null
+
+export function setAccessToken(token: string | null) {
+  currentAccessToken = token
+}
 
 export function clearSession() {
+  currentAccessToken = null
+  // Remove credentials left by releases that predated HttpOnly refresh cookies.
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
   localStorage.removeItem('user')
+  localStorage.setItem(SESSION_SYNC_KEY, String(Date.now()))
   window.dispatchEvent(new Event(SESSION_CLEARED_EVENT))
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
+  const token = currentAccessToken
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
@@ -65,36 +75,29 @@ export interface User {
 
 export interface TokenResponse {
   access_token: string
-  refresh_token: string
   token_type?: string
 }
 
-async function rotateRefreshToken(refreshToken: string) {
+async function rotateRefreshCookie() {
   try {
-    const { data } = await axios.post<TokenResponse>(`${baseURL}/auth/refresh`, {
-      refresh_token: refreshToken,
-    })
-    localStorage.setItem('access_token', data.access_token)
-    localStorage.setItem('refresh_token', data.refresh_token)
+    const { data } = await axios.post<TokenResponse>(
+      `${baseURL}/auth/refresh`,
+      {},
+      { withCredentials: true },
+    )
+    setAccessToken(data.access_token)
     return data.access_token
   } catch (error) {
-    // Another tab may already have completed a rotation while this request failed.
-    if (localStorage.getItem('refresh_token') === refreshToken) clearSession()
+    clearSession()
     throw error
   }
 }
 
-async function refreshAcrossTabs(expectedRefreshToken: string) {
-  if (!navigator.locks) return rotateRefreshToken(expectedRefreshToken)
+async function refreshAcrossTabs() {
+  if (!navigator.locks) return rotateRefreshCookie()
 
   return navigator.locks.request('academic-cluster:token-refresh', async () => {
-    const currentRefreshToken = localStorage.getItem('refresh_token')
-    const currentAccessToken = localStorage.getItem('access_token')
-    if (currentRefreshToken !== expectedRefreshToken) {
-      if (currentRefreshToken && currentAccessToken) return currentAccessToken
-      throw new Error('The session was cleared while waiting to refresh')
-    }
-    return rotateRefreshToken(currentRefreshToken)
+    return rotateRefreshCookie()
   })
 }
 
@@ -102,13 +105,7 @@ async function refreshAcrossTabs(expectedRefreshToken: string) {
 export function refreshAccessToken(): Promise<string> {
   if (refreshPromise) return refreshPromise
 
-  const refreshToken = localStorage.getItem('refresh_token')
-  if (!refreshToken) {
-    clearSession()
-    return Promise.reject(new Error('No refresh token is available'))
-  }
-
-  refreshPromise = refreshAcrossTabs(refreshToken).finally(() => {
+  refreshPromise = refreshAcrossTabs().finally(() => {
     refreshPromise = null
   })
 
@@ -379,30 +376,11 @@ export const authApi = {
     const { data } = await api.get<User>('/auth/me')
     return data
   },
-  async logout(refresh_token: string) {
-    await api.post('/auth/logout', { refresh_token })
+  async logout() {
+    await api.post('/auth/logout', {})
   },
-  async updateMe(payload: { full_name?: string; password?: string }) {
+  async updateMe(payload: { full_name?: string }) {
     const { data } = await api.put<User>('/auth/me', payload)
-    return data
-  },
-  async listUsers(skip = 0, limit = 50) {
-    const { data } = await api.get<{ users: User[]; total: number }>('/auth/users', { params: { skip, limit } })
-    return data
-  },
-  async changeRole(userId: string, role: string) {
-    await api.put(`/auth/users/${userId}/role`, null, { params: { role } })
-  },
-  async toggleActive(userId: string, is_active: boolean) {
-    await api.put(`/auth/users/${userId}/active`, null, { params: { is_active } })
-  },
-  async stats() {
-    const { data } = await api.get<{
-      total_users: number
-      total_projects: number
-      total_papers: number
-      active_users: number
-    }>('/auth/stats')
     return data
   },
 }
@@ -636,7 +614,7 @@ export function apiErrorMessage(error: unknown, fallback = '请求未完成，�
 }
 
 export function accessToken() {
-  return localStorage.getItem('access_token')
+  return currentAccessToken
 }
 
 export function apiBaseUrl() {

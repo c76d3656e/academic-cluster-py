@@ -23,6 +23,34 @@ logger = structlog.get_logger()
 router = APIRouter(tags=["admin-source-config"])
 
 
+async def _audit_source_change(
+    db: DatabaseService,
+    admin: dict[str, Any],
+    action: str,
+    key: str,
+    item: dict[str, Any],
+) -> None:
+    try:
+        await db.log_activity(
+            user_id=str(admin["id"]),
+            action=f"source.{action}",
+            resource_type="source_config",
+            details={
+                "key": key,
+                "is_enabled": bool(item.get("is_enabled")),
+                "key_count": int(item.get("key_count") or 0),
+                "is_set": bool(item.get("is_set")),
+            },
+        )
+    except Exception as error:
+        logger.warning(
+            "Failed to persist source configuration audit",
+            key=key,
+            action=action,
+            error=str(error),
+        )
+
+
 class SourceConfigItem(BaseModel):
     key: str
     label: str
@@ -91,6 +119,7 @@ async def update_source_config(
         raise HTTPException(status_code=404, detail="Unknown source key") from None
 
     _reset_search_runtime_cache()
+    await _audit_source_change(db, admin, "update", key, item)
     logger.info("Source config updated", key=key, admin_id=admin.get("id"))
     return SourceConfigItem(**item)
 
@@ -115,6 +144,7 @@ async def append_source_config(
         raise HTTPException(status_code=400, detail=str(e)) from None
 
     _reset_search_runtime_cache()
+    await _audit_source_change(db, admin, "append", key, item)
     logger.info("Source config appended", key=key, admin_id=admin.get("id"))
     return SourceConfigItem(**item)
 
@@ -131,6 +161,7 @@ async def delete_source_config(
         raise HTTPException(status_code=404, detail="Unknown source key") from None
 
     _reset_search_runtime_cache()
+    await _audit_source_change(db, admin, "clear", key, item)
     logger.info("Source config cleared", key=key, admin_id=admin.get("id"))
     return SourceConfigItem(**item)
 

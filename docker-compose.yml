@@ -3,7 +3,7 @@ services:
   # PostgreSQL with pgvector
   # =============================================================================
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb
     container_name: academic-cluster-postgres
     restart: unless-stopped
     shm_size: '256mb'
@@ -38,12 +38,13 @@ services:
       start_period: 15s
     networks:
       - academic-cluster-network
+    pids_limit: 256
 
   # =============================================================================
   # Redis Cache
   # =============================================================================
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: academic-cluster-redis
     restart: unless-stopped
     command:
@@ -68,9 +69,10 @@ services:
       start_period: 10s
     networks:
       - academic-cluster-network
+    pids_limit: 128
 
   security-migrate:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg16@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb
     restart: "no"
     environment:
       POSTGRES_HOST: postgres
@@ -110,6 +112,7 @@ services:
       POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?APP_POSTGRES_PASSWORD must be set}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-172.16.0.0/12}
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     depends_on:
@@ -122,6 +125,13 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -134,6 +144,7 @@ services:
       resources:
         limits:
           memory: 4g
+          pids: 512
         reservations:
           memory: 1g
 
@@ -147,16 +158,26 @@ services:
     container_name: academic-cluster-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      - "${FRONTEND_PORT:-3000}:8080"
     depends_on:
       app:
         condition: service_started
     networks:
       - academic-cluster-network
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+      - /var/run:rw,noexec,nosuid,size=4m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
           memory: 256m
+          pids: 128
         reservations:
           memory: 64m
 

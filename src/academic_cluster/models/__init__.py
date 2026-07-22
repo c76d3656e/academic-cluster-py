@@ -2,7 +2,6 @@
 
 from .user import (
     RefreshTokenRequest,
-    SystemStatsResponse,
     TokenResponse,
     UserCreate,
     UserListResponse,
@@ -14,7 +13,6 @@ from .user import (
 
 __all__ = [
     "RefreshTokenRequest",
-    "SystemStatsResponse",
     "TokenResponse",
     "UserCreate",
     "UserListResponse",

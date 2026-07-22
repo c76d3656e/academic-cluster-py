@@ -389,7 +389,10 @@ class DatabaseService:
                     FROM embeddings
                     WHERE paper_id = ANY(:paper_ids)
                       AND model_name = :model_name
-                      AND (:dimensions IS NULL OR dimensions = :dimensions)
+                      AND (
+                          CAST(:dimensions AS INTEGER) IS NULL
+                          OR dimensions = CAST(:dimensions AS INTEGER)
+                      )
                 """),
                 {
                     "paper_ids": paper_ids,
@@ -1126,9 +1129,7 @@ class DatabaseService:
                 {"value": actual_id},
             )
             await session.execute(
-                text(
-                    "SELECT set_config('app.current_organization_id', :value, true)"
-                ),
+                text("SELECT set_config('app.current_organization_id', :value, true)"),
                 {"value": organization_id},
             )
             await session.execute(
@@ -1361,6 +1362,23 @@ class DatabaseService:
                 ),
                 {"user_id": user_id},
             )
+
+    async def increment_user_token_version(self, user_id: str) -> int:
+        """Invalidate every issued access token for a user immediately."""
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    UPDATE users
+                    SET token_version = token_version + 1
+                    WHERE id = :id
+                    RETURNING token_version
+                """),
+                {"id": user_id},
+            )
+            value = result.scalar()
+        if value is None:
+            raise ValueError("user does not exist")
+        return int(value)
 
     # =========================================================================
     # 用户活动日志相关方法

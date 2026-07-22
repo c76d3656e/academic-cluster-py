@@ -91,6 +91,7 @@ packages = ["src/academic_cluster"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "scripts/migrate_agent_tables.sql" = "academic_cluster/sql/migrate_agent_tables.sql"
+"scripts/migrate_security.sql" = "academic_cluster/sql/migrate_security.sql"
 
 [tool.ruff]
 line-length = 88
@@ -155,7 +156,7 @@ skips = ["B101"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "--strict-markers"
+addopts = "--strict-markers -m 'not live'"
 markers = [
     "integration: requires a disposable PostgreSQL or another local integration service",
     "live: calls external provider APIs and is excluded from deterministic CI",

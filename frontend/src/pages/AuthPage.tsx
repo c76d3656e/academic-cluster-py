@@ -119,10 +119,10 @@ export function AuthPage({ mode = 'login' }: { mode?: 'login' | 'register' }) {
                   type={showPassword ? 'text' : 'password'}
                   autoComplete={isRegister ? 'new-password' : 'current-password'}
                   required
-                  minLength={8}
+                  minLength={isRegister ? 12 : 1}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder="至少 8 个字符"
+                  placeholder={isRegister ? '至少 12 个字符' : '输入密码'}
                 />
                 <button
                   type="button"
@@ -142,7 +142,7 @@ export function AuthPage({ mode = 'login' }: { mode?: 'login' | 'register' }) {
                   type="password"
                   autoComplete="new-password"
                   required
-                  minLength={8}
+                  minLength={12}
                   value={confirm}
                   onChange={(event) => setConfirm(event.target.value)}
                   placeholder="再次输入密码"

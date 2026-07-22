@@ -375,7 +375,7 @@ function ProfilePanel({ email, initialName, onSaved }: { email: string; initialN
               <KeyRound size={18} />
               <div>
                 <h3>更改密码</h3>
-                <p>新密码至少需要 8 个字符</p>
+                <p>新密码至少需要 12 个字符</p>
               </div>
             </div>
             <form className="settings-form" onSubmit={savePassword}>
@@ -394,7 +394,7 @@ function ProfilePanel({ email, initialName, onSaved }: { email: string; initialN
                 <Input
                   id="new-password"
                   type="password"
-                  minLength={8}
+                  minLength={12}
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
                   required

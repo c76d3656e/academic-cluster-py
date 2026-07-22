@@ -599,7 +599,7 @@ async def test_provider(
             admin,
             "test",
             provider_id_str,
-            {"kind": kind, "healthy": False, "error": error_msg},
+            {"kind": kind, "healthy": False, "error_type": type(e).__name__},
         )
         logger.warning(
             "Provider health test failed", provider_id=provider_id_str, error=error_msg
@@ -685,7 +685,9 @@ async def _test_embedding(base_url: str, api_key: str, model: str) -> None:
 
         _validated_embedding(
             data[0].get("embedding"),
-            expected_dimensions=(await get_runtime_policy()).embedding_target_dimensions,
+            expected_dimensions=(
+                await get_runtime_policy()
+            ).embedding_target_dimensions,
         )
 
 
@@ -736,7 +738,9 @@ async def _test_rerank(base_url: str, api_key: str, model: str) -> None:
                 raise RuntimeError("rerank provider returned an invalid result index")
             score = item.get("relevance_score", item.get("score"))
             if not isinstance(score, int | float):
-                raise RuntimeError("rerank provider returned an invalid relevance score")
+                raise RuntimeError(
+                    "rerank provider returned an invalid relevance score"
+                )
 
 
 async def _update_health(

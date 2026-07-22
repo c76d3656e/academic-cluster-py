@@ -99,7 +99,9 @@ class CreateProjectRequest(BaseModel):
 
     @field_validator("config")
     @classmethod
-    def validate_config_size(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+    def validate_config_size(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
         if value is None:
             return None
         encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()

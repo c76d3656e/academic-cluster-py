@@ -117,7 +117,9 @@ def _apply_results(
             raise RuntimeError("rerank provider returned an invalid relevance score")
         selected.add(index)
         ranked.append({**papers[index], "rerank_score": float(score)})
-    ranked.extend(papers[index] for index in range(candidate_count) if index not in selected)
+    ranked.extend(
+        papers[index] for index in range(candidate_count) if index not in selected
+    )
     ranked.extend(papers[candidate_count:])
     return ranked
 
@@ -217,7 +219,9 @@ async def _invoke_provider(
             status_code = response.status_code
             response.raise_for_status()
             payload = response.json()
-        if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("results"), list
+        ):
             raise RuntimeError("rerank provider returned an invalid response")
         results = cast(list[dict[str, Any]], payload["results"])
         if db is not None and call_id is not None:

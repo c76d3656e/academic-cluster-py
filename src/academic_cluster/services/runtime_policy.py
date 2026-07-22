@@ -139,10 +139,14 @@ async def get_runtime_policy(db: Any | None = None) -> RuntimePolicy:
         max_phase_attempts=int(values["workflow.max_phase_attempts"]),
         max_research_rounds=int(values["workflow.max_research_rounds"]),
         max_revision_attempts=int(values["workflow.max_revision_attempts"]),
-        search_request_timeout_seconds=float(values["research.request_timeout_seconds"]),
+        search_request_timeout_seconds=float(
+            values["research.request_timeout_seconds"]
+        ),
         search_total_timeout_seconds=float(values["research.total_timeout_seconds"]),
         search_max_retries=int(values["research.max_retries"]),
-        search_retry_after_cap_seconds=float(values["research.retry_after_cap_seconds"]),
+        search_retry_after_cap_seconds=float(
+            values["research.retry_after_cap_seconds"]
+        ),
         search_backoff_cap_seconds=float(values["research.backoff_cap_seconds"]),
         analysis_processing_limit=int(values["analysis.processing_limit"]),
         kg_entities_per_paper=int(values["analysis.kg_entities_per_paper"]),
@@ -154,7 +158,9 @@ async def get_runtime_policy(db: Any | None = None) -> RuntimePolicy:
         knn_similarity_threshold=float(values["analysis.knn_similarity_threshold"]),
         min_references_per_section=int(values["writing.min_references_per_section"]),
         max_references_per_section=int(values["writing.max_references_per_section"]),
-        provider_request_timeout_seconds=float(values["provider.request_timeout_seconds"]),
+        provider_request_timeout_seconds=float(
+            values["provider.request_timeout_seconds"]
+        ),
         provider_router_retries=int(values["provider.router_retries"]),
         provider_timeout_retries=int(values["provider.timeout_retries"]),
         provider_retry_delay_seconds=float(values["provider.retry_delay_seconds"]),
@@ -170,5 +176,7 @@ async def get_runtime_policy(db: Any | None = None) -> RuntimePolicy:
         rerank_failure_mode=values["rerank.failure_mode"],
         rerank_max_concurrent_requests=int(values["rerank.max_concurrent_requests"]),
         rerank_max_queued_requests=int(values["rerank.max_queued_requests"]),
-        rerank_queue_wait_timeout_seconds=float(values["rerank.queue_wait_timeout_seconds"]),
+        rerank_queue_wait_timeout_seconds=float(
+            values["rerank.queue_wait_timeout_seconds"]
+        ),
     )

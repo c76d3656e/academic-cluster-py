@@ -382,10 +382,10 @@ function CreateUserForm({ onCreated, onCancel }: { onCreated: () => void; onCanc
             type="password"
             autoComplete="new-password"
             required
-            minLength={8}
+            minLength={12}
             value={form.password}
             onChange={(event) => setForm({ ...form, password: event.target.value })}
-            placeholder="至少 8 个字符"
+            placeholder="至少 12 个字符"
           />
         </div>
         <div className="field-group">
@@ -395,7 +395,7 @@ function CreateUserForm({ onCreated, onCancel }: { onCreated: () => void; onCanc
             type="password"
             autoComplete="new-password"
             required
-            minLength={8}
+            minLength={12}
             value={form.confirm}
             onChange={(event) => setForm({ ...form, confirm: event.target.value })}
             placeholder="再次输入"
@@ -406,7 +406,7 @@ function CreateUserForm({ onCreated, onCancel }: { onCreated: () => void; onCanc
         <Button type="button" variant="ghost" onClick={onCancel}>
           取消
         </Button>
-        <Button type="submit" disabled={mutation.isPending || !form.email.trim() || form.password.length < 8}>
+        <Button type="submit" disabled={mutation.isPending || !form.email.trim() || form.password.length < 12}>
           {mutation.isPending ? '创建中…' : '创建用户'}
         </Button>
       </div>

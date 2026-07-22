@@ -91,7 +91,10 @@ class VectorStoreService:
                         FROM embeddings
                         WHERE paper_id = ANY(CAST(:paper_ids AS uuid[]))
                           AND model_name = :model_name
-                          AND (:dimensions IS NULL OR dimensions = :dimensions)
+                          AND (
+                              CAST(:dimensions AS INTEGER) IS NULL
+                              OR dimensions = CAST(:dimensions AS INTEGER)
+                          )
                           AND vector IS NOT NULL
                         ORDER BY paper_id, created_at DESC
                     )

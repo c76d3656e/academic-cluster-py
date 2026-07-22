@@ -235,6 +235,8 @@ async def stream_events(
     user = await db.get_user_by_id(user_id)
     if not user or not user.get("is_active", False):
         raise HTTPException(status_code=401, detail="User not found or deactivated")
+    if int(payload.get("ver") or 0) != int(user.get("token_version") or 0):
+        raise HTTPException(status_code=401, detail="Session has been revoked")
 
     from ..services.tenant_context import set_tenant_context
     from .dependencies import project_access_allowed

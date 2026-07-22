@@ -332,6 +332,14 @@ async def test_provider_pool_loads_rerank_only_registry(
         lambda: db,
     )
 
+    async def _safe_url(_url: str) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "academic_cluster.services.url_security.validate_outbound_url",
+        _safe_url,
+    )
+
     (
         configs,
         registry_has_rows,
@@ -457,9 +465,7 @@ async def test_embedding_health_check_rejects_incompatible_vector(
 async def test_rerank_health_check_accepts_ranked_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    response = _HttpResponse(
-        {"results": [{"index": 0, "relevance_score": 0.99}]}
-    )
+    response = _HttpResponse({"results": [{"index": 0, "relevance_score": 0.99}]})
     monkeypatch.setattr("httpx.AsyncClient", lambda **_kwargs: _HttpClient(response))
 
     await provider_admin._test_rerank(

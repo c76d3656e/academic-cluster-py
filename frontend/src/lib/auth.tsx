@@ -1,5 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { authApi, clearSession, SESSION_CLEARED_EVENT, type User } from './api'
+import {
+  accessToken,
+  authApi,
+  clearSession,
+  refreshAccessToken,
+  SESSION_CLEARED_EVENT,
+  setAccessToken,
+  type User,
+} from './api'
 
 interface AuthContextValue {
   user: User | null
@@ -26,7 +34,7 @@ function storedUser(): User | null {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(storedUser)
-  const [loading, setLoading] = useState(Boolean(localStorage.getItem('access_token')))
+  const [loading, setLoading] = useState(true)
 
   const persistUser = useCallback((next: User | null) => {
     setUser(next)
@@ -35,11 +43,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshUser = useCallback(async () => {
-    if (!localStorage.getItem('access_token')) {
-      persistUser(null)
-      return null
-    }
     try {
+      if (!accessToken()) await refreshAccessToken()
       const current = await authApi.me()
       persistUser(current)
       return current
@@ -50,10 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [persistUser])
 
   useEffect(() => {
-    if (!localStorage.getItem('access_token')) return
     let active = true
-    void authApi
-      .me()
+    void refreshAccessToken()
+      .then(() => authApi.me())
       .then((current) => {
         if (active) persistUser(current)
       })
@@ -79,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const syncSession = (event: StorageEvent) => {
-      if (event.key === 'access_token' && !event.newValue) persistUser(null)
+      if (event.key === 'academic-cluster:session-event') persistUser(null)
       if (event.key === 'user') persistUser(storedUser())
     }
     window.addEventListener('storage', syncSession)
@@ -91,8 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true)
       try {
         const tokens = await authApi.login(email, password)
-        localStorage.setItem('access_token', tokens.access_token)
-        localStorage.setItem('refresh_token', tokens.refresh_token)
+        setAccessToken(tokens.access_token)
         const current = await authApi.me()
         persistUser(current)
         return current
@@ -112,8 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await authApi.register(email, password, fullName)
         const tokens = await authApi.login(email, password)
-        localStorage.setItem('access_token', tokens.access_token)
-        localStorage.setItem('refresh_token', tokens.refresh_token)
+        setAccessToken(tokens.access_token)
         const current = await authApi.me()
         persistUser(current)
         return current
@@ -128,13 +130,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const logout = useCallback(async () => {
-    const refreshToken = localStorage.getItem('refresh_token')
-    if (refreshToken) {
-      try {
-        await authApi.logout(refreshToken)
-      } catch {
-        // Local logout remains available when the API is offline.
-      }
+    try {
+      await authApi.logout()
+    } catch {
+      // Local logout remains available when the API is offline.
     }
     clearSession()
   }, [])
@@ -143,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       loading,
-      isAuthenticated: Boolean(user && localStorage.getItem('access_token')),
+      isAuthenticated: Boolean(user && accessToken()),
       isAdmin: user?.role === 'admin',
       login,
       register,

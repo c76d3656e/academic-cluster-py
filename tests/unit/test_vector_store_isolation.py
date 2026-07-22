@@ -55,10 +55,10 @@ async def test_knn_candidates_are_filtered_before_top_k() -> None:
     assert database.opened_session.params == {
         "paper_ids": ["paper-a", "paper-b"],
         "neighbor_count": 3,
-            "threshold": 0.4,
-            "model_name": "embedding-model-v2",
-            "dimensions": None,
-        }
+        "threshold": 0.4,
+        "model_name": "embedding-model-v2",
+        "dimensions": None,
+    }
 
 
 async def test_knn_empty_input_does_not_open_database_session() -> None:

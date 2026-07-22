@@ -758,7 +758,9 @@ async def _write_new_sections(
         plans,
         planner_papers,
         clusters,
-        section_reference_target=min(policy.max_references_per_section, len(references)),
+        section_reference_target=min(
+            policy.max_references_per_section, len(references)
+        ),
         core_reference_count=min(30, len(references)),
     )
     _filtered_plans, evidence_plans = plan_section_evidence(
@@ -771,8 +773,12 @@ async def _write_new_sections(
             for paper in planner_papers
         },
         clusters=clusters,
-        max_references_per_section=min(policy.max_references_per_section, len(references)),
-        min_references_per_section=min(policy.min_references_per_section, len(references)),
+        max_references_per_section=min(
+            policy.max_references_per_section, len(references)
+        ),
+        min_references_per_section=min(
+            policy.min_references_per_section, len(references)
+        ),
     )
     semaphore = asyncio.Semaphore(3)
 

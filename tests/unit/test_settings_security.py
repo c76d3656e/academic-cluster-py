@@ -19,6 +19,7 @@ def _valid_production_settings(**overrides: Any) -> Settings:
         "app_env": "production",
         "app_debug": False,
         "cors_origins": "https://example.test",
+        "allowed_hosts": "example.test",
         "jwt_secret_key": "j" * 48,
         "jwt_algorithm": "HS256",
         "postgres_password": "database-password-strong",

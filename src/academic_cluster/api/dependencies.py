@@ -47,6 +47,8 @@ async def get_current_user(
 
     if not user.get("is_active", False):
         raise HTTPException(status_code=401, detail="User account is deactivated")
+    if int(payload.get("ver") or 0) != int(user.get("token_version") or 0):
+        raise HTTPException(status_code=401, detail="Session has been revoked")
 
     request_headers = getattr(request, "headers", {})
     requested_organization = request_headers.get("X-Organization-ID")

@@ -28,7 +28,9 @@ def _host_matches(host: str, rules: Iterable[str]) -> bool:
     return False
 
 
-def _reject_non_public_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
+def _reject_non_public_ip(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> None:
     if not address.is_global:
         raise UnsafeOutboundUrlError(
             f"provider endpoint resolves to a non-public address: {address}"
@@ -101,7 +103,9 @@ async def validate_outbound_url(url: str) -> None:
             parsed.port or (443 if parsed.scheme.casefold() == "https" else 80),
         )
     except OSError as error:
-        raise UnsafeOutboundUrlError("provider endpoint hostname cannot be resolved") from error
+        raise UnsafeOutboundUrlError(
+            "provider endpoint hostname cannot be resolved"
+        ) from error
     if not addresses:
         raise UnsafeOutboundUrlError("provider endpoint hostname has no addresses")
     for value in addresses:

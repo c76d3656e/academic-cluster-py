@@ -90,7 +90,9 @@ class RateLimiter:
         except Exception as error:
             settings = get_settings()
             if settings.is_production:
-                logger.error("Authentication rate limiter unavailable", error=str(error))
+                logger.error(
+                    "Authentication rate limiter unavailable", error=str(error)
+                )
                 raise RateLimitBackendUnavailable(
                     "authentication rate limiter is unavailable"
                 ) from error

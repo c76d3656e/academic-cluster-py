@@ -46,7 +46,7 @@ class PasswordChangeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     current_password: str = Field(..., min_length=1)
-    new_password: str = Field(..., min_length=8, max_length=128)
+    new_password: str = Field(..., min_length=12, max_length=128)
 
 
 # =============================================================================
@@ -107,6 +107,7 @@ async def change_password(
     # 哈希新密码并更新
     new_hashed = password_service.hash_password(body.new_password)
     await db.update_user(current_user["id"], {"hashed_password": new_hashed})
+    await db.increment_user_token_version(current_user["id"])
     await db.revoke_all_user_tokens(current_user["id"])
     await db.log_activity(current_user["id"], "password.change")
 

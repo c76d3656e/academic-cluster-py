@@ -5,6 +5,10 @@ import { authApi, SESSION_CLEARED_EVENT } from './api'
 
 vi.mock('./api', () => ({
   SESSION_CLEARED_EVENT: 'academic-cluster:session-cleared',
+  accessToken: vi.fn(() => 'token'),
+  clearSession: vi.fn(),
+  refreshAccessToken: vi.fn(() => Promise.resolve('token')),
+  setAccessToken: vi.fn(),
   authApi: {
     me: vi.fn(),
     login: vi.fn(),
@@ -21,7 +25,6 @@ function AuthState() {
 describe('AuthProvider', () => {
   it('drops the in-memory identity when refresh-token rotation fails', async () => {
     const user = { id: 'user-1', email: 'admin@example.org', role: 'admin', is_active: true }
-    localStorage.setItem('access_token', 'token')
     localStorage.setItem('user', JSON.stringify(user))
     vi.mocked(authApi.me).mockResolvedValue(user)
 

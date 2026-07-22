@@ -297,6 +297,7 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
 
     from .crypto import decrypt_key
     from .database import get_database
+    from .url_security import UnsafeOutboundUrlError, validate_outbound_url
 
     db = get_database()
     async with db.session() as session:
@@ -329,6 +330,16 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
         kind = row[0]
         if kind not in configs:
             continue
+        base_url = str(row[2] or "")
+        try:
+            await validate_outbound_url(base_url)
+        except UnsafeOutboundUrlError as error:
+            logger.error(
+                "Skipping provider with unsafe outbound endpoint",
+                provider=row[1],
+                error=str(error),
+            )
+            continue
         api_key = ""
         if row[4]:
             try:
@@ -344,7 +355,7 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
             {
                 "name": row[1],
                 "model": row[3] or "",
-                "api_url": row[2] or "",
+                "api_url": base_url,
                 "api_key": api_key,
                 "rpm_limit": row[5] or _toml_default_rpm(),
                 "priority": row[6] or 100,
@@ -479,7 +490,7 @@ async def init_pools() -> None:
                     "model": litellm_model,
                     "api_key": settings.llm_api_key,
                     "api_base": _normalize_openai_api_base(base_url),
-                "rpm": _toml_default_rpm(),
+                    "rpm": _toml_default_rpm(),
                 },
                 "model_info": {"provider_alias": settings.llm_provider},
             }

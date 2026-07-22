@@ -27,6 +27,8 @@ CREATE INDEX IF NOT EXISTS idx_memberships_user
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS default_organization_id UUID
     REFERENCES organizations(id) ON DELETE SET NULL;
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE projects
     ADD COLUMN IF NOT EXISTS organization_id UUID
     REFERENCES organizations(id) ON DELETE RESTRICT;

@@ -10,8 +10,8 @@
 import asyncio
 import contextlib
 import json
-import random
 import re
+import secrets
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -44,9 +44,7 @@ def _default_routing_policy() -> SimpleNamespace:
         provider_request_timeout_seconds=float(
             definitions["provider.request_timeout_seconds"]["value"]
         ),
-        provider_timeout_retries=int(
-            definitions["provider.timeout_retries"]["value"]
-        ),
+        provider_timeout_retries=int(definitions["provider.timeout_retries"]["value"]),
         provider_timeout_grace_seconds=float(
             definitions["provider.timeout_grace_seconds"]["value"]
         ),
@@ -54,6 +52,7 @@ def _default_routing_policy() -> SimpleNamespace:
             definitions["provider.retry_delay_seconds"]["value"]
         ),
     )
+
 
 _rr_counter = 0
 _llm_request_gate: BoundedFifoGate | None = None
@@ -626,7 +625,7 @@ async def ainvoke_with_callbacks(
                     if attempt < max_retries - 1:
                         wait_s = (
                             routing_policy.provider_retry_delay_seconds
-                            + random.uniform(0.0, 0.5)
+                            + secrets.randbelow(501) / 1000
                         )
                         logger.warning(
                             "LLM call timed out, retrying",
@@ -656,9 +655,7 @@ async def ainvoke_with_callbacks(
                 invoke_task = asyncio.create_task(
                     llm.ainvoke(input, config=config, **kwargs)
                 )
-                _done, _ = await asyncio.wait(
-                    [invoke_task], timeout=effective_timeout
-                )
+                _done, _ = await asyncio.wait([invoke_task], timeout=effective_timeout)
                 if _done:
                     completed_task = invoke_task
                     assert completed_task is not None
@@ -668,9 +665,7 @@ async def ainvoke_with_callbacks(
                 else:
                     await _cancel_and_wait(invoke_task)
                     invoke_task = None
-                    raise TimeoutError(
-                        f"LLM call timed out after {effective_timeout}s"
-                    )
+                    raise TimeoutError(f"LLM call timed out after {effective_timeout}s")
 
     except asyncio.CancelledError:
         await _cancel_and_wait(invoke_task)
@@ -697,9 +692,7 @@ async def ainvoke_with_callbacks(
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
         is_timeout = isinstance(e, asyncio.TimeoutError)
         err_msg = (
-            f"LLM call timed out after {effective_timeout}s"
-            if is_timeout
-            else str(e)
+            f"LLM call timed out after {effective_timeout}s" if is_timeout else str(e)
         )
         if db and call_id:
             try:

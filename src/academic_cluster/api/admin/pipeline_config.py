@@ -170,7 +170,9 @@ async def update_pipeline_config(
         async with db.session() as session:
             dimensions = (
                 await session.execute(
-                    text("SELECT DISTINCT dimensions FROM embeddings ORDER BY dimensions")
+                    text(
+                        "SELECT DISTINCT dimensions FROM embeddings ORDER BY dimensions"
+                    )
                 )
             ).fetchall()
         existing_dimensions = sorted(

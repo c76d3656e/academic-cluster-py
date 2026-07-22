@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from academic_cluster.api import auth_routes
@@ -16,6 +17,8 @@ from academic_cluster.api.console.profile import (
     change_password,
 )
 from academic_cluster.api.dependencies import project_access_allowed
+from academic_cluster.api.security_middleware import RequestSecurityMiddleware
+from academic_cluster.config.settings import Settings
 from academic_cluster.models.user import UserCreate, UserUpdate
 from academic_cluster.services import rate_limit, url_security
 from academic_cluster.services.tenant_context import (
@@ -38,6 +41,7 @@ class _PasswordDatabase:
     def __init__(self) -> None:
         self.updated: list[tuple[str, dict[str, Any]]] = []
         self.revoked: list[str] = []
+        self.token_versions: list[str] = []
         self.activities: list[tuple[str, str]] = []
 
     async def update_user(self, user_id: str, values: dict[str, Any]) -> None:
@@ -45,6 +49,10 @@ class _PasswordDatabase:
 
     async def revoke_all_user_tokens(self, user_id: str) -> None:
         self.revoked.append(user_id)
+
+    async def increment_user_token_version(self, user_id: str) -> int:
+        self.token_versions.append(user_id)
+        return 1
 
     async def log_activity(self, user_id: str, action: str) -> None:
         self.activities.append((user_id, action))
@@ -85,6 +93,7 @@ async def test_password_change_revokes_sessions_and_records_audit() -> None:
     assert response["message"]
     assert db.updated == [("user-1", {"hashed_password": "replacement-hash"})]
     assert db.revoked == ["user-1"]
+    assert db.token_versions == ["user-1"]
     assert db.activities == [("user-1", "password.change")]
 
 
@@ -216,9 +225,9 @@ async def test_rate_limiter_uses_atomic_redis_result(
 def test_security_migration_enables_rls_for_project_artifacts() -> None:
     from pathlib import Path
 
-    sql = (
-        Path(__file__).parents[2] / "scripts" / "migrate_security.sql"
-    ).read_text(encoding="utf-8")
+    sql = (Path(__file__).parents[2] / "scripts" / "migrate_security.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "CREATE TABLE IF NOT EXISTS organizations" in sql
     assert "CREATE TABLE IF NOT EXISTS organization_memberships" in sql
@@ -226,3 +235,57 @@ def test_security_migration_enables_rls_for_project_artifacts() -> None:
     assert "CREATE POLICY tenant_isolation ON projects" in sql
     assert "ALTER TABLE llm_calls FORCE ROW LEVEL SECURITY" in sql
     assert "app_project_access(project_id)" in sql
+
+
+def test_refresh_cookie_is_httponly_secure_and_same_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        auth_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            refresh_cookie_name="academic_cluster_refresh",
+            refresh_token_expire_days=7,
+            is_production=True,
+        ),
+    )
+    response = Response()
+
+    auth_routes._set_refresh_cookie(response, "opaque-refresh-token")
+
+    cookie = response.headers["set-cookie"]
+    assert "HttpOnly" in cookie
+    assert "Secure" in cookie
+    assert "SameSite=strict" in cookie
+    assert "Path=/api/auth" in cookie
+
+
+def test_request_security_middleware_limits_body_and_sets_headers() -> None:
+    app = FastAPI()
+    settings = Settings(
+        _env_file=None,
+        max_request_body_bytes=16_384,
+        app_env="production",
+    )
+    app.add_middleware(RequestSecurityMiddleware, settings=settings)
+
+    @app.get("/ok")
+    async def ok() -> dict[str, bool]:
+        return {"ok": True}
+
+    @app.post("/body")
+    async def body() -> dict[str, bool]:
+        return {"ok": True}
+
+    client = TestClient(app)
+    ok_response = client.get("/ok")
+    oversized = client.post(
+        "/body",
+        content=b"x" * 16_385,
+        headers={"Content-Type": "application/octet-stream"},
+    )
+
+    assert ok_response.headers["x-content-type-options"] == "nosniff"
+    assert ok_response.headers["x-frame-options"] == "DENY"
+    assert "max-age=31536000" in ok_response.headers["strict-transport-security"]
+    assert oversized.status_code == 413

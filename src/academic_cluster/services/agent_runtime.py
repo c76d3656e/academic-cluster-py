@@ -311,13 +311,17 @@ class AgentRunManager:
         from .runtime_policy import get_runtime_policy
 
         runtime_policy = await get_runtime_policy(db)
-        if not isinstance(project_config, dict) or "target_papers" not in project_config:
+        if (
+            not isinstance(project_config, dict)
+            or "target_papers" not in project_config
+        ):
             target_papers = runtime_policy.default_target_papers
         if not isinstance(project_config, dict) or "target_words" not in project_config:
             target_words = runtime_policy.default_target_words
         quality_threshold = (
             _resolve_quality_threshold(project_config)
-            if isinstance(project_config, dict) and "quality_threshold" in project_config
+            if isinstance(project_config, dict)
+            and "quality_threshold" in project_config
             else runtime_policy.quality_threshold
         )
         target_papers, target_words = resolve_agent_targets(

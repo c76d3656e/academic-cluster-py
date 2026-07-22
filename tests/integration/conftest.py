@@ -15,6 +15,12 @@ import pytest
 from sqlalchemy import text
 
 from academic_cluster.services.database import DatabaseService
+from academic_cluster.services.tenant_context import (
+    clear_tenant_context,
+    set_tenant_context,
+)
+
+SYSTEM_QUARANTINE_ORGANIZATION_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def pytest_asyncio_loop_factories(config, item):
@@ -45,6 +51,11 @@ def agent_postgres_url() -> str:
 async def agent_database(agent_postgres_url: str) -> AsyncIterator[DatabaseService]:
     """Create an isolated service instance and verify the Agent schema exists."""
 
+    set_tenant_context(
+        user_id=None,
+        organization_id=SYSTEM_QUARANTINE_ORGANIZATION_ID,
+        is_admin=True,
+    )
     database = DatabaseService(agent_postgres_url)
     try:
         async with database.session() as session:
@@ -56,3 +67,4 @@ async def agent_database(agent_postgres_url: str) -> AsyncIterator[DatabaseServi
         yield database
     finally:
         await database.close()
+        clear_tenant_context()
