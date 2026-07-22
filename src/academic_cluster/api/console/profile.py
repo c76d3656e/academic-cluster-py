@@ -8,7 +8,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ...services.auth import PasswordService, get_password_service
 from ...services.database import DatabaseService, get_database
@@ -42,6 +42,8 @@ class ProfileUpdateRequest(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     """修改密码请求"""
+
+    model_config = ConfigDict(extra="forbid")
 
     current_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=8, max_length=128)
@@ -105,6 +107,8 @@ async def change_password(
     # 哈希新密码并更新
     new_hashed = password_service.hash_password(body.new_password)
     await db.update_user(current_user["id"], {"hashed_password": new_hashed})
+    await db.revoke_all_user_tokens(current_user["id"])
+    await db.log_activity(current_user["id"], "password.change")
 
     logger.info("User changed password", user_id=current_user["id"])
 

@@ -5,7 +5,7 @@
 import enum
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserRole(enum.StrEnum):
@@ -18,7 +18,7 @@ class UserRole(enum.StrEnum):
 class UserCreate(BaseModel):
     """用户注册请求"""
 
-    email: str = Field(..., min_length=5, max_length=255)
+    email: EmailStr = Field(..., max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     full_name: str | None = Field(None, max_length=255)
 
@@ -26,22 +26,23 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     """用户登录请求"""
 
-    email: str
+    email: EmailStr
     password: str
 
 
 class UserUpdate(BaseModel):
     """用户信息更新请求"""
 
+    model_config = ConfigDict(extra="forbid")
+
     full_name: str | None = Field(None, max_length=255)
-    password: str | None = Field(None, min_length=8, max_length=128)
 
 
 class UserResponse(BaseModel):
     """用户信息响应"""
 
     id: str
-    email: str
+    email: EmailStr
     full_name: str | None = None
     role: str = "user"
     is_active: bool = True

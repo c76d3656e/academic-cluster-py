@@ -113,6 +113,9 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     provider_encryption_key: str | None = None
+    provider_allow_insecure_http: bool = False
+    provider_allow_private_networks: bool = False
+    provider_allowed_hosts: str | None = None
 
     admin_email: str = "admin@cluster.local"
     admin_password: str = ""
@@ -130,6 +133,15 @@ class Settings(BaseSettings):
             password=self.redis_password,
             db=self.redis_db,
         )
+
+    @property
+    def provider_allowed_host_list(self) -> list[str]:
+        """Return normalized exact or ``*.example.com`` provider host rules."""
+        return [
+            value.strip().casefold().rstrip(".")
+            for value in (self.provider_allowed_hosts or "").split(",")
+            if value.strip()
+        ]
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -185,6 +197,10 @@ class Settings(BaseSettings):
             insecure.append("provider_encryption_key")
         if self.app_debug:
             insecure.append("app_debug")
+        if self.provider_allow_insecure_http:
+            insecure.append("provider_allow_insecure_http")
+        if self.provider_allow_private_networks:
+            insecure.append("provider_allow_private_networks")
         if self.jwt_algorithm not in {"HS256", "HS384", "HS512"}:
             insecure.append("jwt_algorithm")
         origins = self.cors_origin_list

@@ -53,6 +53,8 @@ dependencies = [
     # Configuration
     "pydantic>=2.9.0",
     "pydantic-settings>=2.14.2",
+    "email-validator>=2.2.0",
+    "defusedxml>=0.7.1",
     "python-dotenv>=1.0.0",
     "tenacity>=9.0.0",
     # Logging

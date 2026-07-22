@@ -13,11 +13,41 @@ from sqlalchemy import text
 
 from ...services.crypto import decrypt_key, encrypt_key, mask_key
 from ...services.database import DatabaseService, get_database
+from ...services.url_security import (
+    UnsafeOutboundUrlError,
+    validate_outbound_url,
+    validate_outbound_url_syntax,
+)
 from ..dependencies import require_admin
 
 logger = structlog.get_logger()
 
 router = APIRouter(tags=["admin-providers"])
+
+
+async def _audit_provider_action(
+    db: DatabaseService,
+    admin: dict[str, Any],
+    action: str,
+    provider_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    """Persist security-sensitive Provider administration without leaking keys."""
+    try:
+        await db.log_activity(
+            user_id=str(admin["id"]),
+            action=f"provider.{action}",
+            resource_type="provider",
+            resource_id=provider_id,
+            details=details or {},
+        )
+    except Exception as error:
+        logger.warning(
+            "Failed to persist provider audit",
+            provider_id=provider_id,
+            action=action,
+            error=str(error),
+        )
 
 
 async def _reload_runtime_pools() -> int:
@@ -245,6 +275,11 @@ async def create_provider(
     """创建 Provider"""
     import json
 
+    try:
+        validate_outbound_url_syntax(body.base_url)
+    except UnsafeOutboundUrlError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
     # 加密 API Key
     api_key_enc = None
     if body.api_key:
@@ -295,6 +330,18 @@ async def create_provider(
         kind=body.kind,
         name=body.display_name,
     )
+    await _audit_provider_action(
+        db,
+        admin,
+        "create",
+        provider_id,
+        {
+            "kind": body.kind,
+            "display_name": body.display_name,
+            "base_url": body.base_url,
+            "api_key_configured": bool(body.api_key),
+        },
+    )
     await _reload_runtime_pools()
 
     return ProviderResponse(
@@ -324,6 +371,17 @@ async def update_provider(
 ) -> ProviderResponse:
     """更新 Provider"""
     import json
+
+    if body.base_url is not None:
+        try:
+            validate_outbound_url_syntax(body.base_url)
+        except UnsafeOutboundUrlError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if not body.api_key:
+            raise HTTPException(
+                status_code=422,
+                detail="changing a provider URL requires re-entering its API key",
+            )
 
     # 构建动态 UPDATE
     updates = []
@@ -389,6 +447,18 @@ async def update_provider(
         raise HTTPException(status_code=404, detail="Provider 不存在")
 
     logger.info("Provider updated", provider_id=provider_id)
+    changed_fields = sorted(body.model_fields_set)
+    await _audit_provider_action(
+        db,
+        admin,
+        "update",
+        provider_id,
+        {
+            "changed_fields": changed_fields,
+            "base_url": body.base_url,
+            "api_key_rotated": "api_key" in body.model_fields_set,
+        },
+    )
     await _reload_runtime_pools()
     return _row_to_provider(row)
 
@@ -418,22 +488,13 @@ async def delete_provider(
     display_name = str(deleted[2])
     reloaded = await _reload_runtime_pools()
 
-    try:
-        await db.log_activity(
-            user_id=str(admin["id"]),
-            action="provider.delete",
-            resource_type="provider",
-            resource_id=deleted_id,
-            details={"kind": kind, "display_name": display_name},
-        )
-    except Exception as error:
-        # Deletion is already committed; an audit outage must not turn the
-        # successful operation into a misleading 500 response.
-        logger.warning(
-            "Failed to persist provider deletion audit",
-            provider_id=deleted_id,
-            error=str(error),
-        )
+    await _audit_provider_action(
+        db,
+        admin,
+        "delete",
+        deleted_id,
+        {"kind": kind, "display_name": display_name},
+    )
 
     logger.info(
         "Provider deleted",
@@ -496,6 +557,7 @@ async def test_provider(
     # 根据 kind 执行不同的健康检查
     start = time.time()
     try:
+        await validate_outbound_url(base_url)
         if kind == "llm":
             await _test_llm(base_url, api_key, test_model or model)
         elif kind == "embedding":
@@ -508,6 +570,13 @@ async def test_provider(
         latency_ms = (time.time() - start) * 1000
         await _update_health(db, provider_id_str, "healthy", None)
         await _reload_runtime_pools()
+        await _audit_provider_action(
+            db,
+            admin,
+            "test",
+            provider_id_str,
+            {"kind": kind, "healthy": True},
+        )
         logger.info(
             "Provider health test passed",
             provider_id=provider_id_str,
@@ -525,6 +594,13 @@ async def test_provider(
         error_msg = str(e)[:500]
         await _update_health(db, provider_id_str, "error", error_msg)
         await _reload_runtime_pools()
+        await _audit_provider_action(
+            db,
+            admin,
+            "test",
+            provider_id_str,
+            {"kind": kind, "healthy": False, "error": error_msg},
+        )
         logger.warning(
             "Provider health test failed", provider_id=provider_id_str, error=error_msg
         )
@@ -551,7 +627,11 @@ async def _test_llm(base_url: str, api_key: str, model: str) -> None:
         url += "/v1"
     url += "/chat/completions"
 
-    async with httpx.AsyncClient(timeout=await _provider_health_timeout()) as client:
+    async with httpx.AsyncClient(
+        timeout=await _provider_health_timeout(),
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
         resp = await client.post(
             url,
             headers={
@@ -577,7 +657,11 @@ async def _test_embedding(base_url: str, api_key: str, model: str) -> None:
         url += "/v1"
     url += "/embeddings"
 
-    async with httpx.AsyncClient(timeout=await _provider_health_timeout()) as client:
+    async with httpx.AsyncClient(
+        timeout=await _provider_health_timeout(),
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
         resp = await client.post(
             url,
             headers={
@@ -619,7 +703,11 @@ async def _test_rerank(base_url: str, api_key: str, model: str) -> None:
 
     import httpx
 
-    async with httpx.AsyncClient(timeout=await _provider_health_timeout()) as client:
+    async with httpx.AsyncClient(
+        timeout=await _provider_health_timeout(),
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
         resp = await client.post(
             _rerank_endpoint(base_url),
             headers={
@@ -760,6 +848,9 @@ async def reload_providers(
 ) -> ReloadResult:
     """热重载 Provider 配置。DB 中 enabled provider 是运行时唯一来源。"""
     reloaded = await _reload_runtime_pools()
+    await _audit_provider_action(
+        db, admin, "reload", details={"runtime_providers": reloaded}
+    )
     return ReloadResult(reloaded=reloaded, message=f"成功重载 {reloaded} 个 Provider")
 
 
@@ -787,5 +878,12 @@ async def toggle_provider(
 
     state = "启用" if row[1] else "禁用"
     logger.info("Provider toggled", provider_id=provider_id, enabled=row[1])
+    await _audit_provider_action(
+        db,
+        admin,
+        "toggle",
+        str(row[0]),
+        {"is_enabled": bool(row[1])},
+    )
     await _reload_runtime_pools()
     return {"id": str(row[0]), "is_enabled": row[1], "message": f"已{state}"}

@@ -14,6 +14,7 @@ import httpx
 import structlog
 
 from .concurrency import BoundedFifoGate
+from .url_security import validate_outbound_url
 
 logger = structlog.get_logger()
 
@@ -192,9 +193,15 @@ async def _invoke_provider(
     try:
         await _respect_rpm(provider, policy.provider_default_rpm)
         async with _request_slot(policy):
-            async with httpx.AsyncClient(timeout=policy.rerank_timeout_seconds) as client:
+            api_url = str(provider.get("api_url") or "")
+            await validate_outbound_url(api_url)
+            async with httpx.AsyncClient(
+                timeout=policy.rerank_timeout_seconds,
+                follow_redirects=False,
+                trust_env=False,
+            ) as client:
                 response = await client.post(
-                    _endpoint(str(provider.get("api_url") or "")),
+                    _endpoint(api_url),
                     headers={
                         "Authorization": f"Bearer {provider.get('api_key') or ''}",
                         "Content-Type": "application/json",

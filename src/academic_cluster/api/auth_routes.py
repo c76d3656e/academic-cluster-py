@@ -192,16 +192,12 @@ async def update_me(
     body: UserUpdate,
     current_user: dict[str, Any] = Depends(get_current_user),
     db: DatabaseService = Depends(get_database),
-    password_service: PasswordService = Depends(get_password_service),
 ) -> UserResponse:
-    """更新当前用户信息"""
+    """更新当前用户非敏感资料；密码只能通过重新认证的专用端点修改。"""
     update_data = {}
 
     if body.full_name is not None:
         update_data["full_name"] = body.full_name
-
-    if body.password is not None:
-        update_data["hashed_password"] = password_service.hash_password(body.password)
 
     if update_data:
         await db.update_user(current_user["id"], update_data)

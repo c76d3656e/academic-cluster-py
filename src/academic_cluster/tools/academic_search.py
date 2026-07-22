@@ -549,9 +549,9 @@ async def search_arxiv(
             response.raise_for_status()
 
             # arXiv 返回 XML，需要解析
-            import xml.etree.ElementTree as ET  # nosec B405
+            import defusedxml.ElementTree as ET
 
-            root = ET.fromstring(response.text)  # nosec B314
+            root = ET.fromstring(response.text)
             ns = {
                 "atom": "http://www.w3.org/2005/Atom",
                 "arxiv": "http://arxiv.org/schemas/atom",
