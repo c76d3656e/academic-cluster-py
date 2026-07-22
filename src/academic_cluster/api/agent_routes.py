@@ -21,7 +21,7 @@ from ..services.agent_runtime import (
     resolve_agent_targets,
 )
 from ..services.database import DatabaseService, get_database
-from .dependencies import get_current_user
+from .dependencies import get_current_user, project_access_allowed
 
 router = APIRouter()
 
@@ -109,10 +109,7 @@ async def _verify_project_access(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     return project

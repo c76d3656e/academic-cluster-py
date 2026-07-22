@@ -671,6 +671,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    from .security_middleware import RequestSecurityMiddleware
+
+    app.add_middleware(RequestSecurityMiddleware, settings=settings)
+
     # CORS 配置
     # 安全修复: 生产环境不允许 allow_origins=["*"] + allow_credentials=True 的组合
     # 该组合允许任意来源携带凭据发起跨域请求，存在 CSRF 风险

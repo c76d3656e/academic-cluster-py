@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     app_debug: bool = False
     cors_origins: str | None = None
     log_level: str = "INFO"
+    max_request_body_bytes: int = Field(default=1_048_576, ge=16_384, le=16_777_216)
+    max_project_config_bytes: int = Field(default=65_536, ge=1_024, le=1_048_576)
+
+    registration_enabled: bool = False
+    auth_login_rate_limit: int = Field(default=5, ge=1, le=10_000)
+    auth_register_rate_limit: int = Field(default=3, ge=1, le=10_000)
+    auth_refresh_rate_limit: int = Field(default=30, ge=1, le=100_000)
+    auth_rate_limit_window_seconds: int = Field(default=60, ge=10, le=86_400)
+    max_projects_per_user: int = Field(default=20, ge=1, le=100_000)
+    trusted_proxy_ips: str | None = None
 
     langfuse_enabled: bool = False
     langfuse_public_key: str | None = None
@@ -144,6 +154,14 @@ class Settings(BaseSettings):
         ]
 
     @property
+    def trusted_proxy_ip_list(self) -> list[str]:
+        return [
+            value.strip()
+            for value in (self.trusted_proxy_ips or "").split(",")
+            if value.strip()
+        ]
+
+    @property
     def cors_origin_list(self) -> list[str]:
         """Parse current CSV and legacy JSON-array CORS formats."""
 
@@ -189,6 +207,8 @@ class Settings(BaseSettings):
             insecure.append("jwt_secret_key")
         if _is_placeholder(self.postgres_password, minimum_length=12):
             insecure.append("postgres_password")
+        if self.postgres_user.casefold() in {"postgres", "root"}:
+            insecure.append("postgres_user")
         if _is_placeholder(self.redis_password, minimum_length=12):
             insecure.append("redis_password")
         if _is_placeholder(self.admin_password, minimum_length=12):

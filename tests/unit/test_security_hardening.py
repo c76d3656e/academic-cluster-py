@@ -9,13 +9,20 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from academic_cluster.api import auth_routes
 from academic_cluster.api.admin import providers
 from academic_cluster.api.console.profile import (
     PasswordChangeRequest,
     change_password,
 )
-from academic_cluster.models.user import UserUpdate
-from academic_cluster.services import url_security
+from academic_cluster.api.dependencies import project_access_allowed
+from academic_cluster.models.user import UserCreate, UserUpdate
+from academic_cluster.services import rate_limit, url_security
+from academic_cluster.services.tenant_context import (
+    clear_tenant_context,
+    get_tenant_context,
+    set_tenant_context,
+)
 
 
 class _PasswordService:
@@ -132,3 +139,90 @@ async def test_provider_url_change_requires_api_key_rotation(
 
     assert caught.value.status_code == 422
     assert "API key" in str(caught.value.detail)
+
+
+async def test_public_registration_is_disabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        auth_routes,
+        "get_settings",
+        lambda: SimpleNamespace(registration_enabled=False),
+    )
+    with pytest.raises(HTTPException) as caught:
+        await auth_routes.register(
+            UserCreate(
+                email="person@example.com",
+                password="registration-password",  # noqa: S106 - rejected fixture
+            ),
+            request=object(),  # type: ignore[arg-type]
+            db=object(),  # type: ignore[arg-type]
+            password_service=object(),  # type: ignore[arg-type]
+        )
+    assert caught.value.status_code == 403
+
+
+def test_project_access_uses_active_organization_not_only_owner() -> None:
+    project = {
+        "id": "project-1",
+        "user_id": "owner-1",
+        "organization_id": "organization-1",
+    }
+    member = {
+        "id": "member-1",
+        "role": "user",
+        "active_organization_id": "organization-1",
+    }
+    outsider = {
+        "id": "owner-1",
+        "role": "user",
+        "active_organization_id": "organization-2",
+    }
+
+    assert project_access_allowed(project, member) is True
+    assert project_access_allowed(project, outsider) is False
+
+
+def test_tenant_context_is_request_local_and_clearable() -> None:
+    clear_tenant_context()
+    set_tenant_context(
+        user_id="user-1", organization_id="organization-1", is_admin=False
+    )
+    assert get_tenant_context().organization_id == "organization-1"
+    clear_tenant_context()
+    assert get_tenant_context().organization_id is None
+
+
+async def test_rate_limiter_uses_atomic_redis_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Redis:
+        async def eval(self, *_args: Any) -> list[int]:
+            return [3, 41]
+
+    monkeypatch.setattr(
+        rate_limit,
+        "get_cache",
+        lambda: SimpleNamespace(redis=_Redis()),
+    )
+    result = await rate_limit.RateLimiter().check(
+        "login:203.0.113.10", limit=5, window_seconds=60
+    )
+    assert result.allowed is True
+    assert result.remaining == 2
+    assert result.retry_after == 41
+
+
+def test_security_migration_enables_rls_for_project_artifacts() -> None:
+    from pathlib import Path
+
+    sql = (
+        Path(__file__).parents[2] / "scripts" / "migrate_security.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS organizations" in sql
+    assert "CREATE TABLE IF NOT EXISTS organization_memberships" in sql
+    assert "ALTER TABLE projects FORCE ROW LEVEL SECURITY" in sql
+    assert "CREATE POLICY tenant_isolation ON projects" in sql
+    assert "ALTER TABLE llm_calls FORCE ROW LEVEL SECURITY" in sql
+    assert "app_project_access(project_id)" in sql

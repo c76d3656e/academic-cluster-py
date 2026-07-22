@@ -2,6 +2,7 @@
 API 路由定义
 """
 
+import json
 import re
 import uuid
 from datetime import date
@@ -9,9 +10,10 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import text
 
+from ..config import get_settings
 from ..services.agent_runtime import (
     AgentAlreadyRunningError,
     AgentCancellationTimeoutError,
@@ -23,7 +25,7 @@ from ..services.agent_runtime import (
     resolve_agent_targets,
 )
 from ..services.database import DatabaseService, get_database
-from .dependencies import get_current_user
+from .dependencies import get_current_user, project_access_allowed
 
 logger = structlog.get_logger()
 
@@ -88,10 +90,22 @@ async def get_features(db: DatabaseService = Depends(get_database)) -> dict[str,
 class CreateProjectRequest(BaseModel):
     """创建项目请求"""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(..., min_length=1, max_length=255)
     query: str = Field(..., min_length=1, max_length=2000)
     description: str | None = Field(None, max_length=5000)
     config: dict[str, Any] | None = None
+
+    @field_validator("config")
+    @classmethod
+    def validate_config_size(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
+        if len(encoded) > get_settings().max_project_config_bytes:
+            raise ValueError("project config exceeds the configured size limit")
+        return value
 
 
 class ProjectResponse(BaseModel):
@@ -174,6 +188,11 @@ async def create_project(
     db: DatabaseService = Depends(get_database),
 ) -> ProjectResponse:
     """创建新项目"""
+    _, project_count = await db.list_projects_by_user(
+        str(current_user["id"]), skip=0, limit=1
+    )
+    if project_count >= get_settings().max_projects_per_user:
+        raise HTTPException(status_code=429, detail="project quota exceeded")
     project_id = str(uuid.uuid4())
 
     logger.info(
@@ -188,6 +207,7 @@ async def create_project(
         {
             "id": project_id,
             "user_id": current_user["id"],
+            "organization_id": current_user.get("active_organization_id"),
             "name": request.name,
             "query": request.query,
             "description": request.description,
@@ -246,10 +266,7 @@ async def get_project_detail(
         raise HTTPException(status_code=404, detail="Project not found")
 
     # 权限检查：只有项目所有者或管理员可以查看
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     public_project = dict(project)
@@ -270,10 +287,7 @@ async def delete_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     from ..services.project_cleanup import delete_project_data
@@ -294,10 +308,7 @@ async def get_project_status(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     execution = await db.get_latest_agent_execution(project_id)
@@ -348,10 +359,7 @@ async def get_project_progress(
     project = await db.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     execution = await db.get_latest_agent_execution(project_id)
@@ -462,10 +470,7 @@ async def get_project_sources(
     project = await db.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     papers = await db.get_project_papers(project_id, limit=500)
@@ -512,10 +517,7 @@ async def _get_authorized_pipeline_project(
     project = await db.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
     return project
 
@@ -640,10 +642,7 @@ async def get_outline(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     outline = await db.get_outline_by_project_id(project_id)
@@ -671,10 +670,7 @@ async def get_review(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    if (
-        project.get("user_id") != current_user["id"]
-        and current_user.get("role") != "admin"
-    ):
+    if not project_access_allowed(project, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # 获取大纲

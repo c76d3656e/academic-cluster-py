@@ -45,6 +45,7 @@ def _convert_uuid_fields(row: dict[str, Any]) -> dict[str, Any]:
 
 
 from ..config import get_settings  # noqa: E402
+from .tenant_context import get_tenant_context  # noqa: E402
 
 logger = structlog.get_logger()
 
@@ -121,6 +122,21 @@ class DatabaseService:
         """获取数据库会话"""
         async with self.session_factory() as session:
             try:
+                tenant = get_tenant_context()
+                await session.execute(
+                    text("SELECT set_config('app.current_user_id', :value, true)"),
+                    {"value": tenant.user_id or ""},
+                )
+                await session.execute(
+                    text(
+                        "SELECT set_config('app.current_organization_id', :value, true)"
+                    ),
+                    {"value": tenant.organization_id or ""},
+                )
+                await session.execute(
+                    text("SELECT set_config('app.is_admin', :value, true)"),
+                    {"value": "true" if tenant.is_admin else "false"},
+                )
                 yield session
                 await session.commit()
             except Exception:
@@ -510,7 +526,7 @@ class DatabaseService:
                     text("""
                         INSERT INTO kg_entities (id, name, entity_type, normalized_name, paper_ids, metadata)
                         VALUES (:id, :name, :entity_type, :normalized_name, :paper_ids, CAST(:metadata AS jsonb))
-                        ON CONFLICT (normalized_name) DO UPDATE
+                        ON CONFLICT (organization_id, normalized_name) DO UPDATE
                         SET paper_ids = (
                             SELECT array_agg(DISTINCT x) FROM unnest(kg_entities.paper_ids || EXCLUDED.paper_ids) AS x
                         )
@@ -1022,6 +1038,11 @@ class DatabaseService:
 
         project_id: str = str(project_data.get("id") or uuid.uuid4())
         user_id = project_data.get("user_id")
+        organization_id = project_data.get("organization_id")
+        if not organization_id:
+            organization_id = get_tenant_context().organization_id
+        if not organization_id:
+            raise ValueError("organization_id is required for every project")
         config = project_data.get("config")
         if isinstance(config, dict):
             config = json.dumps(config)
@@ -1030,12 +1051,16 @@ class DatabaseService:
             if user_id:
                 await session.execute(
                     text("""
-                        INSERT INTO projects (id, user_id, name, description, query, status, config)
-                        VALUES (:id, :user_id, :name, :description, :query, :status, :config)
+                        INSERT INTO projects (
+                            id, user_id, organization_id, name, description, query, status, config
+                        ) VALUES (
+                            :id, :user_id, :organization_id, :name, :description, :query, :status, :config
+                        )
                     """),
                     {
                         "id": project_id,
                         "user_id": user_id,
+                        "organization_id": organization_id,
                         "name": project_data.get("name"),
                         "description": project_data.get("description"),
                         "query": project_data.get("query"),
@@ -1046,11 +1071,15 @@ class DatabaseService:
             else:
                 await session.execute(
                     text("""
-                        INSERT INTO projects (id, name, description, query, status, config)
-                        VALUES (:id, :name, :description, :query, :status, :config)
+                        INSERT INTO projects (
+                            id, organization_id, name, description, query, status, config
+                        ) VALUES (
+                            :id, :organization_id, :name, :description, :query, :status, :config
+                        )
                     """),
                     {
                         "id": project_id,
+                        "organization_id": organization_id,
                         "name": project_data.get("name"),
                         "description": project_data.get("description"),
                         "query": project_data.get("query"),
@@ -1088,6 +1117,54 @@ class DatabaseService:
             )
             row = result.fetchone()
             actual_id = str(row[0]) if row else str(user_id)
+            organization_id = str(
+                user_data.get("organization_id")
+                or uuid.uuid5(uuid.NAMESPACE_URL, f"academic-cluster:user:{actual_id}")
+            )
+            await session.execute(
+                text("SELECT set_config('app.current_user_id', :value, true)"),
+                {"value": actual_id},
+            )
+            await session.execute(
+                text(
+                    "SELECT set_config('app.current_organization_id', :value, true)"
+                ),
+                {"value": organization_id},
+            )
+            await session.execute(
+                text("SELECT set_config('app.is_admin', :value, true)"),
+                {"value": "true" if user_data.get("role") == "admin" else "false"},
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO organizations (id, name, slug, created_by)
+                    VALUES (:id, :name, :slug, :user_id)
+                    ON CONFLICT (id) DO NOTHING
+                """),
+                {
+                    "id": organization_id,
+                    "name": user_data.get("full_name") or user_data["email"],
+                    "slug": f"personal-{actual_id.replace('-', '')}",
+                    "user_id": actual_id,
+                },
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO organization_memberships (
+                        organization_id, user_id, role
+                    ) VALUES (:organization_id, :user_id, 'owner')
+                    ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'owner'
+                """),
+                {"organization_id": organization_id, "user_id": actual_id},
+            )
+            await session.execute(
+                text("""
+                    UPDATE users
+                    SET default_organization_id = :organization_id
+                    WHERE id = :user_id
+                """),
+                {"organization_id": organization_id, "user_id": actual_id},
+            )
 
         logger.info("Saved user", user_id=actual_id)
         return actual_id
@@ -1103,6 +1180,24 @@ class DatabaseService:
         if not row:
             return None
         return _convert_uuid_fields(dict(row._mapping))
+
+    async def user_has_organization_access(
+        self, user_id: str, organization_id: str
+    ) -> bool:
+        """Verify active tenant selection against persisted membership."""
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM organization_memberships
+                        WHERE user_id = :user_id
+                          AND organization_id = :organization_id
+                          AND is_active = TRUE
+                    )
+                """),
+                {"user_id": user_id, "organization_id": organization_id},
+            )
+            return bool(result.scalar())
 
     async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         """根据邮箱获取用户"""
@@ -1327,11 +1422,16 @@ class DatabaseService:
     async def list_projects_by_user(
         self, user_id: str, skip: int = 0, limit: int = 20
     ) -> tuple[list[dict[str, Any]], int]:
-        """列出用户的项目"""
+        """列出用户在当前组织中的项目；RLS 仍是最终隔离边界。"""
+        organization_id = get_tenant_context().organization_id
+        if not organization_id:
+            return [], 0
         async with self.session() as session:
             count_result = await session.execute(
-                text("SELECT COUNT(*) FROM projects WHERE user_id = :user_id"),
-                {"user_id": user_id},
+                text(
+                    "SELECT COUNT(*) FROM projects WHERE organization_id = :organization_id"
+                ),
+                {"organization_id": organization_id},
             )
             total_raw = count_result.scalar()
             total = int(total_raw) if total_raw is not None else 0
@@ -1339,11 +1439,15 @@ class DatabaseService:
             result = await session.execute(
                 text("""
                     SELECT * FROM projects
-                    WHERE user_id = :user_id
+                    WHERE organization_id = :organization_id
                     ORDER BY created_at DESC
                     LIMIT :limit OFFSET :skip
                 """),
-                {"user_id": user_id, "limit": limit, "skip": skip},
+                {
+                    "organization_id": organization_id,
+                    "limit": limit,
+                    "skip": skip,
+                },
             )
             rows = result.fetchall()
 

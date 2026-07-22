@@ -22,6 +22,7 @@ def _valid_production_settings(**overrides: Any) -> Settings:
         "jwt_secret_key": "j" * 48,
         "jwt_algorithm": "HS256",
         "postgres_password": "database-password-strong",
+        "postgres_user": "academic_app",
         "redis_password": "redis-password-strong",
         "admin_password": "administrator-password-strong",
         "provider_encryption_key": "provider-encryption-password-stable",
@@ -44,6 +45,7 @@ def test_valid_production_security_configuration_passes() -> None:
     [
         ("jwt_secret_key", "your_jwt_secret_key_here"),
         ("postgres_password", "your_postgres_password_here"),
+        ("postgres_user", "postgres"),
         ("redis_password", "your_redis_password_here"),
         ("admin_password", ""),
         ("provider_encryption_key", None),

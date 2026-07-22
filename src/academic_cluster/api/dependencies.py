@@ -12,6 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..services.auth import TokenService, get_token_service
 from ..services.database import DatabaseService, get_database
+from ..services.tenant_context import set_tenant_context
 
 logger = structlog.get_logger()
 
@@ -47,7 +48,31 @@ async def get_current_user(
     if not user.get("is_active", False):
         raise HTTPException(status_code=401, detail="User account is deactivated")
 
+    request_headers = getattr(request, "headers", {})
+    requested_organization = request_headers.get("X-Organization-ID")
+    organization_id = requested_organization or user.get("default_organization_id")
+    set_tenant_context(
+        user_id=user_id,
+        organization_id=str(organization_id) if organization_id else None,
+        is_admin=user.get("role") == "admin",
+    )
+    if requested_organization and not await db.user_has_organization_access(
+        user_id, requested_organization
+    ):
+        raise HTTPException(status_code=403, detail="Organization access denied")
+    user["active_organization_id"] = organization_id
+
     return user
+
+
+def project_access_allowed(project: dict[str, Any], user: dict[str, Any]) -> bool:
+    """Apply active-tenant access with a legacy owner fallback during migration."""
+    if user.get("role") == "admin":
+        return True
+    organization_id = project.get("organization_id")
+    if organization_id:
+        return str(organization_id) == str(user.get("active_organization_id"))
+    return str(project.get("user_id")) == str(user.get("id"))
 
 
 async def require_admin(

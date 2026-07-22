@@ -69,6 +69,26 @@ services:
     networks:
       - academic-cluster-network
 
+  security-migrate:
+    image: pgvector/pgvector:pg16
+    restart: "no"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-academic_cluster}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      APP_POSTGRES_USER: ${APP_POSTGRES_USER:-academic_app}
+      APP_POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?APP_POSTGRES_PASSWORD must be set}
+    entrypoint: ["/bin/sh", "/migrations/security-migrate.sh"]
+    volumes:
+      - ./scripts/migrate_security.sql:/migrations/migrate_security.sql:ro
+      - ./docker/postgres/security-migrate.sh:/migrations/security-migrate.sh:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - academic-cluster-network
+
   # =============================================================================
   # Backend API (FastAPI + LangGraph Agent)
   # =============================================================================
@@ -86,13 +106,17 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${APP_POSTGRES_USER:-academic_app}
+      POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD:?APP_POSTGRES_PASSWORD must be set}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      security-migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     volumes:

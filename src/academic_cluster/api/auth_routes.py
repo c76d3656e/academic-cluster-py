@@ -51,6 +51,8 @@ async def register(
     password_service: PasswordService = Depends(get_password_service),
 ) -> UserResponse:
     """用户注册"""
+    if not get_settings().registration_enabled:
+        raise HTTPException(status_code=403, detail="Public registration is disabled")
     existing = await db.get_user_by_email(body.email)
     if existing:
         # 安全修复: 使用模糊错误信息，防止用户枚举攻击

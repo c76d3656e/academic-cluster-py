@@ -236,11 +236,20 @@ async def stream_events(
     if not user or not user.get("is_active", False):
         raise HTTPException(status_code=401, detail="User not found or deactivated")
 
-    # 权限检查: 验证用户有权访问该项目
+    from ..services.tenant_context import set_tenant_context
+    from .dependencies import project_access_allowed
+
+    organization_id = user.get("default_organization_id")
+    user["active_organization_id"] = organization_id
+    set_tenant_context(
+        user_id=user_id,
+        organization_id=str(organization_id) if organization_id else None,
+        is_admin=user.get("role") == "admin",
+    )
     project = await db.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    if project.get("user_id") != user["id"] and user.get("role") != "admin":
+    if not project_access_allowed(project, user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     manager = get_sse_manager()
