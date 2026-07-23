@@ -1,0 +1,54 @@
+{
+  "fixture_version": "1.0.0",
+  "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json",
+  "node": "finalize",
+  "contract_version": "1.0.0",
+  "expected_variant": "success",
+  "context": {
+    "expected_entry": "finalize",
+    "required_state_fields": [
+      "project_id",
+      "execution_id",
+      "topic",
+      "final_review",
+      "peer_review_complete"
+    ],
+    "before": {
+      "project_id": "contract-project",
+      "execution_id": "contract-execution",
+      "topic": "deterministic agent contracts",
+      "papers": [{ "id": "paper-1", "title": "Fixture" }],
+      "research_complete": true,
+      "analysis_complete": true,
+      "writing_complete": true,
+      "peer_review_complete": true,
+      "final_review": "# Review\n\nEvidence [1].",
+      "final_references": [
+        { "original_number": 1, "new_number": 1, "paper_id": "paper-1" }
+      ]
+    }
+  },
+  "error": {
+    "mode": "terminal_failure",
+    "state_patch": {
+      "current_phase": "completed",
+      "status": "failed",
+      "terminal_failure": true,
+      "errors": ["terminal contract failure"]
+    },
+    "expected_route": "__end__"
+  },
+  "fallback": {
+    "mode": "warning_completion",
+    "state_patch": {
+      "current_phase": "completed",
+      "status": "completed_with_warnings",
+      "warnings": ["quality threshold exhausted"]
+    },
+    "expected_route": "__end__"
+  },
+  "acceptance": {
+    "expected_accepted": true,
+    "expected_artifact_version": "1.0.0"
+  }
+}

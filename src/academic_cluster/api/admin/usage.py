@@ -185,15 +185,29 @@ async def get_usage_by_provider(
 @router.get("/recent-calls", response_model=list[RecentCallItem])
 async def get_recent_calls(
     limit: int = 50,
+    skip: int = 0,
+    call_type: str | None = None,
+    status: str | None = None,
     admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
 ) -> list[RecentCallItem]:
-    """获取最近的 LLM 调用记录"""
+    """获取全局模型调用记录（支持分页及类型/状态筛选）。"""
     limit = max(1, min(limit, 200))
+    skip = max(0, skip)
+
+    conditions: list[str] = []
+    params: dict[str, Any] = {"limit": limit, "skip": skip}
+    if call_type:
+        conditions.append("lc.call_type = :call_type")
+        params["call_type"] = call_type
+    if status:
+        conditions.append("lc.status = :status")
+        params["status"] = status
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
     async with db.session() as session:
         result = await session.execute(
-            text("""
+            text(f"""
                 SELECT lc.id, lc.pipeline_run_id, COALESCE(lc.project_id, pr.project_id) AS project_id, p.name AS project_name,
                        p.user_id, u.email AS user_email,
                        lc.node_execution_id, COALESCE(lc.node_name, ne.node_name) AS node_name,
@@ -210,10 +224,12 @@ async def get_recent_calls(
                 LEFT JOIN projects p ON COALESCE(lc.project_id, pr.project_id) = p.id
                 LEFT JOIN users u ON p.user_id = u.id
                 LEFT JOIN node_executions ne ON lc.node_execution_id = ne.id
+                {where_clause}
                 ORDER BY lc.created_at DESC
                 LIMIT :limit
-            """),
-            {"limit": limit},
+                OFFSET :skip
+            """),  # nosec B608 -- clauses are selected from fixed literals above
+            params,
         )
         rows = result.fetchall()
 

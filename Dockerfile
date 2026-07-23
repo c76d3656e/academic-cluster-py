@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/astral-sh/uv:0.7-python3.12-bookworm-slim AS builder
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.7-python3.12-bookworm-slim@sha256:0213115f0f4e8e3a3416441723526f0b3197ef3f6df69916397a9195d1fc7774
+ARG PYTHON_IMAGE=python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+FROM ${UV_IMAGE} AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -19,11 +21,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Layer 2: 复制源码并安装项目本体（源码变动只重跑这一层）
 COPY src/ src/
 COPY pyproject.toml uv.lock README.md ./
+COPY scripts/migrate_agent_tables.sql scripts/migrate_agent_tables.sql
+COPY scripts/migrate_security.sql scripts/migrate_security.sql
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
-FROM python:3.12-slim AS production
+FROM ${PYTHON_IMAGE} AS production
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
@@ -38,6 +42,8 @@ COPY --from=builder --chown=appuser:appuser /app/pyproject.toml /app/pyproject.t
 
 COPY --chown=appuser:appuser src/ src/
 COPY --chown=appuser:appuser jcrdata/ jcrdata/
+COPY --chown=appuser:appuser scripts/migrate_agent_tables.sql scripts/migrate_agent_tables.sql
+COPY --chown=appuser:appuser scripts/migrate_security.sql scripts/migrate_security.sql
 
 RUN mkdir -p data/raw data/processed data/embeddings logs && \
     chown -R appuser:appuser data logs
@@ -45,6 +51,7 @@ RUN mkdir -p data/raw data/processed data/embeddings logs && \
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    LANGGRAPH_STRICT_MSGPACK=true \
     PYTHONPATH=/app/src
 
 USER appuser

@@ -18,10 +18,8 @@ _fernet: Fernet | None = None
 
 _KEY_FILE = "/app/data/.provider_encryption_key"
 
-
 def _load_or_generate_key() -> str:
     """从文件或环境变量获取密钥，未设置时自动生成并持久化。"""
-    # 1. 环境变量优先
     from ..config import get_settings
 
     settings = get_settings()

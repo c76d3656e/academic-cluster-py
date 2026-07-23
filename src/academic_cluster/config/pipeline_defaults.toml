@@ -1,0 +1,443 @@
+[[items]]
+key = "ui.show_usage"
+value = "false"
+label = "显示调用明细"
+description = "允许研究者在项目页查看自己的模型调用明细。"
+group = "界面"
+type = "bool"
+
+[[items]]
+key = "embedding.target_dimensions"
+value = "1024"
+label = "Embedding 统一维度"
+description = "所有写入向量库的 Embedding 必须匹配该维度。切换模型维度后先更新此值，再重新生成旧向量；系统对统一维度使用精确相似度检索。"
+group = "Embedding"
+type = "integer"
+minimum = 1
+maximum = 16000
+
+[[items]]
+key = "writing.default_target_words"
+value = "12000"
+label = "默认文章目标字数"
+description = "新项目未指定目标字数时使用；已保存项目配置优先。"
+group = "写作"
+type = "integer"
+minimum = 1000
+maximum = 100000
+
+[[items]]
+key = "writing.quality_threshold"
+value = "75"
+label = "同行评审通过分数"
+description = "低于该分数时进入修订流程。"
+group = "写作"
+type = "number"
+minimum = 0
+maximum = 100
+
+[[items]]
+key = "writing.minimum_body_ratio"
+value = "0.40"
+label = "正文最低比例"
+description = "正文至少应达到目标字数的比例，不含参考文献。"
+group = "写作"
+type = "number"
+minimum = 0.1
+maximum = 1.0
+
+[[items]]
+key = "writing.minimum_body_tolerance"
+value = "0.05"
+label = "正文长度容差"
+description = "对正文最低比例允许的相对偏差，例如 0.05 表示允许少 5%。"
+group = "写作"
+type = "number"
+minimum = 0.0
+maximum = 0.25
+
+[[items]]
+key = "research.enabled_sources"
+value = "[\"semantic_scholar\", \"arxiv\", \"pubmed\", \"crossref\", \"openalex\"]"
+label = "启用检索源"
+description = "每次关键词检索并发查询的学术数据源。"
+group = "检索"
+type = "sources"
+options = ["semantic_scholar", "arxiv", "pubmed", "crossref", "openalex"]
+
+[[items]]
+key = "research.results_per_source"
+value = "100"
+label = "单源单次结果数"
+description = "每次关键词检索向每个启用来源请求的最大论文数。"
+group = "检索"
+type = "integer"
+minimum = 1
+maximum = 100
+
+[[items]]
+key = "research.default_target_papers"
+value = "50"
+label = "默认目标论文数"
+description = "新项目未指定目标论文数时使用。"
+group = "检索"
+type = "integer"
+minimum = 1
+maximum = 500
+
+[[items]]
+key = "research.request_timeout_seconds"
+value = "30"
+label = "单源请求超时"
+description = "每个学术检索 HTTP 请求的超时秒数。"
+group = "检索"
+type = "number"
+minimum = 1
+maximum = 300
+
+[[items]]
+key = "research.total_timeout_seconds"
+value = "120"
+label = "多源检索总超时"
+description = "一次跨源并发检索允许的总时长。"
+group = "检索"
+type = "number"
+minimum = 5
+maximum = 900
+
+[[items]]
+key = "research.max_retries"
+value = "3"
+label = "检索请求重试次数"
+description = "单个检索源遇到限流或临时错误时的最大尝试次数。"
+group = "检索"
+type = "integer"
+minimum = 1
+maximum = 8
+
+[[items]]
+key = "research.retry_after_cap_seconds"
+value = "60"
+label = "Retry-After 等待上限"
+description = "检索源返回 Retry-After 时允许等待的最长秒数。"
+group = "检索"
+type = "number"
+minimum = 1
+maximum = 300
+
+[[items]]
+key = "research.backoff_cap_seconds"
+value = "30"
+label = "检索退避上限"
+description = "指数退避的最长等待秒数。"
+group = "检索"
+type = "number"
+minimum = 1
+maximum = 120
+
+[[items]]
+key = "research.max_search_calls"
+value = "6"
+label = "单次运行最大检索轮数"
+description = "研究 Agent 在一个运行中可执行的关键词检索次数。"
+group = "检索"
+type = "integer"
+minimum = 1
+maximum = 12
+
+[[items]]
+key = "workflow.max_phase_attempts"
+value = "2"
+label = "阶段失败重试次数"
+description = "研究、分析或写作节点失败后的最大尝试总数。"
+group = "编排"
+type = "integer"
+minimum = 1
+maximum = 5
+
+[[items]]
+key = "workflow.max_research_rounds"
+value = "2"
+label = "覆盖不足补充轮数"
+description = "覆盖度不足时允许重新检索的最大轮数。"
+group = "编排"
+type = "integer"
+minimum = 1
+maximum = 5
+
+[[items]]
+key = "workflow.max_revision_attempts"
+value = "2"
+label = "同行评审修订次数"
+description = "同行评审未达标后允许的写作修订总次数。"
+group = "编排"
+type = "integer"
+minimum = 0
+maximum = 5
+
+[[items]]
+key = "analysis.processing_limit"
+value = "80"
+label = "知识图谱处理论文上限"
+description = "单次分析阶段允许进入知识图谱抽取的论文数。"
+group = "分析"
+type = "integer"
+minimum = 1
+maximum = 500
+
+[[items]]
+key = "analysis.kg_entities_per_paper"
+value = "8"
+label = "每篇实体上限"
+description = "知识图谱从每篇论文抽取的实体预算。"
+group = "分析"
+type = "integer"
+minimum = 1
+maximum = 50
+
+[[items]]
+key = "analysis.kg_relations_per_paper"
+value = "8"
+label = "每篇关系上限"
+description = "知识图谱从每篇论文抽取的关系预算。"
+group = "分析"
+type = "integer"
+minimum = 1
+maximum = 100
+
+[[items]]
+key = "analysis.kg_timeout_seconds"
+value = "300"
+label = "单篇知识图谱超时"
+description = "单篇论文知识图谱抽取的超时秒数。"
+group = "分析"
+type = "number"
+minimum = 10
+maximum = 1800
+
+[[items]]
+key = "analysis.evidence_processing_limit"
+value = "80"
+label = "证据卡片处理上限"
+description = "单次分析阶段生成证据卡片的最大论文数。"
+group = "分析"
+type = "integer"
+minimum = 1
+maximum = 500
+
+[[items]]
+key = "analysis.evidence_timeout_seconds"
+value = "900"
+label = "证据批处理超时"
+description = "一批证据卡片生成允许的总时长。"
+group = "分析"
+type = "number"
+minimum = 30
+maximum = 3600
+
+[[items]]
+key = "analysis.knn_neighbors"
+value = "8"
+label = "KNN 邻居数"
+description = "知识图谱聚类时每篇论文保留的相似邻居数。"
+group = "分析"
+type = "integer"
+minimum = 1
+maximum = 50
+
+[[items]]
+key = "analysis.knn_similarity_threshold"
+value = "0.3"
+label = "KNN 相似度阈值"
+description = "低于该余弦相似度的论文连接将被过滤。"
+group = "分析"
+type = "number"
+minimum = 0
+maximum = 1
+
+[[items]]
+key = "writing.min_references_per_section"
+value = "8"
+label = "章节最少参考文献"
+description = "证据规划时每个章节期望的最少引用数。"
+group = "写作"
+type = "integer"
+minimum = 1
+maximum = 100
+
+[[items]]
+key = "writing.max_references_per_section"
+value = "18"
+label = "章节最多参考文献"
+description = "证据规划时每个章节允许的最多引用数。"
+group = "写作"
+type = "integer"
+minimum = 1
+maximum = 200
+
+[[items]]
+key = "provider.request_timeout_seconds"
+value = "300"
+label = "模型请求超时"
+description = "LLM 与 Embedding 单次上游请求的默认超时。"
+group = "Provider"
+type = "number"
+minimum = 5
+maximum = 1800
+
+[[items]]
+key = "provider.router_retries"
+value = "1"
+label = "Router 故障转移次数"
+description = "LiteLLM Router 在不同 Provider 间的重试次数。"
+group = "Provider"
+type = "integer"
+minimum = 0
+maximum = 5
+
+[[items]]
+key = "provider.timeout_retries"
+value = "2"
+label = "调用超时尝试次数"
+description = "单次 LLM 调用发生超时时允许的总尝试次数。"
+group = "Provider"
+type = "integer"
+minimum = 1
+maximum = 5
+
+[[items]]
+key = "provider.retry_delay_seconds"
+value = "1"
+label = "调用重试基础等待"
+description = "模型请求重试前的基础等待秒数。"
+group = "Provider"
+type = "number"
+minimum = 0
+maximum = 30
+
+[[items]]
+key = "provider.timeout_grace_seconds"
+value = "60"
+label = "超时清理宽限"
+description = "上游超时后等待底层连接结束的额外秒数。"
+group = "Provider"
+type = "number"
+minimum = 0
+maximum = 300
+
+[[items]]
+key = "provider.allowed_failures"
+value = "3"
+label = "熔断失败次数"
+description = "Provider 进入冷却前允许的连续失败次数。"
+group = "Provider"
+type = "integer"
+minimum = 1
+maximum = 20
+
+[[items]]
+key = "provider.cooldown_seconds"
+value = "60"
+label = "Provider 冷却时间"
+description = "熔断后暂停向 Provider 发送请求的秒数。"
+group = "Provider"
+type = "number"
+minimum = 1
+maximum = 3600
+
+[[items]]
+key = "provider.default_rpm"
+value = "10"
+label = "默认 RPM"
+description = "Provider 未明确填写 RPM 时使用的安全默认值。"
+group = "Provider"
+type = "integer"
+minimum = 1
+maximum = 10000
+
+[[items]]
+key = "rerank.enabled"
+value = "false"
+label = "启用检索重排"
+description = "使用已启用的 rerank Provider 对跨源论文结果重新排序。"
+group = "Rerank"
+type = "bool"
+
+[[items]]
+key = "rerank.candidate_limit"
+value = "500"
+label = "重排候选上限"
+description = "每次检索最多发送给 rerank Provider 的论文数量。"
+group = "Rerank"
+type = "integer"
+minimum = 1
+maximum = 1000
+
+[[items]]
+key = "rerank.top_n"
+value = "100"
+label = "重排重点结果数"
+description = "Provider 返回的高相关结果数量，其余结果保持原顺序追加。"
+group = "Rerank"
+type = "integer"
+minimum = 1
+maximum = 1000
+
+[[items]]
+key = "rerank.timeout_seconds"
+value = "60"
+label = "Rerank 请求超时"
+description = "单个 rerank Provider 请求的超时秒数。"
+group = "Rerank"
+type = "number"
+minimum = 1
+maximum = 600
+
+[[items]]
+key = "rerank.max_retries"
+value = "2"
+label = "Rerank Provider 尝试数"
+description = "按优先级尝试可用 rerank Provider 的最大次数。"
+group = "Rerank"
+type = "integer"
+minimum = 1
+maximum = 10
+
+[[items]]
+key = "rerank.failure_mode"
+value = "passthrough"
+label = "Rerank 失败语义"
+description = "passthrough 保留原顺序继续；fail 终止当前检索节点。"
+group = "Rerank"
+type = "choice"
+options = ["passthrough", "fail"]
+
+[[items]]
+key = "rerank.max_concurrent_requests"
+value = "4"
+label = "Rerank 最大并发"
+description = "进程内同时执行的 rerank 请求上限。"
+group = "Rerank"
+type = "integer"
+minimum = 1
+maximum = 128
+
+[[items]]
+key = "rerank.max_queued_requests"
+value = "32"
+label = "Rerank 排队上限"
+description = "并发满时允许等待的 rerank 请求数量。"
+group = "Rerank"
+type = "integer"
+minimum = 0
+maximum = 10000
+
+[[items]]
+key = "rerank.queue_wait_timeout_seconds"
+value = "120"
+label = "Rerank 排队超时"
+description = "等待 rerank 并发槽位的最长秒数。"
+group = "Rerank"
+type = "number"
+minimum = 1
+maximum = 3600

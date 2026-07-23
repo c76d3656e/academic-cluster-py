@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json",
+  "title": "Academic Cluster Agent Node Acceptance Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fixture_version",
+    "schema",
+    "node",
+    "contract_version",
+    "expected_variant",
+    "context",
+    "error",
+    "fallback",
+    "acceptance"
+  ],
+  "properties": {
+    "fixture_version": { "const": "1.0.0" },
+    "schema": {
+      "const": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json"
+    },
+    "node": {
+      "enum": [
+        "supervisor",
+        "research",
+        "analysis",
+        "writing",
+        "peer_review",
+        "finalize"
+      ]
+    },
+    "contract_version": { "const": "1.0.0" },
+    "expected_variant": { "type": "string", "minLength": 1 },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_entry", "required_state_fields", "before"],
+      "properties": {
+        "expected_entry": {
+          "enum": [
+            "supervisor",
+            "research",
+            "analysis",
+            "writing",
+            "peer_review",
+            "finalize"
+          ]
+        },
+        "required_state_fields": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "before": {
+          "type": "object",
+          "required": ["project_id", "execution_id", "topic"]
+        }
+      }
+    },
+    "error": { "$ref": "#/$defs/scenario" },
+    "fallback": { "$ref": "#/$defs/scenario" },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_accepted", "expected_artifact_version"],
+      "properties": {
+        "expected_accepted": { "const": true },
+        "expected_artifact_version": { "const": "1.0.0" }
+      }
+    }
+  },
+  "$defs": {
+    "route": {
+      "enum": [
+        "research",
+        "analysis",
+        "writing",
+        "peer_review",
+        "finalize",
+        "__end__"
+      ]
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "state_patch", "expected_route"],
+      "properties": {
+        "mode": { "type": "string", "minLength": 1 },
+        "state_patch": { "type": "object" },
+        "expected_route": { "$ref": "#/$defs/route" }
+      }
+    }
+  }
+}

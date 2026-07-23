@@ -10,32 +10,41 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   python-lint:
     name: Python Lint & Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --frozen --all-extras
 
       - name: Ruff lint
-        run: uv run ruff check src/
+        run: uv run ruff check src/ tests/
 
       - name: Ruff format check
-        run: uv run ruff format --check src/
+        run: uv run ruff format --check src/ tests/
 
       - name: Mypy type check
         run: uv run mypy src/academic_cluster/
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Verify migration SQL is packaged
+        run: uv run python -c "import glob, zipfile; wheel = glob.glob('dist/*.whl')[0]; names = zipfile.ZipFile(wheel).namelist(); assert 'academic_cluster/sql/migrate_agent_tables.sql' in names; assert 'academic_cluster/sql/migrate_security.sql' in names"
 
   python-test:
     name: Python Tests
@@ -43,7 +52,7 @@ jobs:
     needs: python-lint
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:1d533553fefe4f12e5d80c7b80622ba0c382abb5758856f52983d8789179f0fb
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: test
@@ -56,7 +65,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         ports:
           - 6379:6379
         options: >-
@@ -65,31 +74,55 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/academic_cluster_test
-      REDIS_URL: redis://localhost:6379/0
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: academic_cluster_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      ACADEMIC_CLUSTER_TEST_DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/academic_cluster_test
+      LANGGRAPH_STRICT_MSGPACK: "true"
       JWT_SECRET_KEY: test-secret-key-for-ci-only
       APP_SECRET_KEY: test-app-secret-key-for-ci-only
       APP_ENV: testing
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --frozen --all-extras
 
-      - name: Run tests
-        run: uv run pytest tests/unit/ -v --tb=short --cov=academic_cluster --cov-report=xml --cov-report=term-missing
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Initialize database schema
+        env:
+          PGPASSWORD: test
+        run: psql -h localhost -U postgres -d academic_cluster_test -v ON_ERROR_STOP=1 -f docker/postgres/init.sql
+
+      - name: Apply tenant security migration
+        env:
+          PGPASSWORD: test
+        run: psql -h localhost -U postgres -d academic_cluster_test -v ON_ERROR_STOP=1 -f scripts/migrate_security.sql
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit/ -m "not integration and not live" -v --tb=short --cov=academic_cluster --cov-report=xml --cov-report=term-missing
+
+      - name: Run PostgreSQL integration tests
+        run: uv run pytest tests/integration/ -m "integration and not live" -v --tb=short
 
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-report
           path: coverage.xml
@@ -98,24 +131,67 @@ jobs:
     name: Python Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --frozen --all-extras
 
       - name: Bandit security scan
         run: uv run bandit -r src/ -c pyproject.toml
 
       - name: Pip audit
         run: uv run pip-audit
+
+      - name: Repository vulnerability, secret and misconfiguration scan
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  node-contract-eval:
+    name: Node Contract & Promptfoo Evaluation
+    runs-on: ubuntu-latest
+    needs: python-lint
+    env:
+      PROMPTFOO_DISABLE_TELEMETRY: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Install Python dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Check generated node contracts
+        run: uv run python scripts/export_node_contracts.py --check
+
+      - name: Run deterministic Promptfoo acceptance
+        working-directory: promptfoo
+        env:
+          PROMPTFOO_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: npx --yes promptfoo@0.121.19 eval --config promptfooconfig.yaml --no-cache
 
   frontend-lint:
     name: Frontend Lint & Type Check
@@ -124,10 +200,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"
           cache: "npm"
@@ -136,11 +212,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Dependency security audit
+        run: npm audit --audit-level=high
+
       - name: ESLint
         run: npm run lint
 
       - name: Type check
         run: npm run type-check
+
+      - name: Unit tests
+        run: npm test
 
       - name: Build
         run: npm run build
@@ -150,37 +232,55 @@ jobs:
     runs-on: ubuntu-latest
     needs: [python-lint, frontend-lint]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Hadolint backend Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
           dockerfile: Dockerfile
           ignore: DL3008
 
       - name: Hadolint frontend Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
           dockerfile: frontend/Dockerfile
           ignore: DL3008
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: false
+          load: true
           tags: academic-cluster:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Build frontend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ./frontend
           push: false
+          load: true
           tags: academic-cluster-frontend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          image-ref: academic-cluster:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          image-ref: academic-cluster-frontend:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"

@@ -1,9 +1,13 @@
-from academic_cluster.agents.section_evaluator import _check_citation_format
+import pytest
+
 from academic_cluster.services.citation_utils import (
+    MalformedCitationError,
     normalize_citation_surface,
+    renumber_citations_by_first_use,
     strip_body_structure_leakage,
+    strip_reference_block,
     strip_revision_commentary,
-    strip_unsupported_precise_metrics,
+    strip_section_reference_block,
 )
 
 
@@ -55,36 +59,6 @@ def test_strip_revision_commentary_removes_think_blocks():
     assert cleaned == "正式正文保留[1]。"
 
 
-def test_strip_unsupported_precise_metrics_keeps_metrics_present_in_evidence():
-    content = "该系统在测试集中达到87.3%的偏好匹配率[1]。但另一个未证实指标为63.2%[1]。"
-    cards = [{"metric": "87.3%", "evidence_span": "test preference rate reaches 87.3%"}]
-
-    cleaned = strip_unsupported_precise_metrics(content, cards)
-
-    assert "87.3%" in cleaned
-    # 有引用标记 [N] 的句子即使指标不在 evidence card 中也保留（指标来自被引文献）
-    assert "63.2%" in cleaned
-
-
-def test_strip_unsupported_precise_metrics_removes_metric_without_citation():
-    content = "该系统在测试集中达到87.3%的偏好匹配率。另一个未证实指标为63.2%。"
-    cards = [{"metric": "87.3%", "evidence_span": "test preference rate reaches 87.3%"}]
-
-    cleaned = strip_unsupported_precise_metrics(content, cards)
-
-    # 无引用标记时，unsupported metric 仍然应该被删除
-    assert "87.3%" in cleaned
-    assert "63.2%" not in cleaned
-
-
-def test_strip_unsupported_precise_metrics_does_not_remove_years_or_plain_citations():
-    content = "2024年的研究指出该方向仍在发展[1]。该结论与后续工作一致[2]。"
-
-    cleaned = strip_unsupported_precise_metrics(content, [{"claim": "该方向仍在发展"}])
-
-    assert cleaned == content
-
-
 def test_normalize_citation_surface_unwraps_parenthesized_numeric_citations():
     content = "医疗场景（[7]）与自动驾驶([8])存在差异，而占位符([x])应删除。"
 
@@ -115,19 +89,220 @@ def test_normalize_citation_surface_removes_placeholder_citation_chains():
     assert "[1,2]" in cleaned
 
 
-def test_check_citation_format_flags_parenthesized_citation_prose():
-    draft = "特别是在5G/6G网络延迟波动场景中（文献[24][28]已证实网络稳定性对技术效能的影响系数达0.65），探索轻量化评估框架。"
+def test_full_width_semicolon_citations_are_parsed_and_renumbered():
+    renumbered, mappings = renumber_citations_by_first_use(
+        "联合证据 [2；1]。",
+        {
+            1: {"paper_id": "paper-1", "title": "First"},
+            2: {"paper_id": "paper-2", "title": "Second"},
+        },
+    )
 
-    result = _check_citation_format(draft)
-
-    assert result["parenthesized_citation_count"] == 1
-    assert result["issues"]
+    assert renumbered == "联合证据 [1,2]。"
+    assert [mapping["original_number"] for mapping in mappings] == [2, 1]
 
 
-def test_check_citation_format_flags_adjacent_numeric_citations():
-    draft = "已有研究[24][28]证实网络稳定性的重要性。"
+def test_normalize_citation_surface_preserves_code_and_math_regions():
+    content = (
+        "正文占位符([x])应删除，真实引用([8])应展开。\n\n"
+        "```python\n"
+        "matrix[x] = refs[1,2]\n"
+        "wrapped = ([x])\n"
+        "```\n\n"
+        "    indented[x] = refs[1,2]\n\n"
+        "`inline[x] + refs[1,2] + ([x])`\n\n"
+        "$A[x] + B[1,2]$\n\n"
+        "$$\nC[x] + D[1,2]\n$$\n\n"
+        r"\(E[x] + F[1,2]\)"
+        "\n\n"
+        r"\[G[x] + H[1,2]\]"
+    )
 
-    result = _check_citation_format(draft)
+    cleaned = normalize_citation_surface(content)
 
-    assert result["adjacent_numeric_citation_count"] == 1
-    assert result["issues"]
+    assert "正文占位符" in cleaned
+    assert "([x])应删除" not in cleaned
+    assert "真实引用[8]应展开" in cleaned
+    assert "```python\nmatrix[x] = refs[1,2]\nwrapped = ([x])\n```" in cleaned
+    assert "    indented[x] = refs[1,2]" in cleaned
+    assert "`inline[x] + refs[1,2] + ([x])`" in cleaned
+    assert "$A[x] + B[1,2]$" in cleaned
+    assert "$$\nC[x] + D[1,2]\n$$" in cleaned
+    assert r"\(E[x] + F[1,2]\)" in cleaned
+    assert r"\[G[x] + H[1,2]\]" in cleaned
+
+
+def test_renumber_citations_ignores_code_and_math_first_appearances():
+    markdown = (
+        "```text\nprotected [2]\n```\n"
+        "    indented [1,2]\n"
+        "`inline [1]` $math[2]$ $$block[1,2]$$ "
+        r"\(latex[2]\) \[display[1,2]\]"
+        "\n"
+        "Visible second paper [2], then first paper [1]."
+    )
+    paper_map = {
+        1: {
+            "paper_id": "paper-1",
+            "title": "First",
+            "url": "https://example.org/paper-1",
+        },
+        2: {"paper_id": "paper-2", "title": "Second"},
+    }
+
+    renumbered, mappings = renumber_citations_by_first_use(markdown, paper_map)
+
+    assert "```text\nprotected [2]\n```" in renumbered
+    assert "    indented [1,2]" in renumbered
+    assert "`inline [1]`" in renumbered
+    assert "$math[2]$" in renumbered
+    assert "$$block[1,2]$$" in renumbered
+    assert r"\(latex[2]\)" in renumbered
+    assert r"\[display[1,2]\]" in renumbered
+    assert renumbered.endswith("Visible second paper [1], then first paper [2].")
+    assert [mapping["original_number"] for mapping in mappings] == [2, 1]
+    assert mappings[1]["url"] == "https://example.org/paper-1"
+
+
+def test_reference_block_strippers_ignore_headings_inside_fenced_code():
+    content = (
+        "Body cites [1].\n\n"
+        "```markdown\n"
+        "## References\n"
+        '[1] Example, "Code only", 2024\n'
+        "```"
+    )
+
+    assert strip_reference_block(content) == content
+    assert strip_section_reference_block(content) == content
+
+
+def test_strip_reference_block_preserves_a_following_appendix():
+    content = (
+        "# Review\n\nBody cites [1].\n\n"
+        "## References\n\n[1] Canonical source.\n\n"
+        "## Appendix\n\nSupplementary method."
+    )
+
+    cleaned = strip_reference_block(content)
+
+    assert (
+        cleaned == "# Review\n\nBody cites [1].\n\n## Appendix\n\nSupplementary method."
+    )
+
+
+@pytest.mark.parametrize("fence", ["```", "~~~"])
+def test_renumber_citations_preserves_crlf_fenced_code(fence: str):
+    markdown = (
+        f"{fence}text\r\nprotected [2]\r\n{fence}\r\n"
+        "Visible second paper [2], then first paper [1]."
+    )
+    paper_map = {
+        1: {"paper_id": "paper-1", "title": "First"},
+        2: {"paper_id": "paper-2", "title": "Second"},
+    }
+
+    renumbered, mappings = renumber_citations_by_first_use(markdown, paper_map)
+
+    assert f"{fence}text\r\nprotected [2]\r\n{fence}" in renumbered
+    assert renumbered.endswith("Visible second paper [1], then first paper [2].")
+    assert [mapping["original_number"] for mapping in mappings] == [2, 1]
+
+
+def test_renumber_citations_does_not_pair_currency_with_inline_math():
+    markdown = (
+        "Cost was $1,000,000 [2] and $5m [1]. "
+        "Formula $x[99]$ and visible [3]. Paired math $5 million$ stays protected."
+    )
+    paper_map = {
+        1: {"paper_id": "paper-1", "title": "First"},
+        2: {"paper_id": "paper-2", "title": "Second"},
+        3: {"paper_id": "paper-3", "title": "Third"},
+    }
+
+    renumbered, mappings = renumber_citations_by_first_use(markdown, paper_map)
+
+    assert "Cost was $1,000,000 [1] and $5m [2]." in renumbered
+    assert "Formula $x[99]$" in renumbered
+    assert renumbered.endswith("visible [3]. Paired math $5 million$ stays protected.")
+    assert [mapping["original_number"] for mapping in mappings] == [2, 1, 3]
+
+
+def test_renumber_citations_supports_common_currency_surfaces():
+    markdown = (
+        "Rates were $5/GB [2], $-10 [1], $.50 [3], $2\u202f000 [4], and $5mm [5]."
+    )
+    paper_map = {
+        number: {"paper_id": f"paper-{number}", "title": str(number)}
+        for number in range(1, 6)
+    }
+
+    renumbered, mappings = renumber_citations_by_first_use(markdown, paper_map)
+
+    assert renumbered == (
+        "Rates were $5/GB [1], $-10 [2], $.50 [3], $2\u202f000 [4], and $5mm [5]."
+    )
+    assert [mapping["original_number"] for mapping in mappings] == [2, 1, 3, 4, 5]
+
+
+def test_renumber_citations_preserves_currency_like_numeric_math():
+    markdown = (
+        "Formula $5[99]$ and $5 million [98]$ remain protected; "
+        "visible second [2], then first [1]."
+    )
+    paper_map = {
+        1: {"paper_id": "paper-1", "title": "First"},
+        2: {"paper_id": "paper-2", "title": "Second"},
+    }
+
+    renumbered, mappings = renumber_citations_by_first_use(markdown, paper_map)
+
+    assert "$5[99]$" in renumbered
+    assert "$5 million [98]$" in renumbered
+    assert renumbered.endswith("visible second [1], then first [2].")
+    assert [mapping["original_number"] for mapping in mappings] == [2, 1]
+
+
+@pytest.mark.parametrize(
+    "token,pattern",
+    [
+        ("3-1", "ascending"),
+        ("2-50", "exceeds"),
+        ("1-", "malformed"),
+    ],
+)
+def test_renumber_citations_rejects_malformed_ranges(token: str, pattern: str):
+    with pytest.raises(MalformedCitationError, match=pattern):
+        renumber_citations_by_first_use(
+            f"Unsupported range [{token}].",
+            {1: {"paper_id": "paper-1"}},
+        )
+
+
+def test_four_digit_values_outside_year_range_are_not_year_brackets():
+    with pytest.raises(ValueError, match="unknown citation number: 9999"):
+        renumber_citations_by_first_use(
+            "Unsupported citation [9999].",
+            {1: {"paper_id": "paper-1"}},
+        )
+
+
+def test_strip_section_reference_block_removes_unquoted_bibliography_lines():
+    content = (
+        "Body cites [1].\n\n"
+        "[1] Smith. Paper title. Journal, 2024.\n"
+        "[2] J. Doe, Another paper title, Journal, 2023.\n"
+        "[3] 王伟, 李明. 中文标题. 期刊, 2022."
+    )
+
+    assert strip_section_reference_block(content) == "Body cites [1]."
+
+
+def test_strip_section_reference_block_preserves_narrative_citation_lines():
+    content = (
+        "Body cites [1].\n\n[1] Smith proposed the method in 2024.\n"
+        "[2] 王伟提出了方法，发表于2024年。\n"
+        "[3] Smith. Their method improved in 2024."
+    )
+
+    assert strip_section_reference_block(content) == content

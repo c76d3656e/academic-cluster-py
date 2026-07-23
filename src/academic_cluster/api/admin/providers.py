@@ -13,11 +13,41 @@ from sqlalchemy import text
 
 from ...services.crypto import decrypt_key, encrypt_key, mask_key
 from ...services.database import DatabaseService, get_database
+from ...services.url_security import (
+    UnsafeOutboundUrlError,
+    validate_outbound_url,
+    validate_outbound_url_syntax,
+)
 from ..dependencies import require_admin
 
 logger = structlog.get_logger()
 
 router = APIRouter(tags=["admin-providers"])
+
+
+async def _audit_provider_action(
+    db: DatabaseService,
+    admin: dict[str, Any],
+    action: str,
+    provider_id: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    """Persist security-sensitive Provider administration without leaking keys."""
+    try:
+        await db.log_activity(
+            user_id=str(admin["id"]),
+            action=f"provider.{action}",
+            resource_type="provider",
+            resource_id=provider_id,
+            details=details or {},
+        )
+    except Exception as error:
+        logger.warning(
+            "Failed to persist provider audit",
+            provider_id=provider_id,
+            action=action,
+            error=str(error),
+        )
 
 
 async def _reload_runtime_pools() -> int:
@@ -61,13 +91,8 @@ class ProviderCreateRequest(BaseModel):
     model: str | None = None
     api_key: str | None = None
     is_enabled: bool = True
-    priority: int = Field(default=100, ge=1)
-    rpm_limit: int = Field(default=10, ge=1)
-    weight: int = Field(default=1, ge=1)
-    extra_keys: list[str] | None = None
-    key_strategy: str = Field(
-        default="round_robin", pattern="^(round_robin|random|priority)$"
-    )
+    priority: int = Field(default=100, ge=1, strict=True)
+    rpm_limit: int = Field(default=10, ge=1, strict=True)
     auto_ban: bool = True
     test_model: str | None = None
     input_price_per_m: float = Field(default=0, ge=0, description="输入价格 $/M tokens")
@@ -85,11 +110,8 @@ class ProviderUpdateRequest(BaseModel):
     model: str | None = None
     api_key: str | None = None
     is_enabled: bool | None = None
-    priority: int | None = None
-    rpm_limit: int | None = None
-    weight: int | None = None
-    extra_keys: list[str] | None = None
-    key_strategy: str | None = None
+    priority: int | None = Field(default=None, ge=1, strict=True)
+    rpm_limit: int | None = Field(default=None, ge=1, strict=True)
     auto_ban: bool | None = None
     test_model: str | None = None
     input_price_per_m: float | None = None
@@ -109,8 +131,6 @@ class ProviderResponse(BaseModel):
     is_enabled: bool = True
     priority: int = 100
     rpm_limit: int = 10
-    weight: int = 1
-    key_strategy: str = "round_robin"
     health_status: str = "unknown"
     last_health_check: str | None = None
     last_error: str | None = None
@@ -121,7 +141,6 @@ class ProviderResponse(BaseModel):
     input_price_per_m: float = 0
     output_price_per_m: float = 0
     metadata: dict[str, Any] | None = None
-    extra_key_count: int = 0
     created_by: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -150,12 +169,22 @@ class ReloadResult(BaseModel):
     message: str
 
 
+class ProviderDeleteResponse(BaseModel):
+    """Deleted provider identity and resulting runtime pool size."""
+
+    id: str
+    kind: str
+    display_name: str
+    reloaded: int = 0
+    message: str
+
+
 # =============================================================================
 # 辅助函数
 # =============================================================================
 
 
-def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
+def _row_to_provider(row: Any) -> ProviderResponse:
     """将数据库行转换为 ProviderResponse（支持 tuple 或 RowMapping）"""
     m = row._mapping if hasattr(row, "_mapping") else row
 
@@ -167,17 +196,6 @@ def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
         except Exception:
             api_key_hint = "****"
 
-    extra_key_count = 0
-    raw = extra_keys_raw if extra_keys_raw is not None else m.get("extra_keys")
-    if raw:
-        import json
-
-        try:
-            keys = json.loads(raw) if isinstance(raw, str) else raw
-            extra_key_count = len(keys) if isinstance(keys, list) else 0
-        except Exception:  # nosec B110
-            pass
-
     return ProviderResponse(
         id=str(m["id"]),
         kind=m["kind"],
@@ -188,8 +206,6 @@ def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
         is_enabled=m["is_enabled"],
         priority=m["priority"],
         rpm_limit=m["rpm_limit"],
-        weight=m["weight"],
-        key_strategy=m["key_strategy"] or "round_robin",
         health_status=m["health_status"] or "unknown",
         last_health_check=str(m["last_health_check"])
         if m["last_health_check"]
@@ -202,7 +218,6 @@ def _row_to_provider(row: Any, extra_keys_raw: Any = None) -> ProviderResponse:
         input_price_per_m=float(m.get("input_price_per_m") or 0),
         output_price_per_m=float(m.get("output_price_per_m") or 0),
         metadata=m["metadata"] if isinstance(m["metadata"], dict) else None,
-        extra_key_count=extra_key_count,
         created_by=str(m["created_by"]) if m["created_by"] else None,
         created_at=str(m["created_at"]) if m["created_at"] else None,
         updated_at=str(m["updated_at"]) if m["updated_at"] else None,
@@ -221,7 +236,7 @@ async def list_providers(
     db: DatabaseService = Depends(get_database),
 ) -> ProviderListResponse:
     """列出所有 Provider"""
-    conditions = []
+    conditions = ["kind IN ('llm', 'embedding', 'rerank')"]
     params: dict[str, Any] = {}
 
     if kind:
@@ -234,10 +249,10 @@ async def list_providers(
         result = await session.execute(
             text(f"""
                 SELECT id, kind, display_name, base_url, model, api_key_enc,
-                       is_enabled, priority, rpm_limit, weight, key_strategy,
+                       is_enabled, priority, rpm_limit,
                        health_status, last_health_check, last_error, failure_count,
                        auto_ban, cooldown_until, test_model, metadata, created_by,
-                       created_at, updated_at, extra_keys,
+                       created_at, updated_at,
                        input_price_per_m, output_price_per_m
                 FROM provider_registry
                 {where_clause}
@@ -260,29 +275,28 @@ async def create_provider(
     """创建 Provider"""
     import json
 
+    try:
+        validate_outbound_url_syntax(body.base_url)
+    except UnsafeOutboundUrlError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
     # 加密 API Key
     api_key_enc = None
     if body.api_key:
         api_key_enc = encrypt_key(body.api_key)
 
     # 加密额外 Keys
-    extra_keys_enc = []
-    if body.extra_keys:
-        extra_keys_enc = [encrypt_key(k) for k in body.extra_keys]
-
     async with db.session() as session:
         result = await session.execute(
             text("""
                 INSERT INTO provider_registry (
                     kind, display_name, base_url, model, api_key_enc,
-                    is_enabled, priority, rpm_limit, weight, extra_keys,
-                    key_strategy, auto_ban, test_model,
+                    is_enabled, priority, rpm_limit, auto_ban, test_model,
                     input_price_per_m, output_price_per_m,
                     metadata, created_by
                 ) VALUES (
                     :kind, :display_name, :base_url, :model, :api_key_enc,
-                    :is_enabled, :priority, :rpm_limit, :weight, :extra_keys,
-                    :key_strategy, :auto_ban, :test_model,
+                    :is_enabled, :priority, :rpm_limit, :auto_ban, :test_model,
                     :input_price_per_m, :output_price_per_m,
                     :metadata, :created_by
                 )
@@ -297,9 +311,6 @@ async def create_provider(
                 "is_enabled": body.is_enabled,
                 "priority": body.priority,
                 "rpm_limit": body.rpm_limit,
-                "weight": body.weight,
-                "extra_keys": json.dumps(extra_keys_enc),
-                "key_strategy": body.key_strategy,
                 "auto_ban": body.auto_ban,
                 "test_model": body.test_model,
                 "input_price_per_m": body.input_price_per_m,
@@ -319,6 +330,18 @@ async def create_provider(
         kind=body.kind,
         name=body.display_name,
     )
+    await _audit_provider_action(
+        db,
+        admin,
+        "create",
+        provider_id,
+        {
+            "kind": body.kind,
+            "display_name": body.display_name,
+            "base_url": body.base_url,
+            "api_key_configured": bool(body.api_key),
+        },
+    )
     await _reload_runtime_pools()
 
     return ProviderResponse(
@@ -331,13 +354,10 @@ async def create_provider(
         is_enabled=body.is_enabled,
         priority=body.priority,
         rpm_limit=body.rpm_limit,
-        weight=body.weight,
-        key_strategy=body.key_strategy,
         health_status="unknown",
         auto_ban=body.auto_ban,
         test_model=body.test_model,
         metadata=body.metadata,
-        extra_key_count=len(body.extra_keys) if body.extra_keys else 0,
         created_at=str(row[1]),
     )
 
@@ -351,6 +371,17 @@ async def update_provider(
 ) -> ProviderResponse:
     """更新 Provider"""
     import json
+
+    if body.base_url is not None:
+        try:
+            validate_outbound_url_syntax(body.base_url)
+        except UnsafeOutboundUrlError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        if not body.api_key:
+            raise HTTPException(
+                status_code=422,
+                detail="changing a provider URL requires re-entering its API key",
+            )
 
     # 构建动态 UPDATE
     updates = []
@@ -377,15 +408,6 @@ async def update_provider(
     if body.rpm_limit is not None:
         updates.append("rpm_limit = :rpm_limit")
         params["rpm_limit"] = body.rpm_limit
-    if body.weight is not None:
-        updates.append("weight = :weight")
-        params["weight"] = body.weight
-    if body.extra_keys is not None:
-        updates.append("extra_keys = :extra_keys")
-        params["extra_keys"] = json.dumps([encrypt_key(k) for k in body.extra_keys])
-    if body.key_strategy is not None:
-        updates.append("key_strategy = :key_strategy")
-        params["key_strategy"] = body.key_strategy
     if body.auto_ban is not None:
         updates.append("auto_ban = :auto_ban")
         params["auto_ban"] = body.auto_ban
@@ -411,10 +433,10 @@ async def update_provider(
                 UPDATE provider_registry SET {", ".join(updates)}
                 WHERE id = :id
                 RETURNING id, kind, display_name, base_url, model, api_key_enc,
-                          is_enabled, priority, rpm_limit, weight, key_strategy,
+                          is_enabled, priority, rpm_limit,
                           health_status, last_health_check, last_error, failure_count,
                           auto_ban, cooldown_until, test_model, metadata, created_by,
-                          created_at, updated_at, extra_keys,
+                          created_at, updated_at,
                           input_price_per_m, output_price_per_m
             """),  # nosec B608
             params,
@@ -425,28 +447,68 @@ async def update_provider(
         raise HTTPException(status_code=404, detail="Provider 不存在")
 
     logger.info("Provider updated", provider_id=provider_id)
+    changed_fields = sorted(body.model_fields_set)
+    await _audit_provider_action(
+        db,
+        admin,
+        "update",
+        provider_id,
+        {
+            "changed_fields": changed_fields,
+            "base_url": body.base_url,
+            "api_key_rotated": "api_key" in body.model_fields_set,
+        },
+    )
     await _reload_runtime_pools()
     return _row_to_provider(row)
 
 
-@router.delete("/{provider_id}")
+@router.delete("/{provider_id}", response_model=ProviderDeleteResponse)
 async def delete_provider(
     provider_id: str,
     admin: dict[str, Any] = Depends(require_admin),
     db: DatabaseService = Depends(get_database),
-) -> dict[str, str]:
-    """删除 Provider"""
+) -> ProviderDeleteResponse:
+    """Delete one provider, audit the action and refresh runtime routing."""
     async with db.session() as session:
         result = await session.execute(
-            text("DELETE FROM provider_registry WHERE id = :id RETURNING id"),
+            text("""
+                DELETE FROM provider_registry
+                WHERE id = :id
+                RETURNING id, kind, display_name
+            """),
             {"id": provider_id},
         )
-        if not result.fetchone():
+        deleted = result.fetchone()
+        if not deleted:
             raise HTTPException(status_code=404, detail="Provider 不存在")
 
-    logger.info("Provider deleted", provider_id=provider_id)
-    await _reload_runtime_pools()
-    return {"message": "删除成功"}
+    deleted_id = str(deleted[0])
+    kind = str(deleted[1])
+    display_name = str(deleted[2])
+    reloaded = await _reload_runtime_pools()
+
+    await _audit_provider_action(
+        db,
+        admin,
+        "delete",
+        deleted_id,
+        {"kind": kind, "display_name": display_name},
+    )
+
+    logger.info(
+        "Provider deleted",
+        provider_id=deleted_id,
+        kind=kind,
+        runtime_providers=reloaded,
+    )
+    return ProviderDeleteResponse(
+        id=deleted_id,
+        kind=kind,
+        display_name=display_name,
+        reloaded=reloaded,
+        message="删除成功",
+    )
 
 
 @router.post("/{provider_id}/test", response_model=HealthTestResponse)
@@ -495,6 +557,7 @@ async def test_provider(
     # 根据 kind 执行不同的健康检查
     start = time.time()
     try:
+        await validate_outbound_url(base_url)
         if kind == "llm":
             await _test_llm(base_url, api_key, test_model or model)
         elif kind == "embedding":
@@ -507,6 +570,13 @@ async def test_provider(
         latency_ms = (time.time() - start) * 1000
         await _update_health(db, provider_id_str, "healthy", None)
         await _reload_runtime_pools()
+        await _audit_provider_action(
+            db,
+            admin,
+            "test",
+            provider_id_str,
+            {"kind": kind, "healthy": True},
+        )
         logger.info(
             "Provider health test passed",
             provider_id=provider_id_str,
@@ -524,6 +594,13 @@ async def test_provider(
         error_msg = str(e)[:500]
         await _update_health(db, provider_id_str, "error", error_msg)
         await _reload_runtime_pools()
+        await _audit_provider_action(
+            db,
+            admin,
+            "test",
+            provider_id_str,
+            {"kind": kind, "healthy": False, "error_type": type(e).__name__},
+        )
         logger.warning(
             "Provider health test failed", provider_id=provider_id_str, error=error_msg
         )
@@ -535,6 +612,12 @@ async def test_provider(
         )
 
 
+async def _provider_health_timeout() -> float:
+    from ...services.runtime_policy import get_runtime_policy
+
+    return (await get_runtime_policy()).provider_request_timeout_seconds
+
+
 async def _test_llm(base_url: str, api_key: str, model: str) -> None:
     """测试 LLM 端点（发送最小请求）"""
     import httpx
@@ -544,7 +627,11 @@ async def _test_llm(base_url: str, api_key: str, model: str) -> None:
         url += "/v1"
     url += "/chat/completions"
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(
+        timeout=await _provider_health_timeout(),
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
         resp = await client.post(
             url,
             headers={
@@ -570,7 +657,11 @@ async def _test_embedding(base_url: str, api_key: str, model: str) -> None:
         url += "/v1"
     url += "/embeddings"
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(
+        timeout=await _provider_health_timeout(),
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
         resp = await client.post(
             url,
             headers={
@@ -581,28 +672,75 @@ async def _test_embedding(base_url: str, api_key: str, model: str) -> None:
         )
         if resp.status_code >= 400:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            payload = resp.json()
+        except ValueError as error:
+            raise RuntimeError("embedding provider returned invalid JSON") from error
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+            raise RuntimeError("embedding provider returned an invalid response")
+
+        from ...services.embedding_service import _validated_embedding
+        from ...services.runtime_policy import get_runtime_policy
+
+        _validated_embedding(
+            data[0].get("embedding"),
+            expected_dimensions=(
+                await get_runtime_policy()
+            ).embedding_target_dimensions,
+        )
+
+
+def _rerank_endpoint(base_url: str) -> str:
+    url = base_url.strip().rstrip("/")
+    if url.casefold().endswith("/rerank"):
+        return url
+    if not url.casefold().endswith("/v1"):
+        url += "/v1"
+    return url + "/rerank"
 
 
 async def _test_rerank(base_url: str, api_key: str, model: str) -> None:
-    """测试 Rerank 端点"""
+    """Test an OpenAI-compatible rerank endpoint with two small documents."""
+
     import httpx
 
-    url = base_url.rstrip("/")
-    if not url.endswith("/v1"):
-        url += "/v1"
-    url += "/rerank"
-
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(
+        timeout=await _provider_health_timeout(),
+        follow_redirects=False,
+        trust_env=False,
+    ) as client:
         resp = await client.post(
-            url,
+            _rerank_endpoint(base_url),
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            json={"model": model, "query": "test", "documents": ["hello world"]},
+            json={
+                "model": model,
+                "query": "academic retrieval",
+                "documents": ["academic retrieval", "unrelated document"],
+                "top_n": 2,
+                "return_documents": False,
+            },
         )
         if resp.status_code >= 400:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            payload = resp.json()
+        except ValueError as error:
+            raise RuntimeError("rerank provider returned invalid JSON") from error
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list) or not results:
+            raise RuntimeError("rerank provider returned an invalid response")
+        for item in results:
+            if not isinstance(item, dict) or not isinstance(item.get("index"), int):
+                raise RuntimeError("rerank provider returned an invalid result index")
+            score = item.get("relevance_score", item.get("score"))
+            if not isinstance(score, int | float):
+                raise RuntimeError(
+                    "rerank provider returned an invalid relevance score"
+                )
 
 
 async def _update_health(
@@ -714,6 +852,9 @@ async def reload_providers(
 ) -> ReloadResult:
     """热重载 Provider 配置。DB 中 enabled provider 是运行时唯一来源。"""
     reloaded = await _reload_runtime_pools()
+    await _audit_provider_action(
+        db, admin, "reload", details={"runtime_providers": reloaded}
+    )
     return ReloadResult(reloaded=reloaded, message=f"成功重载 {reloaded} 个 Provider")
 
 
@@ -741,5 +882,12 @@ async def toggle_provider(
 
     state = "启用" if row[1] else "禁用"
     logger.info("Provider toggled", provider_id=provider_id, enabled=row[1])
+    await _audit_provider_action(
+        db,
+        admin,
+        "toggle",
+        str(row[0]),
+        {"is_enabled": bool(row[1])},
+    )
     await _reload_runtime_pools()
     return {"id": str(row[0]), "is_enabled": row[1], "message": f"已{state}"}

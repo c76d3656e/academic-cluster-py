@@ -1,34 +1,27 @@
 import js from '@eslint/js'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
-import pluginVue from 'eslint-plugin-vue'
-import vueParser from 'vue-eslint-parser'
 
-export default [
+export default tseslint.config(
   {
     ignores: ['dist/', 'node_modules/', '*.config.js'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  ...pluginVue.configs['flat/recommended'],
+  reactHooks.configs.flat.recommended,
+  reactRefresh.configs.vite,
   {
-    files: ['**/*.vue'],
-    languageOptions: {
-      parser: vueParser,
-      parserOptions: {
-        parser: tseslint.parser,
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-      },
-    },
-  },
-  {
+    files: ['src/**/*.{ts,tsx}'],
     rules: {
-      'vue/multi-word-component-names': 'off',
-      'vue/singleline-html-element-content-newline': 'off',
-      'vue/max-attributes-per-line': 'off',
-      'vue/require-default-prop': 'off',
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
-]
+  {
+    files: ['src/components/ui.tsx', 'src/lib/auth.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+)

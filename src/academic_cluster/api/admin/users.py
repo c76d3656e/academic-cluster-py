@@ -8,7 +8,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from ...models.user import UserListResponse, UserResponse
 from ...services.auth import PasswordService, get_password_service
@@ -28,8 +28,8 @@ router = APIRouter(tags=["admin-users"])
 class AdminCreateUserRequest(BaseModel):
     """管理员创建用户请求"""
 
-    email: str = Field(..., min_length=5, max_length=255)
-    password: str = Field(..., min_length=8, max_length=128)
+    email: EmailStr = Field(..., max_length=255)
+    password: str = Field(..., min_length=12, max_length=128)
     full_name: str | None = Field(None, max_length=255)
     role: str = Field("user", pattern="^(user|admin)$")
 
@@ -195,6 +195,9 @@ async def change_user_role(
     user = await db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+
+    if user_id == admin["id"] and body.role != "admin":
+        raise HTTPException(status_code=400, detail="不能降低自己的管理员权限")
 
     await db.set_user_role(user_id, body.role)
 

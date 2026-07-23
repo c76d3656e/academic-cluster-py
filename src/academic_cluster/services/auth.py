@@ -29,6 +29,7 @@ class PasswordService:
             memory_cost=65536,
             parallelism=4,
         )
+        self._dummy_hash = self._hasher.hash(secrets.token_urlsafe(32))
 
     def hash_password(self, plain: str) -> str:
         """哈希密码"""
@@ -45,6 +46,10 @@ class PasswordService:
         """检查是否需要重新哈希"""
         return self._hasher.check_needs_rehash(hashed)
 
+    def burn_unknown_user_check(self, plain: str) -> None:
+        """Equalize the expensive verification path for unknown login emails."""
+        self.verify_password(plain, self._dummy_hash)
+
 
 class TokenService:
     """JWT Token 服务"""
@@ -58,12 +63,15 @@ class TokenService:
         )
         self.refresh_token_expire = timedelta(days=settings.refresh_token_expire_days)
 
-    def create_access_token(self, user_id: str, role: str) -> str:
+    def create_access_token(
+        self, user_id: str, role: str, token_version: int = 0
+    ) -> str:
         """创建 Access Token"""
         now = datetime.now(UTC)
         payload = {
             "sub": user_id,
             "role": role,
+            "ver": token_version,
             "type": "access",
             "exp": now + self.access_token_expire,
             "iat": now,

@@ -25,7 +25,8 @@ class VectorStoreService:
         self,
         paper_ids: list[str],
         embeddings: list[list[float]],
-        model_name: str = "bge-m3",
+        *,
+        model_name: str,
     ) -> None:
         """
         添加嵌入向量
@@ -35,8 +36,13 @@ class VectorStoreService:
             embeddings: 嵌入向量列表
             model_name: 模型名称
         """
+        if len(paper_ids) != len(embeddings):
+            raise ValueError(
+                "paper_ids and embeddings must contain the same number of items"
+            )
+
         async with self.db.session() as session:
-            for paper_id, embedding in zip(paper_ids, embeddings, strict=False):
+            for paper_id, embedding in zip(paper_ids, embeddings, strict=True):
                 # 使用 UPSERT 语义
                 await session.execute(
                     text("""
@@ -55,45 +61,14 @@ class VectorStoreService:
 
         logger.info("Added embeddings", count=len(paper_ids))
 
-    async def search_similar(
-        self,
-        query_embedding: list[float],
-        limit: int = 10,
-        threshold: float = 0.5,
-    ) -> list[dict[str, Any]]:
-        """
-        搜索相似向量
-
-        Args:
-            query_embedding: 查询向量
-            limit: 返回结果数
-            threshold: 相似度阈值
-
-        Returns:
-            相似论文列表
-        """
-        async with self.db.session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT paper_id, similarity
-                    FROM search_similar_papers(:query_embedding, :limit, :threshold)
-                """),
-                {
-                    "query_embedding": str(query_embedding),
-                    "limit": limit,
-                    "threshold": threshold,
-                },
-            )
-
-            rows = result.fetchall()
-
-        return [{"paper_id": str(row[0]), "similarity": row[1]} for row in rows]
-
     async def get_knn_graph(
         self,
         paper_ids: list[str],
         k: int = 10,
         threshold: float = 0.5,
+        *,
+        model_name: str,
+        dimensions: int | None = None,
     ) -> list[dict[str, Any]]:
         """
         获取 KNN 图
@@ -106,44 +81,55 @@ class VectorStoreService:
         Returns:
             边列表 [{source, target, weight}]
         """
-        edges = []
-
+        if not paper_ids or k <= 0:
+            return []
         async with self.db.session() as session:
-            for paper_id in paper_ids:
-                # 获取该论文的嵌入向量
-                result = await session.execute(
-                    text("""
-                        SELECT vector FROM embeddings
-                        WHERE paper_id = :paper_id
-                        LIMIT 1
-                    """),
-                    {"paper_id": paper_id},
-                )
-                row = result.fetchone()
+            result = await session.execute(
+                text("""
+                    WITH project_embeddings AS MATERIALIZED (
+                        SELECT DISTINCT ON (paper_id) paper_id, vector
+                        FROM embeddings
+                        WHERE paper_id = ANY(CAST(:paper_ids AS uuid[]))
+                          AND model_name = :model_name
+                          AND (
+                              CAST(:dimensions AS INTEGER) IS NULL
+                              OR dimensions = CAST(:dimensions AS INTEGER)
+                          )
+                          AND vector IS NOT NULL
+                        ORDER BY paper_id, created_at DESC
+                    )
+                    SELECT source.paper_id, neighbor.paper_id, neighbor.similarity
+                    FROM project_embeddings AS source
+                    CROSS JOIN LATERAL (
+                        SELECT candidate.paper_id,
+                               1 - (source.vector <=> candidate.vector) AS similarity
+                        FROM project_embeddings AS candidate
+                        WHERE candidate.paper_id <> source.paper_id
+                          AND 1 - (source.vector <=> candidate.vector) >= :threshold
+                        ORDER BY source.vector <=> candidate.vector
+                        LIMIT :neighbor_count
+                    ) AS neighbor
+                """),
+                {
+                    "paper_ids": list(dict.fromkeys(paper_ids)),
+                    "neighbor_count": k,
+                    "threshold": threshold,
+                    "model_name": model_name,
+                    "dimensions": dimensions,
+                },
+            )
+            rows = result.fetchall()
 
-                if not row or not row[0]:
-                    continue
+        edges = [
+            {
+                "source": str(row[0]),
+                "target": str(row[1]),
+                "weight": float(row[2]),
+            }
+            for row in rows
+        ]
 
-                vector = row[0]
-
-                # 搜索相似论文
-                similar = await self.search_similar(
-                    query_embedding=vector,
-                    limit=k + 1,
-                    threshold=threshold,
-                )
-
-                for item in similar:
-                    if item["paper_id"] != paper_id:
-                        edges.append(
-                            {
-                                "source": paper_id,
-                                "target": item["paper_id"],
-                                "weight": item["similarity"],
-                            }
-                        )
-
-        logger.info("KNN graph built", edges=len(edges))
+        logger.info("Project-scoped KNN graph built", edges=len(edges))
         return edges
 
     async def close(self) -> None:

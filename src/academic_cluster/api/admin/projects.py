@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ...services.database import DatabaseService, get_database
 from ..dependencies import require_admin
+from ..routes import normalize_project_status
 
 logger = structlog.get_logger()
 
@@ -67,7 +68,7 @@ async def list_all_projects(
                 id=p["id"],
                 name=p.get("name", ""),
                 query=p.get("query", ""),
-                status=p.get("status", "created"),
+                status=normalize_project_status(p.get("status"))[0],
                 user_id=p.get("user_id"),
                 user_name=p.get("user_name"),
                 user_email=p.get("user_email"),
@@ -91,55 +92,9 @@ async def delete_project(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    # 使用原始 SQL 级联删除项目及相关数据
-    from sqlalchemy import text
+    from ...services.project_cleanup import delete_project_data
 
-    async with db.session() as session:
-        # 删除相关的 LLM 调用记录
-        await session.execute(
-            text("""
-                DELETE FROM llm_calls
-                WHERE pipeline_run_id IN (
-                    SELECT id FROM pipeline_runs WHERE project_id = :project_id
-                )
-            """),
-            {"project_id": project_id},
-        )
-
-        # 删除相关的节点执行记录
-        await session.execute(
-            text("""
-                DELETE FROM node_executions
-                WHERE pipeline_run_id IN (
-                    SELECT id FROM pipeline_runs WHERE project_id = :project_id
-                )
-            """),
-            {"project_id": project_id},
-        )
-
-        # 删除 pipeline 运行记录
-        await session.execute(
-            text("DELETE FROM pipeline_runs WHERE project_id = :project_id"),
-            {"project_id": project_id},
-        )
-
-        # 删除审计日志
-        await session.execute(
-            text("DELETE FROM pipeline_audit_log WHERE project_id = :project_id"),
-            {"project_id": project_id},
-        )
-
-        # 删除大纲
-        await session.execute(
-            text("DELETE FROM outlines WHERE project_id = :project_id"),
-            {"project_id": project_id},
-        )
-
-        # 删除项目
-        await session.execute(
-            text("DELETE FROM projects WHERE id = :project_id"),
-            {"project_id": project_id},
-        )
+    await delete_project_data(project_id, db)
 
     await db.log_activity(
         admin["id"],

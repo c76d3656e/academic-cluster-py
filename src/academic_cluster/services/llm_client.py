@@ -8,15 +8,50 @@
 """
 
 import asyncio
+import contextlib
+import json
 import re
+import secrets
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from hashlib import sha256
+from types import SimpleNamespace
 from typing import Any
 
 import structlog
-from langchain_core.messages import AIMessage
+from langchain_core.language_models.base import LanguageModelInput
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.runnables import Runnable, RunnableBinding
+from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
+from pydantic import ConfigDict
+
+from .concurrency import BoundedFifoGate
 
 logger = structlog.get_logger()
+
+def _default_routing_policy() -> SimpleNamespace:
+    """Return TOML defaults for compatibility clients outside the provider pool."""
+
+    from .runtime_policy import config_definitions
+
+    definitions = config_definitions()
+    return SimpleNamespace(
+        provider_request_timeout_seconds=float(
+            definitions["provider.request_timeout_seconds"]["value"]
+        ),
+        provider_timeout_retries=int(definitions["provider.timeout_retries"]["value"]),
+        provider_timeout_grace_seconds=float(
+            definitions["provider.timeout_grace_seconds"]["value"]
+        ),
+        provider_retry_delay_seconds=float(
+            definitions["provider.retry_delay_seconds"]["value"]
+        ),
+    )
+
 
 _TASK_TAGS: dict[str, set[str]] = {
     "kg":       {"kg", "public"},
@@ -28,12 +63,23 @@ _TASK_TAGS: dict[str, set[str]] = {
 }
 
 _rr_counter = 0
-_llm_queue_semaphore: asyncio.Semaphore | None = None
-_llm_queue_capacity = 0
+_llm_request_gate: BoundedFifoGate | None = None
+_llm_request_gate_config: tuple[int, int, float] | None = None
 
 _THINK_BLOCK_RE = re.compile(
     r"<think\b[^>]*>.*?(?:</think>|$)", re.IGNORECASE | re.DOTALL
 )
+
+
+async def _cancel_and_wait(task: asyncio.Task[Any] | None) -> None:
+    """Cancel an in-flight provider task and always consume its terminal state."""
+
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await task
 
 
 def _messages_to_openai(input: Any) -> list[dict[str, Any]]:
@@ -66,6 +112,44 @@ def _router_response_to_aimessage(response: Any, provider_alias: str = "") -> AI
         if isinstance(choice, dict)
         else getattr(choice, "finish_reason", "")
     )
+    raw_tool_calls = (
+        msg_dict.get("tool_calls", [])
+        if isinstance(msg_dict, dict)
+        else getattr(msg_dict, "tool_calls", [])
+    ) or []
+    tool_calls: list[dict[str, Any]] = []
+    for raw_call in raw_tool_calls:
+        if isinstance(raw_call, dict):
+            call_data = raw_call
+        elif hasattr(raw_call, "model_dump"):
+            call_data = raw_call.model_dump()
+        else:
+            call_data = {
+                "id": getattr(raw_call, "id", ""),
+                "function": getattr(raw_call, "function", {}),
+            }
+        raw_function = call_data.get("function") or {}
+        if not isinstance(raw_function, dict) and hasattr(raw_function, "model_dump"):
+            raw_function = raw_function.model_dump()
+        function = raw_function if isinstance(raw_function, dict) else {}
+        raw_arguments = function.get("arguments") or {}
+        if isinstance(raw_arguments, str):
+            try:
+                arguments = json.loads(raw_arguments)
+            except json.JSONDecodeError:
+                arguments = {}
+        else:
+            arguments = raw_arguments
+        if not isinstance(arguments, dict) or not function.get("name"):
+            continue
+        tool_calls.append(
+            {
+                "name": str(function["name"]),
+                "args": arguments,
+                "id": str(call_data.get("id") or ""),
+                "type": "tool_call",
+            }
+        )
 
     usage = getattr(response, "usage", None) or response.get("usage", {}) or {}
 
@@ -75,11 +159,12 @@ def _router_response_to_aimessage(response: Any, provider_alias: str = "") -> AI
         or {}
     )
     actual_provider = str(
-        hidden.get("model_id", "") or hidden.get("api_base", "") or provider_alias
+        provider_alias or hidden.get("custom_llm_provider", "") or "llm"
     )
 
     return AIMessage(
         content=content or "",
+        tool_calls=tool_calls,
         usage_metadata={
             "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
             "output_tokens": int(usage.get("completion_tokens", 0) or 0),
@@ -89,6 +174,8 @@ def _router_response_to_aimessage(response: Any, provider_alias: str = "") -> AI
             "model_name": getattr(response, "model", None) or response.get("model", ""),
             "token_usage": dict(usage) if not isinstance(usage, dict) else usage,
             "provider": actual_provider,
+            "model_id": str(hidden.get("model_id", "") or ""),
+            "api_base_url": str(hidden.get("api_base", "") or ""),
             "finish_reason": finish_reason,
         },
     )
@@ -146,29 +233,164 @@ def _safe_attr(obj: Any, *names: str, default: Any = None) -> Any:
 
 def _api_key_hint(llm: Any) -> str | None:
     key = _safe_attr(llm, "openai_api_key", "api_key", default=None)
+    return _api_key_value_hint(key)
+
+
+def _api_key_value_hint(key: Any) -> str | None:
     if not key:
         return None
     value = getattr(key, "get_secret_value", lambda: str(key))()
     return sha256(str(value).encode("utf-8")).hexdigest()[:12]
 
 
-def _get_llm_queue_semaphore() -> asyncio.Semaphore:
-    """Build a process-local queue gate from enabled provider capacity.
+def _object_field(obj: Any, name: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    try:
+        return getattr(obj, name, default)
+    except Exception:
+        return default
 
-    容量 = 所有 provider 总 slots × 并发管道倍数（默认 3 倍），
-    避免跨 pipeline 竞争导致死锁。
+
+@dataclass(frozen=True)
+class _ResolvedRouterDeployment:
+    provider_alias: str
+    model_name: str
+    api_base_url: str
+    api_key: Any
+
+
+def _resolve_router_response_deployment(
+    router: Any, response: Any
+) -> _ResolvedRouterDeployment | None:
+    """Resolve the exact deployment selected by LiteLLM from response metadata."""
+
+    hidden = getattr(response, "_hidden_params", None)
+    if not isinstance(hidden, dict):
+        return None
+    model_id = hidden.get("model_id")
+    get_deployment = getattr(router, "get_deployment", None)
+    if not isinstance(model_id, str) or not model_id or not callable(get_deployment):
+        return None
+    try:
+        deployment = get_deployment(model_id)
+    except Exception:
+        return None
+    if deployment is None:
+        return None
+
+    model_info = _object_field(deployment, "model_info", {})
+    litellm_params = _object_field(deployment, "litellm_params", {})
+    return _ResolvedRouterDeployment(
+        provider_alias=str(_object_field(model_info, "provider_alias", "") or ""),
+        model_name=str(_object_field(litellm_params, "model", "") or ""),
+        api_base_url=str(
+            _object_field(litellm_params, "api_base", "")
+            or hidden.get("api_base", "")
+            or ""
+        ),
+        api_key=_object_field(litellm_params, "api_key"),
+    )
+
+
+def _unwrap_bound_llm(llm: Any) -> tuple[Any, dict[str, Any]]:
+    """Return the underlying model and all kwargs applied by ``bind_tools``."""
+
+    current = llm
+    bound_kwargs: dict[str, Any] = {}
+    while isinstance(current, RunnableBinding):
+        bound_kwargs = {**dict(current.kwargs), **bound_kwargs}
+        current = current.bound
+    return current, bound_kwargs
+
+
+class AuditedChatModel(BaseChatModel):
+    """Tool-bindable async chat model that uses the canonical audit wrapper."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    inner: Any
+
+    @property
+    def _llm_type(self) -> str:
+        return "academic-cluster-audited"
+
+    def bind_tools(
+        self,
+        tools: Sequence[dict[str, Any] | type | Callable[..., Any] | BaseTool],
+        *,
+        tool_choice: str | None = None,
+        **kwargs: Any,
+    ) -> Runnable[LanguageModelInput, AIMessage]:
+        bind_kwargs = dict(kwargs)
+        if tool_choice is not None:
+            bind_kwargs["tool_choice"] = tool_choice
+        return type(self)(inner=self.inner.bind_tools(tools, **bind_kwargs))
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del messages, stop, run_manager, kwargs
+        raise RuntimeError("AuditedChatModel supports asynchronous invocation only")
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        del run_manager
+        if stop:
+            kwargs["stop"] = stop
+        response = await ainvoke_with_callbacks(self.inner, messages, **kwargs)
+        if not isinstance(response, BaseMessage):
+            raise TypeError("audited chat model returned a non-message response")
+        return ChatResult(generations=[ChatGeneration(message=response)])
+
+
+def _get_llm_request_gate() -> tuple[BoundedFifoGate, float]:
+    """Return the explicit LLM capacity boundary configured by the operator.
+
+    Provider RPM is a rate budget, not a measure of safe open connections.  The
+    application therefore uses an independently configured in-flight capacity
+    plus a bounded FIFO queue. LiteLLM remains responsible for provider RPM,
+    TPM, cooldown, and failover after work is admitted here.
     """
-    global _llm_queue_semaphore, _llm_queue_capacity
 
-    from .provider_pool import get_llm_available_slots
+    global _llm_request_gate, _llm_request_gate_config
 
-    base = get_llm_available_slots(default=10)
-    capacity = max(10, base * 3)  # 总 slot × 3 倍余量，容纳多个 pipeline
-    if _llm_queue_semaphore is None or capacity != _llm_queue_capacity:
-        _llm_queue_capacity = capacity
-        _llm_queue_semaphore = asyncio.Semaphore(capacity)
-        logger.info("LLM queue capacity resolved", capacity=capacity, base_slots=base)
-    return _llm_queue_semaphore
+    from ..config import get_settings
+
+    settings = get_settings()
+    config = (
+        settings.llm_max_concurrent_requests,
+        settings.llm_max_queued_requests,
+        settings.llm_queue_wait_timeout_seconds,
+    )
+    if _llm_request_gate is None or config != _llm_request_gate_config:
+        _llm_request_gate = BoundedFifoGate(capacity=config[0], max_waiters=config[1])
+        _llm_request_gate_config = config
+        logger.info(
+            "LLM request gate configured",
+            capacity=config[0],
+            max_waiters=config[1],
+            queue_wait_timeout_seconds=config[2],
+        )
+    return _llm_request_gate, config[2]
+
+
+@asynccontextmanager
+async def _llm_request_slot() -> AsyncIterator[None]:
+    """Acquire the bounded LLM queue without consuming provider call timeout."""
+
+    gate, wait_timeout = _get_llm_request_gate()
+    async with gate.slot(timeout=wait_timeout):
+        yield
 
 
 # 轮询计数器
@@ -217,6 +439,9 @@ def create_llm(
     _rr_counter = (_rr_counter + 1) % len(candidates)
     deployment = candidates[_rr_counter]
     params = deployment["litellm_params"]
+    routing_policy = pool.routing_policy
+    if routing_policy is None:
+        raise RuntimeError("LLM pool is missing its runtime routing policy")
 
     # 始终使用 provider 自身配置的模型名（不同 provider 模型不通用）
     litellm_model = params["model"]
@@ -228,7 +453,7 @@ def create_llm(
         api_key=params["api_key"],
         base_url=params.get("api_base"),
         max_tokens=max_tokens,  # type: ignore[call-arg]
-        timeout=300,  # 单次 HTTP 请求超时 5 分钟
+        timeout=routing_policy.provider_request_timeout_seconds,
     )
     # 在 llm 对象上附加 provider 别名和路由分组名，供 ainvoke_with_callbacks 读取
     model_info = deployment.get("model_info", {}) or {}
@@ -238,7 +463,10 @@ def create_llm(
     llm._provider_alias = model_info.get("provider_alias", "") or deployment.get(  # type: ignore[attr-defined]
         "model_name", ""
     )
-    llm._provider_rpm_limit = int(params.get("rpm") or 10)  # type: ignore[attr-defined]
+    llm._provider_rpm_limit = int(  # type: ignore[attr-defined]
+        params.get("rpm") or routing_policy.provider_default_rpm
+    )
+    llm._routing_policy = routing_policy  # type: ignore[attr-defined]
     llm._requested_model = actual_model  # type: ignore[attr-defined]
     llm._upstream_model = actual_model  # type: ignore[attr-defined]
     llm._api_base_url = params.get("api_base")  # type: ignore[attr-defined]
@@ -249,14 +477,18 @@ def create_llm(
 
 
 async def ainvoke_with_callbacks(
-    llm: Any, input: Any, config: Any = None, timeout: float = 300.0, **kwargs: Any
+    llm: Any,
+    input: Any,
+    config: Any = None,
+    timeout: float | None = None,
+    **kwargs: Any,
 ) -> Any:
     """
     包装 LLM 调用，手动追踪 token 用量和持久化到 DB。
 
     通过 LiteLLM Router 发出实际 HTTP 请求，由 Router 处理：
     - 多端点加权路由（simple-shuffle）
-    - 失败自动重试 + 故障转移（num_retries=2）
+    - 有界重试 + 故障转移（Router num_retries=1）
     - RPM/TPM 限速
     - 不健康端点 cooldown（allowed_fails=3, cooldown_time=60s）
 
@@ -271,59 +503,62 @@ async def ainvoke_with_callbacks(
     import time as _time
 
     from .observability import (
-        get_current_node,
+        get_current_agent_phase,
+        get_current_execution,
         get_current_project,
-        get_current_tracker,
-        get_resolved_run_id,
     )
 
     start_time = _time.monotonic()
-    node_name = get_current_node() or "unknown"
-    tracker = get_current_tracker()
-    run_id = get_resolved_run_id()
-    if not run_id:
+    base_llm, bound_kwargs = _unwrap_bound_llm(llm)
+    routing_policy = getattr(base_llm, "_routing_policy", None)
+    if routing_policy is None:
+        routing_policy = _default_routing_policy()
+    effective_timeout = float(
+        timeout
+        if timeout is not None
+        else routing_policy.provider_request_timeout_seconds
+    )
+    project_id = get_current_project()
+    execution_id = get_current_execution()
+    agent_phase = get_current_agent_phase()
+    node_name = agent_phase or ("agent" if execution_id else "unknown")
+    if not project_id or not execution_id:
         logger.warning(
-            "ainvoke_with_callbacks no run_id",
+            "ainvoke_with_callbacks has no audit execution context",
             node=node_name,
-            has_tracker=tracker is not None,
+            has_project=project_id is not None,
+            has_execution=execution_id is not None,
         )
 
-    _temperature = getattr(llm, "_temperature", 0.7)
-    _max_tokens = getattr(llm, "_max_tokens", None)
+    _temperature = getattr(base_llm, "_temperature", 0.7)
+    _max_tokens = getattr(base_llm, "_max_tokens", None)
 
-    provider_alias = getattr(llm, "_provider_alias", "") or "llm"
+    provider_alias = getattr(base_llm, "_provider_alias", "") or "llm"
     requested_model = (
-        getattr(llm, "_requested_model", None)
-        or _safe_attr(llm, "model_name", "model", default=None)
+        getattr(base_llm, "_requested_model", None)
+        or _safe_attr(base_llm, "model_name", "model", default=None)
         or "unknown"
     )
-    upstream_model = getattr(llm, "_upstream_model", None) or requested_model
-    api_base_url = getattr(llm, "_api_base_url", None) or str(
-        _safe_attr(llm, "openai_api_base", "base_url", default="") or ""
+    upstream_model = getattr(base_llm, "_upstream_model", None) or requested_model
+    api_base_url = getattr(base_llm, "_api_base_url", None) or str(
+        _safe_attr(base_llm, "openai_api_base", "base_url", default="") or ""
     )
-    litellm_model = getattr(llm, "_litellm_model", "openai/" + requested_model)
+    api_key_hint = _api_key_hint(base_llm)
+    litellm_model = getattr(base_llm, "_litellm_model", "openai/" + requested_model)
     call_id = None
     db = None
+    invoke_task: asyncio.Task[Any] | None = None
 
-    if run_id:
+    if project_id and execution_id:
         try:
             from .database import get_database
 
             db = get_database()
-            exec_id = tracker._node_ids.get(node_name) if tracker else None
-            if not exec_id:
-                exec_id = await db.create_node_execution(
-                    run_id,
-                    node_name,
-                    "llm",
-                )
-                if tracker:
-                    tracker._node_ids[node_name] = exec_id
             call_id = await db.create_llm_call(
-                pipeline_run_id=run_id,
-                node_execution_id=exec_id,
-                project_id=get_current_project()
-                or getattr(tracker, "project_id", None),
+                pipeline_run_id=None,
+                node_execution_id=None,
+                project_id=project_id,
+                execution_id=execution_id,
                 node_name=node_name,
                 call_type="llm",
                 provider_name=provider_alias,
@@ -331,15 +566,17 @@ async def ainvoke_with_callbacks(
                 requested_model=requested_model,
                 upstream_model=upstream_model,
                 api_base_url=api_base_url,
-                api_key_hint=_api_key_hint(llm),
+                api_key_hint=api_key_hint,
                 status="running",
                 input_preview=_preview_value(input),
                 request_metadata={
                     "node_name": node_name,
-                    "timeout_s": timeout,
+                    "timeout_s": effective_timeout,
                     "temperature": _temperature,
                     "max_tokens": _max_tokens,
                     "provider_alias": provider_alias,
+                    "execution_id": execution_id,
+                    "agent_phase": agent_phase,
                     "config_keys": sorted((config or {}).keys())
                     if isinstance(config, dict)
                     else [],
@@ -361,32 +598,54 @@ async def ainvoke_with_callbacks(
     try:
         if pool is not None:
             messages = _messages_to_openai(input)
-            semaphore = _get_llm_queue_semaphore()
-            router_kwargs = dict(kwargs)
+            router = pool.router
+            router_kwargs = {**bound_kwargs, **kwargs}
             router_kwargs.pop("config", None)
 
-            max_retries = 3
+            max_retries = routing_policy.provider_timeout_retries
             last_timeout_error = None
             for attempt in range(max_retries):
                 try:
-                    async with semaphore:
-                        response = await asyncio.wait_for(
-                            pool.router.acompletion(
+                    async with _llm_request_slot():
+                        # 使用 asyncio.wait 替代 wait_for——wait_for 无法取消 httpx
+                        invoke_task = asyncio.create_task(
+                            router.acompletion(
                                 model=litellm_model,
                                 messages=messages,
                                 temperature=_temperature,
                                 max_tokens=_max_tokens,
-                                timeout=timeout,
+                                timeout=effective_timeout,
                                 frequency_penalty=0.5,
                                 **router_kwargs,
-                            ),
-                            timeout=timeout + 60,
+                            )
                         )
+                        _done, _ = await asyncio.wait(
+                            [invoke_task],
+                            timeout=(
+                                effective_timeout
+                                + routing_policy.provider_timeout_grace_seconds
+                            ),
+                        )
+                        if _done:
+                            completed_task = invoke_task
+                            assert completed_task is not None
+                            invoke_task = None
+                            response = completed_task.result()
+                        else:
+                            await _cancel_and_wait(invoke_task)
+                            invoke_task = None
+                            raise TimeoutError(
+                                "LLM call timed out after "
+                                f"{effective_timeout + routing_policy.provider_timeout_grace_seconds}s"
+                            )
                     break  # success
                 except TimeoutError as te:
                     last_timeout_error = te
                     if attempt < max_retries - 1:
-                        wait_s = 5 * (attempt + 1)
+                        wait_s = (
+                            routing_policy.provider_retry_delay_seconds
+                            + secrets.randbelow(501) / 1000
+                        )
                         logger.warning(
                             "LLM call timed out, retrying",
                             attempt=attempt + 1,
@@ -398,18 +657,38 @@ async def ainvoke_with_callbacks(
                     else:
                         raise last_timeout_error from None
 
+            resolved_deployment = _resolve_router_response_deployment(router, response)
+            if resolved_deployment is not None:
+                provider_alias = resolved_deployment.provider_alias or provider_alias
+                api_base_url = resolved_deployment.api_base_url or api_base_url
+                api_key_hint = (
+                    _api_key_value_hint(resolved_deployment.api_key) or api_key_hint
+                )
+                if resolved_deployment.model_name:
+                    upstream_model = resolved_deployment.model_name
             response = _router_response_to_aimessage(response, provider_alias)
             response = sanitize_llm_response(response)
         else:
             # Fallback: 直接使用 llm.ainvoke()（测试环境未初始化 pool 时）
-            semaphore = _get_llm_queue_semaphore()
-            async with semaphore:
-                response = await asyncio.wait_for(
-                    llm.ainvoke(input, config=config, **kwargs), timeout=timeout
+            async with _llm_request_slot():
+                invoke_task = asyncio.create_task(
+                    llm.ainvoke(input, config=config, **kwargs)
                 )
-                response = sanitize_llm_response(response)
+                _done, _ = await asyncio.wait([invoke_task], timeout=effective_timeout)
+                if _done:
+                    completed_task = invoke_task
+                    assert completed_task is not None
+                    invoke_task = None
+                    response = completed_task.result()
+                    response = sanitize_llm_response(response)
+                else:
+                    await _cancel_and_wait(invoke_task)
+                    invoke_task = None
+                    raise TimeoutError(f"LLM call timed out after {effective_timeout}s")
 
     except asyncio.CancelledError:
+        await _cancel_and_wait(invoke_task)
+        invoke_task = None
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
         err_msg = "LLM call cancelled"
         if db and call_id:
@@ -431,7 +710,9 @@ async def ainvoke_with_callbacks(
     except Exception as e:
         elapsed_ms = int((_time.monotonic() - start_time) * 1000)
         is_timeout = isinstance(e, asyncio.TimeoutError)
-        err_msg = f"LLM call timed out after {timeout}s" if is_timeout else str(e)
+        err_msg = (
+            f"LLM call timed out after {effective_timeout}s" if is_timeout else str(e)
+        )
         if db and call_id:
             try:
                 await db.finish_llm_call(
@@ -446,7 +727,12 @@ async def ainvoke_with_callbacks(
                     error=str(persist_error),
                     node=node_name,
                 )
-        logger.error(err_msg, node=node_name, timeout_s=timeout, elapsed_ms=elapsed_ms)
+        logger.error(
+            err_msg,
+            node=node_name,
+            timeout_s=effective_timeout,
+            elapsed_ms=elapsed_ms,
+        )
         raise
 
     elapsed_ms = int((_time.monotonic() - start_time) * 1000)
@@ -497,22 +783,6 @@ async def ainvoke_with_callbacks(
     except Exception:  # nosec B110
         pass
 
-    # 记录到 tracker
-    if tracker:
-        try:
-            await tracker.token_tracker.record(
-                node_name=node_name,
-                provider_name=provider_alias,
-                model_name=model_name,
-                call_type="llm",
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cost=cost,
-                latency_ms=elapsed_ms,
-            )
-        except Exception:  # nosec B110
-            pass
-
     if db and call_id:
         try:
             await db.finish_llm_call(
@@ -525,6 +795,9 @@ async def ainvoke_with_callbacks(
                 output_preview=_preview_value(getattr(response, "content", "")),
                 model_name=model_name,
                 upstream_model=upstream_model,
+                provider_name=provider_alias,
+                api_base_url=api_base_url,
+                api_key_hint=api_key_hint,
                 input_price_per_m=input_price,
                 output_price_per_m=output_price,
             )

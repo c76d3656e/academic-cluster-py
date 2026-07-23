@@ -2,10 +2,7 @@ from academic_cluster.services.citation_planner import (
     CandidateSelectionSource,
     SectionCitationPlan,
 )
-from academic_cluster.services.section_evidence_planner import (
-    cards_from_support_matrix,
-    plan_section_evidence,
-)
+from academic_cluster.services.section_evidence_planner import plan_section_evidence
 
 
 def test_plan_section_evidence_prefers_section_relevant_candidates():
@@ -71,14 +68,6 @@ def test_plan_section_evidence_prefers_section_relevant_candidates():
             "confidence": 0.9,
         }
     ]
-    memories = [
-        {
-            "cluster_id": "1",
-            "summary": "This community studies autonomous LLM agents, planning, memory, and tools.",
-            "method_families": ["agent planning"],
-            "key_claims": [{"paper_id": "p-agent", "claim": "planning and tool use"}],
-        }
-    ]
     clusters = [
         {"id": "1", "paper_ids": ["p-agent"]},
         {"id": "2", "paper_ids": ["p-driving"]},
@@ -90,7 +79,6 @@ def test_plan_section_evidence_prefers_section_relevant_candidates():
         sections=sections,
         citation_plans=plans,
         evidence_cards=evidence_cards,
-        community_memories=memories,
         paper_map=papers,
         clusters=clusters,
         max_references_per_section=2,
@@ -101,5 +89,4 @@ def test_plan_section_evidence_prefers_section_relevant_candidates():
     assert "p-hardware" not in filtered[0].candidate_paper_ids
     matrix = evidence_plan[0]["support_matrix"]
     assert matrix[0]["paper_id"] == "p-agent"
-    cards = cards_from_support_matrix(matrix)
-    assert cards[0]["id"] == "card-agent"
+    assert matrix[0]["evidence_card_id"] == "card-agent"

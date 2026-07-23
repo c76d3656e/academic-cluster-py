@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from ...services.database import DatabaseService, get_database
 from ..dependencies import get_current_user
+from ..routes import normalize_project_status
 
 logger = structlog.get_logger()
 
@@ -132,7 +133,7 @@ async def get_dashboard_overview(
         RecentProject(
             id=str(row[0]),
             name=row[1] or "",
-            status=row[2] or "created",
+            status=normalize_project_status(row[2])[0],
             created_at=row[3],
         )
         for row in recent_rows

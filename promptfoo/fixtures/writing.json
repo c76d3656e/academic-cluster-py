@@ -1,0 +1,59 @@
+{
+  "fixture_version": "1.0.0",
+  "schema": "https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json",
+  "node": "writing",
+  "contract_version": "1.0.0",
+  "expected_variant": "success",
+  "context": {
+    "expected_entry": "writing",
+    "required_state_fields": [
+      "project_id",
+      "execution_id",
+      "topic",
+      "papers",
+      "evidence_cards",
+      "analysis_complete"
+    ],
+    "before": {
+      "project_id": "contract-project",
+      "execution_id": "contract-execution",
+      "topic": "deterministic agent contracts",
+      "target_words": 1000,
+      "papers": [{ "id": "paper-1", "title": "Fixture" }],
+      "paper_ids": ["paper-1"],
+      "research_complete": true,
+      "analysis_complete": true,
+      "evidence_cards": [
+        { "paper_id": "paper-1", "claim": "Evidence-backed claim" }
+      ]
+    }
+  },
+  "error": {
+    "mode": "bounded_retry",
+    "state_patch": {
+      "current_phase": "writing",
+      "status": "writing_failed",
+      "failed_phase": "writing",
+      "phase_attempts": { "writing": 1 },
+      "max_phase_attempts": 2,
+      "terminal_failure": false
+    },
+    "expected_route": "writing"
+  },
+  "fallback": {
+    "mode": "bounded_revision",
+    "state_patch": {
+      "current_phase": "writing",
+      "status": "needs_revision",
+      "needs_revision": true,
+      "revision_feedback": "Strengthen evidence and citations.",
+      "revision_attempt": 1,
+      "max_revision_attempts": 2
+    },
+    "expected_route": "writing"
+  },
+  "acceptance": {
+    "expected_accepted": true,
+    "expected_artifact_version": "1.0.0"
+  }
+}

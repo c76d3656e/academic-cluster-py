@@ -1,0 +1,92 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+description: Deterministic acceptance contracts for the six production graph nodes
+
+prompts:
+  - "{{node}}"
+
+providers:
+  - id: file://providers/node_contract_provider.py:call_api
+    label: deterministic-node-contract-provider
+    config:
+      workers: 1
+      fixture_version: 1.0.0
+      fixture_schema_id: https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json
+
+tests:
+  - description: contract:supervisor
+    vars:
+      node: supervisor
+      fixture: file://fixtures/supervisor.json
+    assert:
+      - type: python
+        value: file://assertions/node_contract_assertion.py:accept_node_fixture
+        config:
+          expected_node: supervisor
+          expected_fixture_version: 1.0.0
+          expected_fixture_schema: https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json
+          expected_contract_version: 1.0.0
+
+  - description: contract:research
+    vars:
+      node: research
+      fixture: file://fixtures/research.json
+    assert:
+      - type: python
+        value: file://assertions/node_contract_assertion.py:accept_node_fixture
+        config:
+          expected_node: research
+          expected_fixture_version: 1.0.0
+          expected_fixture_schema: https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json
+          expected_contract_version: 1.0.0
+
+  - description: contract:analysis
+    vars:
+      node: analysis
+      fixture: file://fixtures/analysis.json
+    assert:
+      - type: python
+        value: file://assertions/node_contract_assertion.py:accept_node_fixture
+        config:
+          expected_node: analysis
+          expected_fixture_version: 1.0.0
+          expected_fixture_schema: https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json
+          expected_contract_version: 1.0.0
+
+  - description: contract:writing
+    vars:
+      node: writing
+      fixture: file://fixtures/writing.json
+    assert:
+      - type: python
+        value: file://assertions/node_contract_assertion.py:accept_node_fixture
+        config:
+          expected_node: writing
+          expected_fixture_version: 1.0.0
+          expected_fixture_schema: https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json
+          expected_contract_version: 1.0.0
+
+  - description: contract:peer_review
+    vars:
+      node: peer_review
+      fixture: file://fixtures/peer_review.json
+    assert:
+      - type: python
+        value: file://assertions/node_contract_assertion.py:accept_node_fixture
+        config:
+          expected_node: peer_review
+          expected_fixture_version: 1.0.0
+          expected_fixture_schema: https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json
+          expected_contract_version: 1.0.0
+
+  - description: contract:finalize
+    vars:
+      node: finalize
+      fixture: file://fixtures/finalize.json
+    assert:
+      - type: python
+        value: file://assertions/node_contract_assertion.py:accept_node_fixture
+        config:
+          expected_node: finalize
+          expected_fixture_version: 1.0.0
+          expected_fixture_schema: https://academic-cluster.local/schemas/agent-node-acceptance-fixture-v1.json
+          expected_contract_version: 1.0.0

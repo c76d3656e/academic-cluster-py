@@ -18,6 +18,7 @@
 
 import asyncio
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -171,7 +172,7 @@ async def _request_with_retry(
     method: str,
     url: str,
     source: str,
-    max_retries: int = 3,
+    max_retries: int | None = None,
     _skip_rate_limit: bool = False,
     **kwargs: Any,
 ) -> httpx.Response:
@@ -183,7 +184,13 @@ async def _request_with_retry(
 
     _skip_rate_limit: 为 True 时跳过全局限流（调用方已自行限流，如 key pool）
     """
-    for attempt in range(max_retries):
+    from ..services.runtime_policy import get_runtime_policy
+
+    policy = await get_runtime_policy()
+    attempts = max_retries or policy.search_max_retries
+    if kwargs.get("timeout") is None:
+        kwargs["timeout"] = policy.search_request_timeout_seconds
+    for attempt in range(attempts):
         if not _skip_rate_limit:
             await _enforce_rate_limit(source)
         response = await client.request(method, url, **kwargs)
@@ -193,14 +200,14 @@ async def _request_with_retry(
             # 限制最大等待时间为 60 秒，避免被恶意/异常的 Retry-After 值阻塞数小时
             retry_after = response.headers.get("Retry-After")
             if retry_after and retry_after.isdigit():
-                wait = min(float(retry_after), 60)
+                wait = min(float(retry_after), policy.search_retry_after_cap_seconds)
             else:
-                wait = min(2 ** (attempt + 1), 30)
+                wait = min(2 ** (attempt + 1), policy.search_backoff_cap_seconds)
             logger.warning(
                 "Rate limited (429), retrying",
                 source=source,
                 attempt=attempt + 1,
-                max_retries=max_retries,
+                max_retries=attempts,
                 wait_seconds=wait,
                 url=url,
             )
@@ -267,7 +274,7 @@ async def search_semantic_scholar(
                     "semantic_scholar",
                     params=params,
                     headers=headers,
-                    timeout=30,
+                    timeout=None,
                 )
             else:
                 # 无 key 模式：使用全局单 key 限流
@@ -284,7 +291,7 @@ async def search_semantic_scholar(
                     "semantic_scholar",
                     params=params,
                     headers=headers,
-                    timeout=30,
+                    timeout=None,
                 )
 
             response.raise_for_status()
@@ -365,7 +372,9 @@ async def search_pubmed(
 
     使用 NCBI E-utilities API
     """
-    email = await get_effective_source_value("pubmed_email") or "user@example.com"
+    email = await get_effective_source_value("pubmed_email")
+    if not email:
+        raise RuntimeError("PubMed requires a configured contact email")
     tool = "academic-cluster"
     api_key = await get_effective_source_value("pubmed_api_key")
 
@@ -396,7 +405,7 @@ async def search_pubmed(
                 search_url,
                 "pubmed",
                 params=search_params,
-                timeout=30,
+                timeout=None,
             )
             search_response.raise_for_status()
             search_data = search_response.json()
@@ -425,7 +434,7 @@ async def search_pubmed(
                 fetch_url,
                 "pubmed",
                 params=fetch_params,
-                timeout=30,
+                timeout=None,
             )
             fetch_response.raise_for_status()
             fetch_data = fetch_response.json()
@@ -535,14 +544,14 @@ async def search_arxiv(
                 url,
                 "arxiv",
                 params=params,
-                timeout=30,
+                timeout=None,
             )
             response.raise_for_status()
 
             # arXiv 返回 XML，需要解析
-            import xml.etree.ElementTree as ET  # nosec B405
+            import defusedxml.ElementTree as ET
 
-            root = ET.fromstring(response.text)  # nosec B314
+            root = ET.fromstring(response.text)
             ns = {
                 "atom": "http://www.w3.org/2005/Atom",
                 "arxiv": "http://arxiv.org/schemas/atom",
@@ -654,15 +663,17 @@ async def search_openalex(
     """
     url = "https://api.openalex.org/works"
 
-    params = {
+    params: dict[str, Any] = {
         "search": query,
         "per_page": min(limit, 200),
-        "mailto": await get_effective_source_value("pubmed_email")
-        or "user@example.com",
     }
+    contact_email = await get_effective_source_value("pubmed_email")
+    if contact_email:
+        params["mailto"] = contact_email
 
     if from_year:
-        params["filter"] = f"publication_year:{from_year}-{to_year or 2024}"
+        current_year = datetime.now(UTC).year
+        params["filter"] = f"publication_year:{from_year}-{to_year or current_year}"
 
     async with httpx.AsyncClient() as client:
         try:
@@ -672,7 +683,7 @@ async def search_openalex(
                 url,
                 "openalex",
                 params=params,
-                timeout=30,
+                timeout=None,
             )
             response.raise_for_status()
             data = response.json()
@@ -787,7 +798,7 @@ async def search_crossref(
                 "crossref",
                 params=params,
                 headers=headers,
-                timeout=30,
+                timeout=None,
             )
             response.raise_for_status()
             data = response.json()
@@ -892,7 +903,7 @@ async def search_all_sources(
     query: str,
     limit_per_source: int = 200,
     sources: list[str] | None = None,
-    timeout: float = 300.0,
+    timeout: float | None = None,
     per_source_limits: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """
@@ -910,6 +921,10 @@ async def search_all_sources(
     Returns:
         合并的论文列表
     """
+    if timeout is None:
+        from ..services.runtime_policy import get_runtime_policy
+
+        timeout = (await get_runtime_policy()).search_total_timeout_seconds
     if sources is None:
         sources = ["semantic_scholar", "openalex", "crossref", "arxiv", "pubmed"]
 
@@ -921,7 +936,7 @@ async def search_all_sources(
         "crossref": search_crossref,
     }
 
-    tasks: list[Any] = []
+    tasks: list[asyncio.Task[Any]] = []
     active_sources: list[str] = []
     for source in sources:
         if source in search_functions:
@@ -930,7 +945,9 @@ async def search_all_sources(
                 if per_source_limits
                 else limit_per_source
             )
-            tasks.append(asyncio.create_task(search_functions[source](query, limit=limit)))
+            tasks.append(
+                asyncio.create_task(search_functions[source](query, limit=limit))
+            )
             active_sources.append(source)
 
     # 使用 wait_for 添加总体超时，避免某个源卡住阻塞整个搜索

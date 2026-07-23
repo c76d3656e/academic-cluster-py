@@ -13,6 +13,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import text
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -44,8 +45,22 @@ def _convert_uuid_fields(row: dict[str, Any]) -> dict[str, Any]:
 
 
 from ..config import get_settings  # noqa: E402
+from .tenant_context import get_tenant_context  # noqa: E402
 
 logger = structlog.get_logger()
+
+
+def build_database_url(settings: Any) -> URL:
+    """Build an asyncpg URL without treating password delimiters as syntax."""
+
+    return URL.create(
+        drivername="postgresql+asyncpg",
+        username=settings.postgres_user,
+        password=settings.postgres_password,
+        host=settings.postgres_host,
+        port=settings.postgres_port,
+        database=settings.postgres_db,
+    )
 
 
 def _json_dumps(value: Any, default: Any = None) -> str:
@@ -73,16 +88,12 @@ class DatabaseService:
 
     def __init__(self, database_url: str | None = None):
         settings = get_settings()
-
-        if database_url is None:
-            database_url = (
-                f"postgresql+asyncpg://{settings.postgres_user}:"
-                f"{settings.postgres_password}@{settings.postgres_host}:"
-                f"{settings.postgres_port}/{settings.postgres_db}"
-            )
+        engine_url: str | URL = (
+            build_database_url(settings) if database_url is None else database_url
+        )
 
         self.engine = create_async_engine(
-            database_url,
+            engine_url,
             echo=settings.app_debug,
             pool_size=5,
             max_overflow=5,
@@ -111,6 +122,21 @@ class DatabaseService:
         """获取数据库会话"""
         async with self.session_factory() as session:
             try:
+                tenant = get_tenant_context()
+                await session.execute(
+                    text("SELECT set_config('app.current_user_id', :value, true)"),
+                    {"value": tenant.user_id or ""},
+                )
+                await session.execute(
+                    text(
+                        "SELECT set_config('app.current_organization_id', :value, true)"
+                    ),
+                    {"value": tenant.organization_id or ""},
+                )
+                await session.execute(
+                    text("SELECT set_config('app.is_admin', :value, true)"),
+                    {"value": "true" if tenant.is_admin else "false"},
+                )
                 yield session
                 await session.commit()
             except Exception:
@@ -119,7 +145,7 @@ class DatabaseService:
 
     async def save_paper(self, paper_data: dict[str, Any]) -> str:
         """保存论文到数据库，返回数据库中实际的 paper_id"""
-        paper_id = paper_data.get("id", str(uuid.uuid4()))
+        paper_id = str(paper_data.get("id") or uuid.uuid4())
 
         # Convert JSONB fields to JSON strings
         authors = paper_data.get("authors")
@@ -138,10 +164,21 @@ class DatabaseService:
         publication_date = paper_data.get("publication_date")
         if isinstance(publication_date, str):
             try:
-                publication_date = datetime.fromisoformat(
-                    publication_date.replace("Z", "+00:00")
-                ).date()
+                publication_date = (
+                    datetime(int(publication_date), 1, 1).date()
+                    if len(publication_date) == 4 and publication_date.isdigit()
+                    else datetime.fromisoformat(
+                        publication_date.replace("Z", "+00:00")
+                    ).date()
+                )
             except ValueError:
+                publication_date = None
+        if publication_date is None:
+            try:
+                year = int(paper_data.get("year") or 0)
+                if 1000 <= year <= 9999:
+                    publication_date = datetime(year, 1, 1).date()
+            except (TypeError, ValueError):
                 publication_date = None
 
         async with self.session() as session:
@@ -154,9 +191,29 @@ class DatabaseService:
                             :publication_date, :journal, :doi, :url, :pdf_url,
                             :citation_count, :reference_count, CAST(:fields_of_study AS jsonb), CAST(:metadata AS jsonb))
                     ON CONFLICT (external_id) DO UPDATE SET
-                        title = EXCLUDED.title,
-                        abstract = EXCLUDED.abstract,
-                        citation_count = EXCLUDED.citation_count
+                        source = COALESCE(EXCLUDED.source, papers.source),
+                        title = COALESCE(NULLIF(EXCLUDED.title, ''), papers.title),
+                        abstract = COALESCE(EXCLUDED.abstract, papers.abstract),
+                        authors = COALESCE(EXCLUDED.authors, papers.authors),
+                        publication_date = COALESCE(
+                            EXCLUDED.publication_date, papers.publication_date
+                        ),
+                        journal = COALESCE(EXCLUDED.journal, papers.journal),
+                        doi = COALESCE(EXCLUDED.doi, papers.doi),
+                        url = COALESCE(EXCLUDED.url, papers.url),
+                        pdf_url = COALESCE(EXCLUDED.pdf_url, papers.pdf_url),
+                        citation_count = GREATEST(
+                            COALESCE(EXCLUDED.citation_count, 0),
+                            COALESCE(papers.citation_count, 0)
+                        ),
+                        reference_count = GREATEST(
+                            COALESCE(EXCLUDED.reference_count, 0),
+                            COALESCE(papers.reference_count, 0)
+                        ),
+                        fields_of_study = COALESCE(
+                            EXCLUDED.fields_of_study, papers.fields_of_study
+                        ),
+                        metadata = COALESCE(EXCLUDED.metadata, papers.metadata)
                     RETURNING id
                 """),
                 {
@@ -221,6 +278,164 @@ class DatabaseService:
         order = {str(pid): idx for idx, pid in enumerate(paper_ids)}
         papers.sort(key=lambda paper: order.get(str(paper.get("id")), len(order)))
         return papers
+
+    async def link_project_papers(
+        self,
+        project_id: str,
+        paper_ids: list[str],
+        *,
+        execution_id: str | None = None,
+        source_query: str | None = None,
+    ) -> int:
+        """Associate papers with a project and return newly inserted link count."""
+
+        unique_ids = list(
+            dict.fromkeys(str(paper_id) for paper_id in paper_ids if paper_id)
+        )
+        if not unique_ids:
+            return 0
+        async with self.session() as session:
+            inserted = await session.execute(
+                text("""
+                    INSERT INTO project_papers (
+                        project_id, paper_id, first_seen_execution_id,
+                        last_seen_execution_id, source_query
+                    )
+                    SELECT :project_id, paper_id, :execution_id,
+                           :execution_id, :source_query
+                    FROM unnest(CAST(:paper_ids AS uuid[])) AS paper_id
+                    ON CONFLICT (project_id, paper_id) DO NOTHING
+                    RETURNING paper_id
+                """),
+                {
+                    "project_id": project_id,
+                    "paper_ids": unique_ids,
+                    "execution_id": execution_id,
+                    "source_query": source_query,
+                },
+            )
+            newly_linked = len(inserted.fetchall())
+            await session.execute(
+                text("""
+                    UPDATE project_papers
+                    SET last_seen_execution_id = COALESCE(
+                            :execution_id, last_seen_execution_id
+                        ),
+                        source_query = COALESCE(:source_query, source_query),
+                        is_selected = TRUE,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = :project_id
+                      AND paper_id = ANY(CAST(:paper_ids AS uuid[]))
+                """),
+                {
+                    "project_id": project_id,
+                    "paper_ids": unique_ids,
+                    "execution_id": execution_id,
+                    "source_query": source_query,
+                },
+            )
+        return newly_linked
+
+    async def get_project_papers(
+        self,
+        project_id: str,
+        *,
+        limit: int = 500,
+        selected_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Load only papers explicitly associated with the project."""
+
+        selection_clause = "AND pp.is_selected = TRUE" if selected_only else ""
+        async with self.session() as session:
+            result = await session.execute(
+                text(f"""
+                    SELECT p.*
+                    FROM project_papers pp
+                    JOIN papers p ON p.id = pp.paper_id
+                    WHERE pp.project_id = :project_id
+                    {selection_clause}
+                    ORDER BY pp.relevance_score DESC NULLS LAST,
+                             p.citation_count DESC NULLS LAST,
+                             pp.created_at ASC,
+                             p.id ASC
+                    LIMIT :limit
+                """),  # nosec B608 - clause is a fixed internal constant
+                {"project_id": project_id, "limit": max(1, min(limit, 1000))},
+            )
+            rows = result.fetchall()
+        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
+
+    async def get_existing_embedding_paper_ids(
+        self,
+        paper_ids: list[str],
+        *,
+        model_name: str = "bge-m3",
+        dimensions: int | None = None,
+    ) -> set[str]:
+        """Return papers with an embedding in the requested model space.
+
+        A model name alone is not a stable vector-space identity: an operator
+        may reconfigure the same model to emit a different dimension.  Treating
+        the old row as reusable would otherwise leave a project without usable
+        vectors after an embedding-dimension migration.
+        """
+
+        if not paper_ids:
+            return set()
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT DISTINCT paper_id::text
+                    FROM embeddings
+                    WHERE paper_id = ANY(:paper_ids)
+                      AND model_name = :model_name
+                      AND (
+                          CAST(:dimensions AS INTEGER) IS NULL
+                          OR dimensions = CAST(:dimensions AS INTEGER)
+                      )
+                """),
+                {
+                    "paper_ids": paper_ids,
+                    "model_name": model_name,
+                    "dimensions": dimensions,
+                },
+            )
+            return {str(row[0]) for row in result.fetchall()}
+
+    async def get_project_evidence_cards(
+        self,
+        project_id: str,
+        *,
+        paper_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Load evidence cards scoped by project and optional paper IDs."""
+
+        conditions = ["project_id = :project_id"]
+        params: dict[str, Any] = {"project_id": project_id}
+        if paper_ids:
+            conditions.append("paper_id = ANY(:paper_ids)")
+            params["paper_ids"] = paper_ids
+        async with self.session() as session:
+            result = await session.execute(
+                text(f"""
+                    SELECT ec.*,
+                           COALESCE(NULLIF(TRIM(p.source), ''), 'unknown')
+                               AS source_api,
+                           p.title,
+                           p.authors,
+                           EXTRACT(YEAR FROM p.publication_date)::INTEGER AS year,
+                           p.journal,
+                           p.doi,
+                           p.url
+                    FROM evidence_cards ec
+                    JOIN papers p ON p.id = ec.paper_id
+                    WHERE {" AND ".join(f"ec.{condition}" for condition in conditions)}
+                    ORDER BY ec.created_at ASC, ec.id ASC
+                """),  # nosec B608 - conditions are fixed internal fragments
+                params,
+            )
+            rows = result.fetchall()
+        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
     async def save_embedding(
         self,
@@ -314,7 +529,7 @@ class DatabaseService:
                     text("""
                         INSERT INTO kg_entities (id, name, entity_type, normalized_name, paper_ids, metadata)
                         VALUES (:id, :name, :entity_type, :normalized_name, :paper_ids, CAST(:metadata AS jsonb))
-                        ON CONFLICT (normalized_name) DO UPDATE
+                        ON CONFLICT (organization_id, normalized_name) DO UPDATE
                         SET paper_ids = (
                             SELECT array_agg(DISTINCT x) FROM unnest(kg_entities.paper_ids || EXCLUDED.paper_ids) AS x
                         )
@@ -415,117 +630,8 @@ class DatabaseService:
         logger.info("Saved evidence card", card_id=actual_id)
         return actual_id
 
-    async def save_community_memory(self, memory_data: dict[str, Any]) -> str:
-        """Persist a synthesized community memory, upserting by project and cluster."""
-        memory_id = memory_data.get("id", str(uuid.uuid4()))
-
-        async with self.session() as session:
-            result = await session.execute(
-                text("""
-                    INSERT INTO community_memories (
-                        id, project_id, cluster_id, summary, method_families, key_claims,
-                        limitations, future_directions, foundation_papers, development_papers,
-                        frontier_papers, representative_papers, cross_community_links,
-                        proof_ids, metadata
-                    )
-                    VALUES (
-                        :id, :project_id, :cluster_id, :summary,
-                        CAST(:method_families AS jsonb), CAST(:key_claims AS jsonb),
-                        CAST(:limitations AS jsonb), CAST(:future_directions AS jsonb),
-                        CAST(:foundation_papers AS jsonb), CAST(:development_papers AS jsonb),
-                        CAST(:frontier_papers AS jsonb), CAST(:representative_papers AS jsonb),
-                        CAST(:cross_community_links AS jsonb), CAST(:proof_ids AS jsonb),
-                        CAST(:metadata AS jsonb)
-                    )
-                    ON CONFLICT (project_id, cluster_id) DO UPDATE SET
-                        summary = EXCLUDED.summary,
-                        method_families = EXCLUDED.method_families,
-                        key_claims = EXCLUDED.key_claims,
-                        limitations = EXCLUDED.limitations,
-                        future_directions = EXCLUDED.future_directions,
-                        foundation_papers = EXCLUDED.foundation_papers,
-                        development_papers = EXCLUDED.development_papers,
-                        frontier_papers = EXCLUDED.frontier_papers,
-                        representative_papers = EXCLUDED.representative_papers,
-                        cross_community_links = EXCLUDED.cross_community_links,
-                        proof_ids = EXCLUDED.proof_ids,
-                        metadata = EXCLUDED.metadata,
-                        updated_at = NOW()
-                    RETURNING id
-                """),
-                {
-                    "id": memory_id,
-                    "project_id": memory_data.get("project_id"),
-                    "cluster_id": memory_data.get("cluster_id"),
-                    "summary": memory_data.get("summary", ""),
-                    "method_families": _json_dumps(
-                        memory_data.get("method_families"), []
-                    ),
-                    "key_claims": _json_dumps(memory_data.get("key_claims"), []),
-                    "limitations": _json_dumps(memory_data.get("limitations"), []),
-                    "future_directions": _json_dumps(
-                        memory_data.get("future_directions"), []
-                    ),
-                    "foundation_papers": _json_dumps(
-                        memory_data.get("foundation_papers"), []
-                    ),
-                    "development_papers": _json_dumps(
-                        memory_data.get("development_papers"), []
-                    ),
-                    "frontier_papers": _json_dumps(
-                        memory_data.get("frontier_papers"), []
-                    ),
-                    "representative_papers": _json_dumps(
-                        memory_data.get("representative_papers"), []
-                    ),
-                    "cross_community_links": _json_dumps(
-                        memory_data.get("cross_community_links"), []
-                    ),
-                    "proof_ids": _json_dumps(memory_data.get("proof_ids"), []),
-                    "metadata": _json_dumps(memory_data.get("metadata"), {}),
-                },
-            )
-            row = result.fetchone()
-
-        actual_id = str(row[0]) if row else memory_id
-        logger.info("Saved community memory", memory_id=actual_id)
-        return actual_id
-
-    async def get_community_memories_by_ids(
-        self, memory_ids: list[str]
-    ) -> list[dict[str, Any]]:
-        """Fetch community memories by ids."""
-        if not memory_ids:
-            return []
-
-        async with self.session() as session:
-            result = await session.execute(
-                text("SELECT * FROM community_memories WHERE id = ANY(:ids)"),
-                {"ids": memory_ids},
-            )
-            rows = result.fetchall()
-
-        memories = [_convert_uuid_fields(dict(row._mapping)) for row in rows]
-        order = {str(mid): idx for idx, mid in enumerate(memory_ids)}
-        memories.sort(key=lambda memory: order.get(str(memory.get("id")), len(order)))
-        return memories
-
-    async def get_community_memories_by_project(
-        self, project_id: str
-    ) -> list[dict[str, Any]]:
-        """Fetch all community memories for a project."""
-        async with self.session() as session:
-            result = await session.execute(
-                text(
-                    "SELECT * FROM community_memories WHERE project_id = :project_id ORDER BY created_at"
-                ),
-                {"project_id": project_id},
-            )
-            rows = result.fetchall()
-        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
-
     async def save_outline(self, outline_data: dict[str, Any]) -> str:
-        """保存大纲"""
+        """Upsert an outline and prune sections absent from its active revision."""
         outline_id: str = str(outline_data.get("id") or uuid.uuid4())
 
         # 转换 sections 为 JSON 字符串
@@ -538,6 +644,12 @@ class DatabaseService:
                 text("""
                     INSERT INTO outlines (id, project_id, title, sections, status, version)
                     VALUES (:id, :project_id, :title, CAST(:sections AS jsonb), :status, :version)
+                    ON CONFLICT (id) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        sections = EXCLUDED.sections,
+                        status = EXCLUDED.status,
+                        version = EXCLUDED.version,
+                        updated_at = CURRENT_TIMESTAMP
                 """),
                 {
                     "id": outline_id,
@@ -546,6 +658,24 @@ class DatabaseService:
                     "sections": sections,
                     "status": outline_data.get("status", "draft"),
                     "version": outline_data.get("version", 1),
+                },
+            )
+            active_section_ids = [
+                str(section_id)
+                for section_id in outline_data.get("active_section_ids") or []
+                if section_id is not None
+            ]
+            await session.execute(
+                text("""
+                    DELETE FROM written_content
+                    WHERE outline_id = :outline_id
+                      AND NOT (
+                          section_id = ANY(CAST(:active_section_ids AS text[]))
+                      )
+                """),
+                {
+                    "outline_id": outline_id,
+                    "active_section_ids": active_section_ids,
                 },
             )
 
@@ -911,6 +1041,11 @@ class DatabaseService:
 
         project_id: str = str(project_data.get("id") or uuid.uuid4())
         user_id = project_data.get("user_id")
+        organization_id = project_data.get("organization_id")
+        if not organization_id:
+            organization_id = get_tenant_context().organization_id
+        if not organization_id:
+            raise ValueError("organization_id is required for every project")
         config = project_data.get("config")
         if isinstance(config, dict):
             config = json.dumps(config)
@@ -919,12 +1054,16 @@ class DatabaseService:
             if user_id:
                 await session.execute(
                     text("""
-                        INSERT INTO projects (id, user_id, name, description, query, status, config)
-                        VALUES (:id, :user_id, :name, :description, :query, :status, :config)
+                        INSERT INTO projects (
+                            id, user_id, organization_id, name, description, query, status, config
+                        ) VALUES (
+                            :id, :user_id, :organization_id, :name, :description, :query, :status, :config
+                        )
                     """),
                     {
                         "id": project_id,
                         "user_id": user_id,
+                        "organization_id": organization_id,
                         "name": project_data.get("name"),
                         "description": project_data.get("description"),
                         "query": project_data.get("query"),
@@ -935,11 +1074,15 @@ class DatabaseService:
             else:
                 await session.execute(
                     text("""
-                        INSERT INTO projects (id, name, description, query, status, config)
-                        VALUES (:id, :name, :description, :query, :status, :config)
+                        INSERT INTO projects (
+                            id, organization_id, name, description, query, status, config
+                        ) VALUES (
+                            :id, :organization_id, :name, :description, :query, :status, :config
+                        )
                     """),
                     {
                         "id": project_id,
+                        "organization_id": organization_id,
                         "name": project_data.get("name"),
                         "description": project_data.get("description"),
                         "query": project_data.get("query"),
@@ -977,6 +1120,52 @@ class DatabaseService:
             )
             row = result.fetchone()
             actual_id = str(row[0]) if row else str(user_id)
+            organization_id = str(
+                user_data.get("organization_id")
+                or uuid.uuid5(uuid.NAMESPACE_URL, f"academic-cluster:user:{actual_id}")
+            )
+            await session.execute(
+                text("SELECT set_config('app.current_user_id', :value, true)"),
+                {"value": actual_id},
+            )
+            await session.execute(
+                text("SELECT set_config('app.current_organization_id', :value, true)"),
+                {"value": organization_id},
+            )
+            await session.execute(
+                text("SELECT set_config('app.is_admin', :value, true)"),
+                {"value": "true" if user_data.get("role") == "admin" else "false"},
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO organizations (id, name, slug, created_by)
+                    VALUES (:id, :name, :slug, :user_id)
+                    ON CONFLICT (id) DO NOTHING
+                """),
+                {
+                    "id": organization_id,
+                    "name": user_data.get("full_name") or user_data["email"],
+                    "slug": f"personal-{actual_id.replace('-', '')}",
+                    "user_id": actual_id,
+                },
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO organization_memberships (
+                        organization_id, user_id, role
+                    ) VALUES (:organization_id, :user_id, 'owner')
+                    ON CONFLICT (organization_id, user_id) DO UPDATE SET role = 'owner'
+                """),
+                {"organization_id": organization_id, "user_id": actual_id},
+            )
+            await session.execute(
+                text("""
+                    UPDATE users
+                    SET default_organization_id = :organization_id
+                    WHERE id = :user_id
+                """),
+                {"organization_id": organization_id, "user_id": actual_id},
+            )
 
         logger.info("Saved user", user_id=actual_id)
         return actual_id
@@ -992,6 +1181,24 @@ class DatabaseService:
         if not row:
             return None
         return _convert_uuid_fields(dict(row._mapping))
+
+    async def user_has_organization_access(
+        self, user_id: str, organization_id: str
+    ) -> bool:
+        """Verify active tenant selection against persisted membership."""
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM organization_memberships
+                        WHERE user_id = :user_id
+                          AND organization_id = :organization_id
+                          AND is_active = TRUE
+                    )
+                """),
+                {"user_id": user_id, "organization_id": organization_id},
+            )
+            return bool(result.scalar())
 
     async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
         """根据邮箱获取用户"""
@@ -1116,6 +1323,26 @@ class DatabaseService:
             return None
         return _convert_uuid_fields(dict(row._mapping))
 
+    async def consume_refresh_token(self, token_hash: str) -> dict[str, Any] | None:
+        """Atomically revoke and return one valid refresh token."""
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    UPDATE refresh_tokens
+                    SET is_revoked = TRUE
+                    WHERE token_hash = :token_hash
+                      AND is_revoked = FALSE
+                      AND expires_at > NOW()
+                    RETURNING *
+                """),
+                {"token_hash": token_hash},
+            )
+            row = result.fetchone()
+
+        if not row:
+            return None
+        return _convert_uuid_fields(dict(row._mapping))
+
     async def revoke_refresh_token(self, token_hash: str) -> None:
         """撤销 Refresh Token"""
         async with self.session() as session:
@@ -1135,6 +1362,23 @@ class DatabaseService:
                 ),
                 {"user_id": user_id},
             )
+
+    async def increment_user_token_version(self, user_id: str) -> int:
+        """Invalidate every issued access token for a user immediately."""
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    UPDATE users
+                    SET token_version = token_version + 1
+                    WHERE id = :id
+                    RETURNING token_version
+                """),
+                {"id": user_id},
+            )
+            value = result.scalar()
+        if value is None:
+            raise ValueError("user does not exist")
+        return int(value)
 
     # =========================================================================
     # 用户活动日志相关方法
@@ -1196,11 +1440,16 @@ class DatabaseService:
     async def list_projects_by_user(
         self, user_id: str, skip: int = 0, limit: int = 20
     ) -> tuple[list[dict[str, Any]], int]:
-        """列出用户的项目"""
+        """列出用户在当前组织中的项目；RLS 仍是最终隔离边界。"""
+        organization_id = get_tenant_context().organization_id
+        if not organization_id:
+            return [], 0
         async with self.session() as session:
             count_result = await session.execute(
-                text("SELECT COUNT(*) FROM projects WHERE user_id = :user_id"),
-                {"user_id": user_id},
+                text(
+                    "SELECT COUNT(*) FROM projects WHERE organization_id = :organization_id"
+                ),
+                {"organization_id": organization_id},
             )
             total_raw = count_result.scalar()
             total = int(total_raw) if total_raw is not None else 0
@@ -1208,11 +1457,15 @@ class DatabaseService:
             result = await session.execute(
                 text("""
                     SELECT * FROM projects
-                    WHERE user_id = :user_id
+                    WHERE organization_id = :organization_id
                     ORDER BY created_at DESC
                     LIMIT :limit OFFSET :skip
                 """),
-                {"user_id": user_id, "limit": limit, "skip": skip},
+                {
+                    "organization_id": organization_id,
+                    "limit": limit,
+                    "skip": skip,
+                },
             )
             rows = result.fetchall()
 
@@ -1329,58 +1582,6 @@ class DatabaseService:
 
         return _convert_uuid_fields(dict(row._mapping))
 
-    async def save_visualization(
-        self, project_id: str, visualization_data: dict[str, Any]
-    ) -> str:
-        """保存可视化数据到 pipeline_checkpoints"""
-        viz_id = str(uuid.uuid4())
-        async with self.session() as session:
-            await session.execute(
-                text("""
-                    INSERT INTO pipeline_checkpoints (id, project_id, node_name, state_snapshot, status)
-                    VALUES (:id, :project_id, :node_name, :state_snapshot, :status)
-                    ON CONFLICT (project_id, node_name) DO UPDATE SET
-                        state_snapshot = EXCLUDED.state_snapshot,
-                        status = EXCLUDED.status,
-                        updated_at = NOW()
-                """),
-                {
-                    "id": viz_id,
-                    "project_id": project_id,
-                    "node_name": "visualization_data",
-                    "state_snapshot": json.dumps(visualization_data),
-                    "status": "completed",
-                },
-            )
-        logger.info("Saved visualization data", project_id=project_id)
-        return viz_id
-
-    async def get_visualization_by_project_id(
-        self, project_id: str
-    ) -> dict[str, Any] | None:
-        """根据项目 ID 获取可视化数据"""
-        async with self.session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT state_snapshot FROM pipeline_checkpoints
-                    WHERE project_id = :project_id AND node_name = 'visualization_data'
-                    ORDER BY created_at DESC LIMIT 1
-                """),
-                {"project_id": project_id},
-            )
-            row = result.fetchone()
-
-        if not row:
-            return None
-
-        snapshot = row[0]
-        if isinstance(snapshot, str):
-            import json as _json
-
-            parsed: dict[str, Any] | None = _json.loads(snapshot)
-            return parsed
-        return snapshot if isinstance(snapshot, dict) else None
-
     async def get_written_sections_by_project_id(
         self, project_id: str
     ) -> list[dict[str, Any]]:
@@ -1399,254 +1600,19 @@ class DatabaseService:
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
-    # =========================================================================
-    # 可观测性：Pipeline Runs / Node Executions / LLM Calls
-    # =========================================================================
-
-    async def create_pipeline_run(
-        self,
-        project_id: str,
-        topic: str | None = None,
-        config: dict[str, Any] | None = None,
-        created_by: str | None = None,
-    ) -> str:
-        """创建 Pipeline 运行记录，返回 run_id"""
-        run_id = str(uuid.uuid4())
-
-        async with self.session() as session:
-            await session.execute(
-                text("""
-                    INSERT INTO pipeline_runs (id, project_id, topic, config, created_by)
-                    VALUES (:id, :project_id, :topic, :config, :created_by)
-                """),
-                {
-                    "id": run_id,
-                    "project_id": project_id,
-                    "topic": topic,
-                    "config": json.dumps(config) if config else None,
-                    "created_by": created_by,
-                },
-            )
-
-        logger.info("Created pipeline run", run_id=run_id, project_id=project_id)
-        return run_id
-
-    async def finish_pipeline_run(
-        self,
-        run_id: str,
-        status: str,
-        error_message: str | None = None,
-        elapsed_seconds: float | None = None,
-        total_tokens: int = 0,
-        total_cost: float = 0,
-        llm_calls_count: int = 0,
-    ) -> None:
-        """结束 Pipeline 运行"""
-        async with self.session() as session:
-            await session.execute(
-                text("""
-                    UPDATE pipeline_runs
-                    SET status = :status,
-                        error_message = :error_message,
-                        finished_at = NOW(),
-                        elapsed_seconds = COALESCE(:elapsed_seconds, EXTRACT(EPOCH FROM (NOW() - created_at))),
-                        total_tokens = :total_tokens,
-                        total_cost = :total_cost,
-                        total_llm_calls = :llm_calls_count
-                    WHERE id = :id
-                """),
-                {
-                    "id": run_id,
-                    "status": status,
-                    "error_message": error_message,
-                    "elapsed_seconds": elapsed_seconds,
-                    "total_tokens": total_tokens,
-                    "total_cost": total_cost,
-                    "llm_calls_count": llm_calls_count,
-                },
-            )
-
-        logger.info("Finished pipeline run", run_id=run_id, status=status)
-
-    async def update_pipeline_run_stats(
-        self,
-        run_id: str,
-        total_tokens: int = 0,
-        total_cost: float = 0,
-        llm_calls_count: int = 0,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
-        total_nodes: int | None = None,
-        completed_nodes: int | None = None,
-        failed_nodes: int | None = None,
-    ) -> None:
-        """更新 Pipeline 运行的汇总统计"""
-        set_parts = [
-            "total_prompt_tokens = :prompt_tokens",
-            "total_completion_tokens = :completion_tokens",
-            "total_tokens = :total_tokens",
-            "total_cost = :total_cost",
-            "total_llm_calls = :llm_calls_count",
-        ]
-        params: dict[str, Any] = {
-            "id": run_id,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": total_tokens,
-            "total_cost": total_cost,
-            "llm_calls_count": llm_calls_count,
-        }
-
-        if total_nodes is not None:
-            set_parts.append("total_nodes = :total_nodes")
-            params["total_nodes"] = total_nodes
-        if completed_nodes is not None:
-            set_parts.append("completed_nodes = :completed_nodes")
-            params["completed_nodes"] = completed_nodes
-        if failed_nodes is not None:
-            set_parts.append("failed_nodes = :failed_nodes")
-            params["failed_nodes"] = failed_nodes
-
-        async with self.session() as session:
-            await session.execute(
-                text(f"UPDATE pipeline_runs SET {', '.join(set_parts)} WHERE id = :id"),  # nosec B608
-                params,
-            )
-
-    async def refresh_pipeline_run_usage_from_calls(self, run_id: str) -> None:
-        """Recompute run usage from persisted call rows.
-
-        Request-level audit rows are the source of truth while the pipeline is
-        running. Keeping the run summary in sync makes usage pages useful before
-        the final tracker summary is written.
-        """
-        async with self.session() as session:
-            await session.execute(
-                text("""
-                    UPDATE pipeline_runs pr
-                    SET total_prompt_tokens = COALESCE(stats.prompt_tokens, 0),
-                        total_completion_tokens = COALESCE(stats.completion_tokens, 0),
-                        total_tokens = COALESCE(stats.total_tokens, 0),
-                        total_cost = COALESCE(stats.total_cost, 0),
-                        total_llm_calls = COALESCE(stats.call_count, 0)
-                    FROM (
-                        SELECT
-                            pipeline_run_id,
-                            COUNT(*) AS call_count,
-                            COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                            COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                            COALESCE(SUM(total_tokens), 0) AS total_tokens,
-                            COALESCE(SUM(cost), 0) AS total_cost
-                        FROM llm_calls
-                        WHERE pipeline_run_id = :run_id
-                        GROUP BY pipeline_run_id
-                    ) stats
-                    WHERE pr.id = stats.pipeline_run_id
-                      AND pr.id = :run_id
-                """),
-                {"run_id": run_id},
-            )
-
-    async def create_node_execution(
-        self,
-        pipeline_run_id: str,
-        node_name: str,
-        node_type: str,
-        index: int | None = None,
-    ) -> str:
-        """创建节点执行记录，返回 execution_id"""
-        execution_id = str(uuid.uuid4())
-
-        async with self.session() as session:
-            await session.execute(
-                text("""
-                    INSERT INTO node_executions (id, pipeline_run_id, node_name, node_type, index, started_at)
-                    VALUES (:id, :pipeline_run_id, :node_name, :node_type, :index, NOW())
-                """),
-                {
-                    "id": execution_id,
-                    "pipeline_run_id": pipeline_run_id,
-                    "node_name": node_name,
-                    "node_type": node_type,
-                    "index": index,
-                },
-            )
-
-        logger.debug(
-            "Created node execution", execution_id=execution_id, node=node_name
-        )
-        return execution_id
-
-    async def finish_node_execution(
-        self,
-        execution_id: str,
-        status: str,
-        error_message: str | None = None,
-        error_traceback: str | None = None,
-        input_summary: dict[str, Any] | None = None,
-        output_summary: dict[str, Any] | None = None,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0,
-        total_tokens: int = 0,
-        cost: float = 0,
-        llm_calls_count: int = 0,
-        retry_count: int = 0,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """结束节点执行"""
-        async with self.session() as session:
-            await session.execute(
-                text("""
-                    UPDATE node_executions
-                    SET status = :status,
-                        error_message = :error_message,
-                        error_traceback = :error_traceback,
-                        input_summary = :input_summary,
-                        output_summary = :output_summary,
-                        prompt_tokens = :prompt_tokens,
-                        completion_tokens = :completion_tokens,
-                        total_tokens = :total_tokens,
-                        cost = :cost,
-                        llm_calls_count = :llm_calls_count,
-                        retry_count = :retry_count,
-                        finished_at = NOW(),
-                        elapsed_ms = EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000,
-                        metadata = :metadata
-                    WHERE id = :id
-                """),
-                {
-                    "id": execution_id,
-                    "status": status,
-                    "error_message": error_message,
-                    "error_traceback": error_traceback,
-                    "input_summary": json.dumps(input_summary)
-                    if input_summary
-                    else None,
-                    "output_summary": json.dumps(output_summary)
-                    if output_summary
-                    else None,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                    "cost": cost,
-                    "llm_calls_count": llm_calls_count,
-                    "retry_count": retry_count,
-                    "metadata": json.dumps(metadata) if metadata else None,
-                },
-            )
-
-        logger.debug(
-            "Finished node execution", execution_id=execution_id, status=status
-        )
+    # Agent executions, decisions and tool/LLM calls are the active
+    # observability write path. Legacy pipeline tables remain read-only so
+    # historical usage reports continue to work after migration.
 
     async def create_llm_call(
         self,
-        pipeline_run_id: str,
+        pipeline_run_id: str | None,
         node_execution_id: str | None,
         call_type: str,
         provider_name: str,
         model_name: str,
         project_id: str | None = None,
+        execution_id: str | None = None,
         node_name: str | None = None,
         requested_model: str | None = None,
         upstream_model: str | None = None,
@@ -1670,14 +1636,16 @@ class DatabaseService:
             await session.execute(
                 text("""
                     INSERT INTO llm_calls (
-                        id, project_id, pipeline_run_id, node_execution_id, node_name,
+                        id, project_id, execution_id, pipeline_run_id,
+                        node_execution_id, node_name,
                         call_type, provider_name, model_name, requested_model, upstream_model,
                         api_base_url, api_key_hint, status,
                         is_stream, latency_ms, first_token_ms,
                         input_preview, output_preview, request_metadata, retry_of,
                         input_price_per_m, output_price_per_m
                     ) VALUES (
-                        :id, :project_id, :pipeline_run_id, :node_execution_id, :node_name,
+                        :id, :project_id, :execution_id, :pipeline_run_id,
+                        :node_execution_id, :node_name,
                         :call_type, :provider_name, :model_name, :requested_model, :upstream_model,
                         :api_base_url, :api_key_hint, :status,
                         :is_stream, :latency_ms, :first_token_ms,
@@ -1688,6 +1656,7 @@ class DatabaseService:
                 {
                     "id": call_id,
                     "project_id": project_id,
+                    "execution_id": execution_id,
                     "pipeline_run_id": pipeline_run_id,
                     "node_execution_id": node_execution_id,
                     "node_name": node_name,
@@ -1728,6 +1697,9 @@ class DatabaseService:
         output_preview: str | None = None,
         model_name: str | None = None,
         upstream_model: str | None = None,
+        provider_name: str | None = None,
+        api_base_url: str | None = None,
+        api_key_hint: str | None = None,
         input_price_per_m: float | None = None,
         output_price_per_m: float | None = None,
     ) -> None:
@@ -1747,6 +1719,9 @@ class DatabaseService:
                         output_preview = COALESCE(:output_preview, output_preview),
                         model_name = COALESCE(:model_name, model_name),
                         upstream_model = COALESCE(:upstream_model, upstream_model),
+                        provider_name = COALESCE(:provider_name, provider_name),
+                        api_base_url = COALESCE(:api_base_url, api_base_url),
+                        api_key_hint = COALESCE(:api_key_hint, api_key_hint),
                         input_price_per_m = COALESCE(:input_price_per_m, input_price_per_m),
                         output_price_per_m = COALESCE(:output_price_per_m, output_price_per_m)
                     WHERE id = :id
@@ -1763,87 +1738,13 @@ class DatabaseService:
                     "output_preview": output_preview,
                     "model_name": model_name,
                     "upstream_model": upstream_model,
+                    "provider_name": provider_name,
+                    "api_base_url": api_base_url,
+                    "api_key_hint": api_key_hint,
                     "input_price_per_m": input_price_per_m,
                     "output_price_per_m": output_price_per_m,
                 },
             )
-
-        async with self.session() as session:
-            result = await session.execute(
-                text("SELECT pipeline_run_id FROM llm_calls WHERE id = :id"),
-                {"id": call_id},
-            )
-            row = result.fetchone()
-
-        if row and row[0]:
-            try:
-                await self.refresh_pipeline_run_usage_from_calls(str(row[0]))
-            except Exception as e:
-                logger.warning(
-                    "Failed to refresh pipeline run usage from llm_calls",
-                    run_id=str(row[0]),
-                    error=str(e),
-                )
-
-    async def get_pipeline_run_stats(self, run_id: str) -> dict[str, Any] | None:
-        """获取 Pipeline 运行的汇总统计"""
-        async with self.session() as session:
-            result = await session.execute(
-                text("SELECT * FROM pipeline_runs WHERE id = :id"),
-                {"id": run_id},
-            )
-            row = result.fetchone()
-
-        if not row:
-            return None
-
-        return _convert_uuid_fields(dict(row._mapping))
-
-    async def get_node_executions(self, run_id: str) -> list[dict[str, Any]]:
-        """获取 Pipeline 运行的所有节点执行记录"""
-        async with self.session() as session:
-            result = await session.execute(
-                text("""
-                    SELECT * FROM node_executions
-                    WHERE pipeline_run_id = :run_id
-                    ORDER BY COALESCE(index, 0), started_at
-                """),
-                {"run_id": run_id},
-            )
-            rows = result.fetchall()
-
-        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
-
-    async def get_llm_calls(
-        self,
-        run_id: str,
-        node_name: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """获取 LLM 调用记录，可按 node_name 过滤"""
-        async with self.session() as session:
-            if node_name:
-                result = await session.execute(
-                    text("""
-                        SELECT lc.* FROM llm_calls lc
-                        LEFT JOIN node_executions ne ON lc.node_execution_id = ne.id
-                        WHERE lc.pipeline_run_id = :run_id
-                          AND COALESCE(lc.node_name, ne.node_name) = :node_name
-                        ORDER BY lc.created_at
-                    """),
-                    {"run_id": run_id, "node_name": node_name},
-                )
-            else:
-                result = await session.execute(
-                    text("""
-                        SELECT * FROM llm_calls
-                        WHERE pipeline_run_id = :run_id
-                        ORDER BY created_at
-                    """),
-                    {"run_id": run_id},
-                )
-            rows = result.fetchall()
-
-        return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
 
     async def get_provider_usage_summary(
         self,
@@ -1900,6 +1801,221 @@ class DatabaseService:
             rows = result.fetchall()
 
         return [_convert_uuid_fields(dict(row._mapping)) for row in rows]
+
+    # =========================================================================
+    # Multi-agent execution and audit persistence
+    # =========================================================================
+
+    async def create_agent_execution(
+        self,
+        *,
+        execution_id: str,
+        project_id: str,
+        input_state: dict[str, Any],
+    ) -> None:
+        """Create the pending execution before a background task is scheduled."""
+
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO agent_executions (
+                        id, project_id, agent_name, status, input_state, started_at
+                    )
+                    VALUES (
+                        :id, :project_id, 'orchestrator', 'pending',
+                        CAST(:input_state AS jsonb), CURRENT_TIMESTAMP
+                    )
+                """),
+                {
+                    "id": execution_id,
+                    "project_id": project_id,
+                    "input_state": json.dumps(input_state, ensure_ascii=False),
+                },
+            )
+
+    async def update_agent_execution(
+        self,
+        execution_id: str,
+        status: str,
+        *,
+        output_state: dict[str, Any] | None = None,
+        quality_score: float | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        """Update one execution using a single canonical lifecycle."""
+
+        terminal = status in {"succeeded", "failed", "interrupted", "cancelled"}
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    UPDATE agent_executions
+                    SET status = :status,
+                        output_state = COALESCE(
+                            CAST(:output_state AS jsonb),
+                            output_state
+                        ),
+                        quality_score = COALESCE(
+                            CAST(:quality_score AS double precision),
+                            quality_score
+                        ),
+                        error_message = :error_message,
+                        finished_at = CASE
+                            WHEN CAST(:terminal AS boolean) THEN CURRENT_TIMESTAMP
+                            ELSE NULL
+                        END,
+                        duration_ms = CASE
+                            WHEN CAST(:terminal AS boolean) THEN
+                                (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - started_at)) * 1000)::bigint
+                            ELSE duration_ms
+                        END
+                    WHERE id = :id
+                """),
+                {
+                    "id": execution_id,
+                    "status": status,
+                    "output_state": (
+                        json.dumps(output_state, ensure_ascii=False)
+                        if output_state is not None
+                        else None
+                    ),
+                    "quality_score": quality_score,
+                    "error_message": error_message,
+                    "terminal": terminal,
+                },
+            )
+
+    async def get_latest_agent_execution(
+        self,
+        project_id: str,
+    ) -> dict[str, Any] | None:
+        async with self.session() as session:
+            result = await session.execute(
+                text("""
+                    SELECT *
+                    FROM agent_executions
+                    WHERE project_id = :project_id
+                    ORDER BY started_at DESC, id DESC
+                    LIMIT 1
+                """),
+                {"project_id": project_id},
+            )
+            row = result.fetchone()
+        return _convert_uuid_fields(dict(row._mapping)) if row else None
+
+    async def record_agent_decision(
+        self,
+        *,
+        execution_id: str,
+        project_id: str,
+        agent_name: str,
+        decision: str,
+        reason: str | None = None,
+    ) -> str:
+        decision_id = str(uuid.uuid4())
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO agent_decisions (
+                        id, execution_id, project_id, agent_name, decision, reason
+                    )
+                    VALUES (
+                        :id, :execution_id, :project_id, :agent_name,
+                        :decision, :reason
+                    )
+                """),
+                {
+                    "id": decision_id,
+                    "execution_id": execution_id,
+                    "project_id": project_id,
+                    "agent_name": agent_name,
+                    "decision": decision,
+                    "reason": reason,
+                },
+            )
+        return decision_id
+
+    async def record_agent_tool_call(
+        self,
+        *,
+        execution_id: str,
+        project_id: str,
+        agent_name: str,
+        tool_name: str,
+        input_summary: str | None,
+        output_summary: str | None,
+        duration_ms: int,
+        status: str,
+        error_message: str | None = None,
+    ) -> str:
+        call_id = str(uuid.uuid4())
+        async with self.session() as session:
+            await session.execute(
+                text("""
+                    INSERT INTO agent_tool_calls (
+                        id, execution_id, project_id, agent_name, tool_name,
+                        input_summary, output_summary, duration_ms, status,
+                        error_message
+                    )
+                    VALUES (
+                        :id, :execution_id, :project_id, :agent_name, :tool_name,
+                        :input_summary, :output_summary, :duration_ms, :status,
+                        :error_message
+                    )
+                """),
+                {
+                    "id": call_id,
+                    "execution_id": execution_id,
+                    "project_id": project_id,
+                    "agent_name": agent_name,
+                    "tool_name": tool_name,
+                    "input_summary": input_summary,
+                    "output_summary": output_summary,
+                    "duration_ms": duration_ms,
+                    "status": status,
+                    "error_message": error_message,
+                },
+            )
+        return call_id
+
+    async def cleanup_stale_agent_executions(self) -> int:
+        """清理过期的 Agent 执行记录
+
+        将 status='running' 的所有 agent_executions 标记为 'interrupted'。
+        用于容器重启后的状态清理。
+        类似 main.py 中对 projects 表的清理逻辑。
+
+        Returns
+        -------
+        int
+            被清理的记录数。
+        """
+        async with self.session() as session:
+            # 先统计受影响的记录数
+            count_result = await session.execute(
+                text("""
+                    SELECT COUNT(*) FROM agent_executions
+                    WHERE status IN ('running', 'pending')
+                """),
+            )
+            count_row = count_result.fetchone()
+            affected: int = int(count_row[0]) if count_row else 0
+
+            if affected > 0:
+                await session.execute(
+                    text("""
+                        UPDATE agent_executions
+                        SET status = 'interrupted',
+                            finished_at = CURRENT_TIMESTAMP,
+                            error_message = 'Server restart: execution interrupted'
+                        WHERE status IN ('running', 'pending')
+                    """),
+                )
+                logger.info(
+                    "Cleaned stale agent executions",
+                    count=affected,
+                )
+
+        return affected
 
 
 # 全局数据库实例
