@@ -470,11 +470,8 @@ async def _call_llm_with_retry(
     async def _call() -> Any:
         from ..services.llm_client import ainvoke_with_callbacks, create_llm
 
-        llm = create_llm(temperature=temperature, max_tokens=None)
-        return await asyncio.wait_for(
-            ainvoke_with_callbacks(llm, messages),
-            timeout=request_timeout,
-        )
+        llm = create_llm(temperature=temperature, task="kg")
+        return await ainvoke_with_callbacks(llm, messages)
 
     return await _call()
 

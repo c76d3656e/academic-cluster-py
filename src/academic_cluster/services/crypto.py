@@ -2,11 +2,12 @@
 Fernet 加密服务
 
 用于加密/解密 Provider API Key（AES-128-CBC + HMAC-SHA256）。
-密钥通过 PROVIDER_ENCRYPTION_KEY 环境变量管理。
+密钥通过 PROVIDER_ENCRYPTION_KEY 环境变量管理，未设置时自动生成并持久化。
 """
 
 import base64
 import hashlib
+from pathlib import Path
 
 import structlog
 from cryptography.fernet import Fernet, InvalidToken
@@ -15,28 +16,47 @@ logger = structlog.get_logger()
 
 _fernet: Fernet | None = None
 
+_KEY_FILE = "/app/data/.provider_encryption_key"
 
-def _get_fernet() -> Fernet:
-    """获取或初始化 Fernet 实例"""
-    global _fernet
+def _load_or_generate_key() -> str:
+    """从文件或环境变量获取密钥，未设置时自动生成并持久化。"""
     from ..config import get_settings
 
     settings = get_settings()
     key = settings.provider_encryption_key
+    if key:
+        return key
 
-    if not key and settings.is_production:
-        raise RuntimeError(
-            "PROVIDER_ENCRYPTION_KEY is required to encrypt provider keys in production"
+    # 2. 尝试从持久化文件读取
+    key_file = Path(_KEY_FILE)
+    if key_file.exists():
+        stored = key_file.read_text().strip()
+        if stored:
+            logger.info("Loaded provider encryption key from file")
+            return stored
+
+    # 3. 自动生成并保存
+    key = Fernet.generate_key().decode()
+    try:
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text(key)
+        logger.info("Auto-generated provider encryption key and persisted to file")
+    except OSError as e:
+        logger.warning(
+            "Could not persist encryption key to file, using in-memory only",
+            error=str(e),
         )
+
+    return key
+
+
+def _get_fernet() -> Fernet:
+    """获取或初始化 Fernet 实例"""
+    global _fernet
     if _fernet is not None:
         return _fernet
 
-    if not key:
-        # 自动生成一个临时 key（仅用于开发环境）
-        key = Fernet.generate_key().decode()
-        logger.warning(
-            "No PROVIDER_ENCRYPTION_KEY set, using auto-generated key (NOT for production)"
-        )
+    key = _load_or_generate_key()
 
     # 如果是明文密码而非 Fernet key，派生一个合法的 Fernet key
     if not _is_fernet_key(key):

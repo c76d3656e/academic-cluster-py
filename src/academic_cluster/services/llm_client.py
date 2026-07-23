@@ -33,7 +33,6 @@ from .concurrency import BoundedFifoGate
 
 logger = structlog.get_logger()
 
-
 def _default_routing_policy() -> SimpleNamespace:
     """Return TOML defaults for compatibility clients outside the provider pool."""
 
@@ -53,6 +52,15 @@ def _default_routing_policy() -> SimpleNamespace:
         ),
     )
 
+
+_TASK_TAGS: dict[str, set[str]] = {
+    "kg":       {"kg", "public"},
+    "evidence": {"ec", "public"},
+    "outline":  {"ol", "public"},
+    "writing":  {"wr", "public"},
+    "search":   {"se", "public"},
+    "default":  {"public"},
+}
 
 _rr_counter = 0
 _llm_request_gate: BoundedFifoGate | None = None
@@ -392,6 +400,7 @@ _rr_counter = 0
 def create_llm(
     temperature: float = 0.7,
     max_tokens: int | None = None,
+    task: str = "default",
 ) -> ChatOpenAI:
     """
     从 Provider Pool 创建 ChatOpenAI 实例。
@@ -402,6 +411,7 @@ def create_llm(
     Args:
         temperature: 温度参数
         max_tokens: 最大 token 数
+        task: 任务标签，用于 visibility 过滤（默认 "default" 仅匹配 public）
 
     Returns:
         ChatOpenAI 实例
@@ -416,9 +426,18 @@ def create_llm(
     if not deployments:
         raise RuntimeError("No LLM deployments configured")
 
+    # visibility 过滤
+    allowed = _TASK_TAGS.get(task, {"public"})
+    candidates = [
+        d for d in deployments
+        if set(d.get("model_info", {}).get("visibility", ["public"])) & allowed
+    ]
+    if not candidates:
+        candidates = deployments  # fallback 全池
+
     # 轮询选择
-    _rr_counter = (_rr_counter + 1) % len(deployments)
-    deployment = deployments[_rr_counter]
+    _rr_counter = (_rr_counter + 1) % len(candidates)
+    deployment = candidates[_rr_counter]
     params = deployment["litellm_params"]
     routing_policy = pool.routing_policy
     if routing_policy is None:
@@ -788,3 +807,55 @@ async def ainvoke_with_callbacks(
             )
 
     return response
+
+
+def create_llm_with_retry(
+    temperature: float = 0.7,
+    max_tokens: int | None = None,
+    task: str = "default",
+    max_retries: int = 3,
+) -> Any:
+    """
+    创建带重试的 LLM 调用包装器。
+
+    每次重试使用不同的 provider（轮询），实现故障转移。
+
+    Returns:
+        async callable: _invoke(messages) -> response
+    """
+
+    async def _invoke(messages: Any) -> Any:
+        from tenacity import (
+            retry,
+            stop_after_attempt,
+            wait_exponential,
+        )
+
+        @retry(
+            stop=stop_after_attempt(max_retries),
+            wait=wait_exponential(multiplier=2, min=3, max=30),
+            reraise=True,
+        )
+        async def _call() -> Any:
+            llm = create_llm(temperature=temperature, max_tokens=max_tokens, task=task)
+            return await ainvoke_with_callbacks(llm, messages)
+
+        return await _call()
+
+    return _invoke
+
+
+async def invoke_llm(
+    messages: list[Any],
+    temperature: float = 0.7,
+    max_tokens: int | None = None,
+    task: str = "default",
+) -> Any:
+    """
+    便捷函数：创建 LLM 并调用，自动注入 callback。
+
+    Returns:
+        LLM response
+    """
+    llm = create_llm(temperature=temperature, max_tokens=max_tokens, task=task)
+    return await ainvoke_with_callbacks(llm, messages)

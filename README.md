@@ -1,30 +1,30 @@
-# Academic Cluster
+﻿# Academic Cluster
 
-Academic Cluster 是一个处于开发阶段的学术文献工作流系统，基于 FastAPI、
-LangGraph、PostgreSQL/pgvector、Redis 和 React/Vite 前端构建。系统围绕单个项目检索
-论文、分析证据与覆盖度、生成综述、执行同行评审，并持久化最终结果。
+Academic Cluster 鏄竴涓浜庡紑鍙戦樁娈电殑瀛︽湳鏂囩尞宸ヤ綔娴佺郴缁燂紝鍩轰簬 FastAPI銆?
+LangGraph銆丳ostgreSQL/pgvector銆丷edis 鍜?React/Vite 鍓嶇鏋勫缓銆傜郴缁熷洿缁曞崟涓」鐩绱?
+璁烘枃銆佸垎鏋愯瘉鎹笌瑕嗙洊搴︺€佺敓鎴愮患杩般€佹墽琛屽悓琛岃瘎瀹★紝骞舵寔涔呭寲鏈€缁堢粨鏋溿€?
 
-生产流程是一个具有版本化节点契约的六节点 LangGraph 状态机，目标是提供可重复
-执行、基于 PostgreSQL 的 checkpoint 恢复，以及可审计的节点级可观测性。
+鐢熶骇娴佺▼鏄竴涓叿鏈夌増鏈寲鑺傜偣濂戠害鐨勫叚鑺傜偣 LangGraph 鐘舵€佹満锛岀洰鏍囨槸鎻愪緵鍙噸澶?
+鎵ц銆佸熀浜?PostgreSQL 鐨?checkpoint 鎭㈠锛屼互鍙婂彲瀹¤鐨勮妭鐐圭骇鍙娴嬫€с€?
 
-## 能力概览
+## 鑳藉姏姒傝
 
-- 按项目检索、归并与管理学术论文。
-- 生成 embedding、覆盖度分析、知识图谱、证据卡片和研究缺口分析。
-- 生成大纲、综述章节、引用、摘要和最终综述。
-- 在终结前执行同行评审，并进行有界的修订或补充检索。
-- 通过 API 提供契约元数据、决策记录、已审计工具调用和 LLM 用量记录。
+- 鎸夐」鐩绱€佸綊骞朵笌绠＄悊瀛︽湳璁烘枃銆?
+- 鐢熸垚 embedding銆佽鐩栧害鍒嗘瀽銆佺煡璇嗗浘璋便€佽瘉鎹崱鐗囧拰鐮旂┒缂哄彛鍒嗘瀽銆?
+- 鐢熸垚澶х翰銆佺患杩扮珷鑺傘€佸紩鐢ㄣ€佹憳瑕佸拰鏈€缁堢患杩般€?
+- 鍦ㄧ粓缁撳墠鎵ц鍚岃璇勫锛屽苟杩涜鏈夌晫鐨勪慨璁㈡垨琛ュ厖妫€绱€?
+- 閫氳繃 API 鎻愪緵濂戠害鍏冩暟鎹€佸喅绛栬褰曘€佸凡瀹¤宸ュ叿璋冪敤鍜?LLM 鐢ㄩ噺璁板綍銆?
 
-## 多智能体流程
+## 澶氭櫤鑳戒綋娴佺▼
 
-只有以下六个名称是 LangGraph 节点：<code>supervisor</code>、
-<code>research</code>、<code>analysis</code>、<code>writing</code>、
-<code>peer_review</code> 与 <code>finalize</code>。embedding、聚类、知识图谱、
-证据和缺口分析均是 <code>analysis</code> 节点内部操作，而不是独立的图节点。
+鍙湁浠ヤ笅鍏釜鍚嶇О鏄?LangGraph 鑺傜偣锛?code>supervisor</code>銆?
+<code>research</code>銆?code>analysis</code>銆?code>writing</code>銆?
+<code>peer_review</code> 涓?<code>finalize</code>銆俥mbedding銆佽仛绫汇€佺煡璇嗗浘璋便€?
+璇佹嵁鍜岀己鍙ｅ垎鏋愬潎鏄?<code>analysis</code> 鑺傜偣鍐呴儴鎿嶄綔锛岃€屼笉鏄嫭绔嬬殑鍥捐妭鐐广€?
 
 ~~~mermaid
 flowchart LR
-    START["开始"] --> S["supervisor"]
+    START["寮€濮?] --> S["supervisor"]
     S --> R["research"]
     S --> A["analysis"]
     S --> W["writing"]
@@ -34,72 +34,72 @@ flowchart LR
     A --> S
     W --> S
     P --> S
-    F --> END["结束"]
+    F --> END["缁撴潫"]
 ~~~
 
-Supervisor 不调用 LLM 路由，而是根据 <code>AgentState</code>、重试预算、
-覆盖度状态和评审状态决定下一阶段。所有非终结阶段都会返回 Supervisor。默认预算为
-每阶段两次尝试、两轮补充检索和两次写作修订。
+Supervisor 涓嶈皟鐢?LLM 璺敱锛岃€屾槸鏍规嵁 <code>AgentState</code>銆侀噸璇曢绠椼€?
+瑕嗙洊搴︾姸鎬佸拰璇勫鐘舵€佸喅瀹氫笅涓€闃舵銆傛墍鏈夐潪缁堢粨闃舵閮戒細杩斿洖 Supervisor銆傞粯璁ら绠椾负
+姣忛樁娈典袱娆″皾璇曘€佷袱杞ˉ鍏呮绱㈠拰涓ゆ鍐欎綔淇銆?
 
-完整运行时设计见 [架构说明](docs/architecture.md)。
+瀹屾暣杩愯鏃惰璁¤ [鏋舵瀯璇存槑](docs/architecture.md)銆?
 
-## 持久化与恢复
+## 鎸佷箙鍖栦笌鎭㈠
 
-正式 API/应用启动路径使用 LangGraph 的 <code>AsyncPostgresSaver</code> 和
-PostgreSQL 连接池。checkpoint 线程同时以 <code>project_id</code> 与
-<code>execution_id</code> 隔离：
+姝ｅ紡 API/搴旂敤鍚姩璺緞浣跨敤 LangGraph 鐨?<code>AsyncPostgresSaver</code> 鍜?
+PostgreSQL 杩炴帴姹犮€俢heckpoint 绾跨▼鍚屾椂浠?<code>project_id</code> 涓?
+<code>execution_id</code> 闅旂锛?
 
 ~~~text
 academic-cluster:agent:v1:{project_id}:{execution_id}
 ~~~
 
-应用启动要求 PostgreSQL checkpointer 健康可用，并持有 PostgreSQL advisory lock。
-后端必须只运行一个进程和一个 Uvicorn worker。持久化 checkpointer 或其锁不可用时，
-运行时会拒绝接受新的 Agent 任务。
+搴旂敤鍚姩瑕佹眰 PostgreSQL checkpointer 鍋ュ悍鍙敤锛屽苟鎸佹湁 PostgreSQL advisory lock銆?
+鍚庣蹇呴』鍙繍琛屼竴涓繘绋嬪拰涓€涓?Uvicorn worker銆傛寔涔呭寲 checkpointer 鎴栧叾閿佷笉鍙敤鏃讹紝
+杩愯鏃朵細鎷掔粷鎺ュ彈鏂扮殑 Agent 浠诲姟銆?
 
-### 并发与背压
+### 骞跺彂涓庤儗鍘?
 
-当前部署模型是**单个 checkpoint owner 的有界并发服务**，不是多副本 worker
-集群。API 在持久化 `pending` 执行后进入进程内 FIFO 调度器：
+褰撳墠閮ㄧ讲妯″瀷鏄?*鍗曚釜 checkpoint owner 鐨勬湁鐣屽苟鍙戞湇鍔?*锛屼笉鏄鍓湰 worker
+闆嗙兢銆侫PI 鍦ㄦ寔涔呭寲 `pending` 鎵ц鍚庤繘鍏ヨ繘绋嬪唴 FIFO 璋冨害鍣細
 
-- `AGENT_MAX_CONCURRENT_RUNS` 控制实际执行中的项目数；
-- `AGENT_MAX_QUEUED_RUNS` 控制等待项目数，满载时 `/agent/run` 与兼容的
-  `/pipeline/{project_id}/start` 返回 HTTP `429`；
-- `AGENT_MAX_ADMITTED_RUNS_PER_USER` 防止单一用户占满全局队列；
-- 取消排队任务、尚未得到首次调度的 task，或关闭期间未注册的 task，都会写回
-  `interrupted`，不会留下阻塞下一次运行的 `pending` 记录；
-- LLM 与 embedding 分别经过显式容量、FIFO 队列与等待 deadline；这些容量不从
-  Provider RPM 推导。LiteLLM 继续负责供应商级 RPM/TPM、cooldown 与 failover；
-- 每个项目的 KG/证据/embedding fan-out 受每运行上限约束，NetworkX/Leiden
-  聚类转入工作线程，SSE 每连接队列和每项目连接数均有限制。慢 SSE 客户端只会收到
-  最新事件，过期事件被替换而不会无限占用内存。
+- `AGENT_MAX_CONCURRENT_RUNS` 鎺у埗瀹為檯鎵ц涓殑椤圭洰鏁帮紱
+- `AGENT_MAX_QUEUED_RUNS` 鎺у埗绛夊緟椤圭洰鏁帮紝婊¤浇鏃?`/agent/run` 涓庡吋瀹圭殑
+  `/pipeline/{project_id}/start` 杩斿洖 HTTP `429`锛?
+- `AGENT_MAX_ADMITTED_RUNS_PER_USER` 闃叉鍗曚竴鐢ㄦ埛鍗犳弧鍏ㄥ眬闃熷垪锛?
+- 鍙栨秷鎺掗槦浠诲姟銆佸皻鏈緱鍒伴娆¤皟搴︾殑 task锛屾垨鍏抽棴鏈熼棿鏈敞鍐岀殑 task锛岄兘浼氬啓鍥?
+  `interrupted`锛屼笉浼氱暀涓嬮樆濉炰笅涓€娆¤繍琛岀殑 `pending` 璁板綍锛?
+- LLM 涓?embedding 鍒嗗埆缁忚繃鏄惧紡瀹归噺銆丗IFO 闃熷垪涓庣瓑寰?deadline锛涜繖浜涘閲忎笉浠?
+  Provider RPM 鎺ㄥ銆侺iteLLM 缁х画璐熻矗渚涘簲鍟嗙骇 RPM/TPM銆乧ooldown 涓?failover锛?
+- 姣忎釜椤圭洰鐨?KG/璇佹嵁/embedding fan-out 鍙楁瘡杩愯涓婇檺绾︽潫锛孨etworkX/Leiden
+  鑱氱被杞叆宸ヤ綔绾跨▼锛孲SE 姣忚繛鎺ラ槦鍒楀拰姣忛」鐩繛鎺ユ暟鍧囨湁闄愬埗銆傛參 SSE 瀹㈡埛绔彧浼氭敹鍒?
+  鏈€鏂颁簨浠讹紝杩囨湡浜嬩欢琚浛鎹㈣€屼笉浼氭棤闄愬崰鐢ㄥ唴瀛樸€?
 
-默认值优先保护数据库和 Provider：2 个活动 Agent、32 个排队 Agent、每用户最多
-2 个已准入任务、8 个 LLM in-flight、4 个 embedding in-flight。请在压测与
-Provider 配额验证后，通过 `.env` 中的 `AGENT_*`、`LLM_*`、`EMBEDDING_*` 和
-`SSE_*` 配置调整；不要仅因较高 RPM 就提高并发槽位。
+榛樿鍊间紭鍏堜繚鎶ゆ暟鎹簱鍜?Provider锛? 涓椿鍔?Agent銆?2 涓帓闃?Agent銆佹瘡鐢ㄦ埛鏈€澶?
+2 涓凡鍑嗗叆浠诲姟銆? 涓?LLM in-flight銆? 涓?embedding in-flight銆傝鍦ㄥ帇娴嬩笌
+Provider 閰嶉楠岃瘉鍚庯紝閫氳繃 `.env` 涓殑 `AGENT_*`銆乣LLM_*`銆乣EMBEDDING_*` 鍜?
+`SSE_*` 閰嶇疆璋冩暣锛涗笉瑕佷粎鍥犺緝楂?RPM 灏辨彁楂樺苟鍙戞Ы浣嶃€?
 
-PostgreSQL 仍是 checkpoint 与唯一活跃执行的事实来源，但目前不提供跨实例 claim、
-lease 或自动重新调度。因此增加 Uvicorn worker、容器副本或滚动部署中的并行
-Agent worker 都不受支持；需要水平扩展时，应先实现持久化 job queue、worker lease
-和跨实例的 Provider 限额，而不是绕开 advisory lock。
+PostgreSQL 浠嶆槸 checkpoint 涓庡敮涓€娲昏穬鎵ц鐨勪簨瀹炴潵婧愶紝浣嗙洰鍓嶄笉鎻愪緵璺ㄥ疄渚?claim銆?
+lease 鎴栬嚜鍔ㄩ噸鏂拌皟搴︺€傚洜姝ゅ鍔?Uvicorn worker銆佸鍣ㄥ壇鏈垨婊氬姩閮ㄧ讲涓殑骞惰
+Agent worker 閮戒笉鍙楁敮鎸侊紱闇€瑕佹按骞虫墿灞曟椂锛屽簲鍏堝疄鐜版寔涔呭寲 job queue銆亀orker lease
+鍜岃法瀹炰緥鐨?Provider 闄愰锛岃€屼笉鏄粫寮€ advisory lock銆?
 
-<code>InMemorySaver</code> 仍用于直接图测试和隔离的确定性 E2E 测试。它不是正式
-API 的 checkpoint 路径，进程退出后也无法恢复状态。
+<code>InMemorySaver</code> 浠嶇敤浜庣洿鎺ュ浘娴嬭瘯鍜岄殧绂荤殑纭畾鎬?E2E 娴嬭瘯銆傚畠涓嶆槸姝ｅ紡
+API 鐨?checkpoint 璺緞锛岃繘绋嬮€€鍑哄悗涔熸棤娉曟仮澶嶇姸鎬併€?
 
-## 前置条件
+## 鍓嶇疆鏉′欢
 
-- Python 3.12 或更高版本。
-- 使用 [uv](https://docs.astral.sh/uv/) 创建锁定的开发环境。
-- Docker Engine 与 Docker Compose，用于 PostgreSQL、Redis 和全栈部署。
-- Node.js 与 npm，用于前端。Promptfoo 需要 Node
-  <code>^20.20.0 || >=22.22.0</code>。
-- 可用的 LLM Provider 与 embedding Provider。embedding 模型必须返回恰好
-  1024 个有限数值维度。
+- Python 3.12 鎴栨洿楂樼増鏈€?
+- 浣跨敤 [uv](https://docs.astral.sh/uv/) 鍒涘缓閿佸畾鐨勫紑鍙戠幆澧冦€?
+- Docker Engine 涓?Docker Compose锛岀敤浜?PostgreSQL銆丷edis 鍜屽叏鏍堥儴缃层€?
+- Node.js 涓?npm锛岀敤浜庡墠绔€侾romptfoo 闇€瑕?Node
+  <code>^20.20.0 || >=22.22.0</code>銆?
+- 鍙敤鐨?LLM Provider 涓?embedding Provider銆俥mbedding 妯″瀷蹇呴』杩斿洖鎭板ソ
+  1024 涓湁闄愭暟鍊肩淮搴︺€?
 
-## 配置
+## 閰嶇疆
 
-创建本地环境文件：
+鍒涘缓鏈湴鐜鏂囦欢锛?
 
 ~~~powershell
 Copy-Item .env.example .env
@@ -109,60 +109,60 @@ Copy-Item .env.example .env
 cp .env.example .env
 ~~~
 
-启动完整工作流前，至少应替换以下占位值：
+鍚姩瀹屾暣宸ヤ綔娴佸墠锛岃嚦灏戝簲鏇挎崲浠ヤ笅鍗犱綅鍊硷細
 
-| 范围 | 必需配置 |
+| 鑼冨洿 | 蹇呴渶閰嶇疆 |
 | --- | --- |
-| LLM | <code>LLM_MODEL</code>、<code>LLM_BASE_URL</code>、<code>LLM_API_KEY</code> |
-| Embedding | <code>EMBEDDING_MODEL</code>、<code>EMBEDDING_API_URL</code>、<code>EMBEDDING_API_KEY</code> |
-| PostgreSQL | 管理迁移账号使用 <code>POSTGRES_USER</code>/<code>POSTGRES_PASSWORD</code>；应用必须使用独立的 <code>APP_POSTGRES_USER</code>/<code>APP_POSTGRES_PASSWORD</code> |
-| Redis | <code>REDIS_HOST</code>、<code>REDIS_PORT</code>、<code>REDIS_PASSWORD</code> |
-| 安全配置 | <code>JWT_SECRET_KEY</code>、<code>PROVIDER_ENCRYPTION_KEY</code>、<code>ALLOWED_HOSTS</code> |
+| LLM | <code>LLM_MODEL</code>銆?code>LLM_BASE_URL</code>銆?code>LLM_API_KEY</code> |
+| Embedding | <code>EMBEDDING_MODEL</code>銆?code>EMBEDDING_API_URL</code>銆?code>EMBEDDING_API_KEY</code> |
+| PostgreSQL | 绠＄悊杩佺Щ璐﹀彿浣跨敤 <code>POSTGRES_USER</code>/<code>POSTGRES_PASSWORD</code>锛涘簲鐢ㄥ繀椤讳娇鐢ㄧ嫭绔嬬殑 <code>APP_POSTGRES_USER</code>/<code>APP_POSTGRES_PASSWORD</code> |
+| Redis | <code>REDIS_HOST</code>銆?code>REDIS_PORT</code>銆?code>REDIS_PASSWORD</code> |
+| 瀹夊叏閰嶇疆 | <code>JWT_SECRET_KEY</code>銆?code>PROVIDER_ENCRYPTION_KEY</code>銆?code>ALLOWED_HOSTS</code> |
 
-<code>LLM_PROVIDERS_JSON</code> 与 <code>EMBEDDING_PROVIDERS_JSON</code> 可通过
-LiteLLM 配置多个 OpenAI-compatible endpoint，也可接入本地的
-OpenAI-compatible 模型服务。设置 <code>ADMIN_PASSWORD</code> 后才会初始化管理员；
-在开发环境中留空会跳过管理员创建。
+<code>LLM_PROVIDERS_JSON</code> 涓?<code>EMBEDDING_PROVIDERS_JSON</code> 鍙€氳繃
+LiteLLM 閰嶇疆澶氫釜 OpenAI-compatible endpoint锛屼篃鍙帴鍏ユ湰鍦扮殑
+OpenAI-compatible 妯″瀷鏈嶅姟銆傝缃?<code>ADMIN_PASSWORD</code> 鍚庢墠浼氬垵濮嬪寲绠＄悊鍛橈紱
+鍦ㄥ紑鍙戠幆澧冧腑鐣欑┖浼氳烦杩囩鐞嗗憳鍒涘缓銆?
 
-生产环境请设置 <code>APP_ENV=production</code>，使用非占位的强密钥，并在重启之间
-保持 <code>PROVIDER_ENCRYPTION_KEY</code> 不变。公开注册默认关闭；仅在明确需要时设置
-<code>REGISTRATION_ENABLED=true</code>，并同时配置外部身份验证或邀请流程。
+鐢熶骇鐜璇疯缃?<code>APP_ENV=production</code>锛屼娇鐢ㄩ潪鍗犱綅鐨勫己瀵嗛挜锛屽苟鍦ㄩ噸鍚箣闂?
+淇濇寔 <code>PROVIDER_ENCRYPTION_KEY</code> 涓嶅彉銆傚叕寮€娉ㄥ唽榛樿鍏抽棴锛涗粎鍦ㄦ槑纭渶瑕佹椂璁剧疆
+<code>REGISTRATION_ENABLED=true</code>锛屽苟鍚屾椂閰嶇疆澶栭儴韬唤楠岃瘉鎴栭個璇锋祦绋嬨€?
 
-## Docker 启动
+## Docker 鍚姩
 
 ~~~powershell
 Copy-Item .env.example .env
-# 编辑 .env：至少设置 POSTGRES_PASSWORD、APP_POSTGRES_PASSWORD、
-# REDIS_PASSWORD 和 Provider 凭据；两个 PostgreSQL 密码必须不同。
-# 当 APP_ENV=production 时，还需要生产级安全配置。
+# 缂栬緫 .env锛氳嚦灏戣缃?POSTGRES_PASSWORD銆丄PP_POSTGRES_PASSWORD銆?
+# REDIS_PASSWORD 鍜?Provider 鍑嵁锛涗袱涓?PostgreSQL 瀵嗙爜蹇呴』涓嶅悓銆?
+# 褰?APP_ENV=production 鏃讹紝杩橀渶瑕佺敓浜х骇瀹夊叏閰嶇疆銆?
 docker compose up -d --build
 Invoke-WebRequest http://localhost:8000/health
 ~~~
 
 ~~~bash
 cp .env.example .env
-# 按上文编辑 .env。
+# 鎸変笂鏂囩紪杈?.env銆?
 docker compose up -d --build
 curl http://localhost:8000/health
 ~~~
 
-默认地址：
+榛樿鍦板潃锛?
 
-| 服务 | 地址 |
+| 鏈嶅姟 | 鍦板潃 |
 | --- | --- |
-| 前端 | <code>http://localhost:3000</code> |
-| 后端 API | <code>http://localhost:8000</code> |
-| OpenAPI | <code>http://localhost:8000/docs</code>，仅非生产环境启用 |
-| 健康检查 | <code>http://localhost:8000/health</code> |
+| 鍓嶇 | <code>http://localhost:3000</code> |
+| 鍚庣 API | <code>http://localhost:8000</code> |
+| OpenAPI | <code>http://localhost:8000/docs</code>锛屼粎闈炵敓浜х幆澧冨惎鐢?|
+| 鍋ュ悍妫€鏌?| <code>http://localhost:8000/health</code> |
 
-Docker Compose 会向后端容器注入 <code>POSTGRES_HOST=postgres</code> 和
-<code>POSTGRES_PORT=5432</code>，并在应用启动前由一次性迁移容器创建无超级用户、
-无 <code>BYPASSRLS</code> 权限的应用角色并应用租户 RLS。本地宿主进程使用
-<code>.env</code> 中的 PostgreSQL 外部端口，默认是 <code>5433</code>。
+Docker Compose 浼氬悜鍚庣瀹瑰櫒娉ㄥ叆 <code>POSTGRES_HOST=postgres</code> 鍜?
+<code>POSTGRES_PORT=5432</code>锛屽苟鍦ㄥ簲鐢ㄥ惎鍔ㄥ墠鐢变竴娆℃€ц縼绉诲鍣ㄥ垱寤烘棤瓒呯骇鐢ㄦ埛銆?
+鏃?<code>BYPASSRLS</code> 鏉冮檺鐨勫簲鐢ㄨ鑹插苟搴旂敤绉熸埛 RLS銆傛湰鍦板涓昏繘绋嬩娇鐢?
+<code>.env</code> 涓殑 PostgreSQL 澶栭儴绔彛锛岄粯璁ゆ槸 <code>5433</code>銆?
 
-## 本地开发
+## 鏈湴寮€鍙?
 
-安装锁定的开发环境并启动 PostgreSQL/Redis：
+瀹夎閿佸畾鐨勫紑鍙戠幆澧冨苟鍚姩 PostgreSQL/Redis锛?
 
 ~~~powershell
 uv sync --frozen --all-extras
@@ -176,7 +176,7 @@ docker compose up -d postgres redis
 uv run academic-cluster --reload
 ~~~
 
-在第二个终端启动前端：
+鍦ㄧ浜屼釜缁堢鍚姩鍓嶇锛?
 
 ~~~powershell
 Set-Location frontend
@@ -190,46 +190,46 @@ npm ci
 npm run dev
 ~~~
 
-CLI 有意固定为单 worker。不要增加 Uvicorn worker 数量，因为 Agent 运行时依赖
-单一 PostgreSQL advisory-lock owner。
+CLI 鏈夋剰鍥哄畾涓哄崟 worker銆備笉瑕佸鍔?Uvicorn worker 鏁伴噺锛屽洜涓?Agent 杩愯鏃朵緷璧?
+鍗曚竴 PostgreSQL advisory-lock owner銆?
 
-## 节点契约
+## 鑺傜偣濂戠害
 
-每个生产图节点都有一个 <code>NodeContract</code>，声明：
+姣忎釜鐢熶骇鍥捐妭鐐归兘鏈変竴涓?<code>NodeContract</code>锛屽０鏄庯細
 
-- 精确的、带版本的输入和输出 Artifact 字段。
-- 自动生成的 Draft 2020-12 JSON Schema。
-- 依赖操作与参数绑定。
-- 由 <code>status</code> 选择的输出 variant。
-- 已声明的错误、重试规则、回退规则、fixture 和验收准则。
+- 绮剧‘鐨勩€佸甫鐗堟湰鐨勮緭鍏ュ拰杈撳嚭 Artifact 瀛楁銆?
+- 鑷姩鐢熸垚鐨?Draft 2020-12 JSON Schema銆?
+- 渚濊禆鎿嶄綔涓庡弬鏁扮粦瀹氥€?
+- 鐢?<code>status</code> 閫夋嫨鐨勮緭鍑?variant銆?
+- 宸插０鏄庣殑閿欒銆侀噸璇曡鍒欍€佸洖閫€瑙勫垯銆乫ixture 鍜岄獙鏀跺噯鍒欍€?
 
-以下契约接口需要普通 API 认证：
+浠ヤ笅濂戠害鎺ュ彛闇€瑕佹櫘閫?API 璁よ瘉锛?
 
 ~~~text
 GET /api/agent/contracts
 GET /api/agent/contracts/{node_name}
 ~~~
 
-机器可读 bundle 位于 <code>promptfoo/contracts/node-contracts.json</code>。它只能从
-生产契约生成；请使用下文检查命令检测漂移。
+鏈哄櫒鍙 bundle 浣嶄簬 <code>promptfoo/contracts/node-contracts.json</code>銆傚畠鍙兘浠?
+鐢熶骇濂戠害鐢熸垚锛涜浣跨敤涓嬫枃妫€鏌ュ懡浠ゆ娴嬫紓绉汇€?
 
-字段级规范见 [节点契约说明](docs/node-contracts.md)。
+瀛楁绾ц鑼冭 [鑺傜偣濂戠害璇存槑](docs/node-contracts.md)銆?
 
-### 当前契约边界
+### 褰撳墠濂戠害杈圭晫
 
-当前契约会校验已声明的 Artifact 字段、版本、JSON-compatible 类型和输出 variant。
-它尚未实现审批状态、N08 引用批准、G07 实验批准、显式
-<code>context_hash</code> 或 append-only 历史 Artifact 存储等策略门。只有将这些
-要求实现到运行时后，才能将其声明为已验收行为。
+褰撳墠濂戠害浼氭牎楠屽凡澹版槑鐨?Artifact 瀛楁銆佺増鏈€丣SON-compatible 绫诲瀷鍜岃緭鍑?variant銆?
+瀹冨皻鏈疄鐜板鎵圭姸鎬併€丯08 寮曠敤鎵瑰噯銆丟07 瀹為獙鎵瑰噯銆佹樉寮?
+<code>context_hash</code> 鎴?append-only 鍘嗗彶 Artifact 瀛樺偍绛夌瓥鐣ラ棬銆傚彧鏈夊皢杩欎簺
+瑕佹眰瀹炵幇鍒拌繍琛屾椂鍚庯紝鎵嶈兘灏嗗叾澹版槑涓哄凡楠屾敹琛屼负銆?
 
-## 可观测与评估
+## 鍙娴嬩笌璇勪及
 
 ### Langfuse
 
-Langfuse 是可选且 fail-open 的旁路观测层。启用后，同一个
-<code>execution_id</code> 会产生一个 execution trace，并包含实际执行节点的子 span。
-默认记录 Artifact 引用、schema digest、输出 variant、状态和耗时等元数据，不捕获
-节点 payload。
+Langfuse 鏄彲閫変笖 fail-open 鐨勬梺璺娴嬪眰銆傚惎鐢ㄥ悗锛屽悓涓€涓?
+<code>execution_id</code> 浼氫骇鐢熶竴涓?execution trace锛屽苟鍖呭惈瀹為檯鎵ц鑺傜偣鐨勫瓙 span銆?
+榛樿璁板綍 Artifact 寮曠敤銆乻chema digest銆佽緭鍑?variant銆佺姸鎬佸拰鑰楁椂绛夊厓鏁版嵁锛屼笉鎹曡幏
+鑺傜偣 payload銆?
 
 ~~~env
 LANGFUSE_ENABLED=true
@@ -239,15 +239,15 @@ LANGFUSE_BASE_URL=https://cloud.langfuse.com
 LANGFUSE_CAPTURE_NODE_IO=false
 ~~~
 
-只有在隐私审查允许时才设置 <code>LANGFUSE_CAPTURE_NODE_IO=true</code>。即便启用，
-捕获值也会经历脱敏、截断和嵌套深度限制。Langfuse 是观测层，不是正确性门禁或
-benchmark runner。
+鍙湁鍦ㄩ殣绉佸鏌ュ厑璁告椂鎵嶈缃?<code>LANGFUSE_CAPTURE_NODE_IO=true</code>銆傚嵆渚垮惎鐢紝
+鎹曡幏鍊间篃浼氱粡鍘嗚劚鏁忋€佹埅鏂拰宓屽娣卞害闄愬埗銆侺angfuse 鏄娴嬪眰锛屼笉鏄纭€ч棬绂佹垨
+benchmark runner銆?
 
 ### Promptfoo
 
-Promptfoo 当前执行离线、确定性的 **NodeContract 验收**。它校验六个
-fixture/contract 组合，不调用 LLM、论文源、Provider 密钥或数据库。它不是
-prompt 质量 benchmark，也不是实时端到端测试。
+Promptfoo 褰撳墠鎵ц绂荤嚎銆佺‘瀹氭€х殑 **NodeContract 楠屾敹**銆傚畠鏍￠獙鍏釜
+fixture/contract 缁勫悎锛屼笉璋冪敤 LLM銆佽鏂囨簮銆丳rovider 瀵嗛挜鎴栨暟鎹簱銆傚畠涓嶆槸
+prompt 璐ㄩ噺 benchmark锛屼篃涓嶆槸瀹炴椂绔埌绔祴璇曘€?
 
 ~~~powershell
 uv run python scripts/export_node_contracts.py --check
@@ -263,37 +263,37 @@ PROMPTFOO_PYTHON="$(cd .. && pwd)/.venv/bin/python" \
   promptfoo eval --config promptfooconfig.yaml --no-cache --no-write
 ~~~
 
-### Benchmark 状态
+### Benchmark 鐘舵€?
 
-项目尚未提供一等的“逐节点 + 全图” benchmark harness、版本化 benchmark 数据集、
-评分器或报告 CLI。目前已有的是确定性契约 fixture 和使用 mock 的全图 E2E 测试。
+椤圭洰灏氭湭鎻愪緵涓€绛夌殑鈥滈€愯妭鐐?+ 鍏ㄥ浘鈥?benchmark harness銆佺増鏈寲 benchmark 鏁版嵁闆嗐€?
+璇勫垎鍣ㄦ垨鎶ュ憡 CLI銆傜洰鍓嶅凡鏈夌殑鏄‘瀹氭€у绾?fixture 鍜屼娇鐢?mock 鐨勫叏鍥?E2E 娴嬭瘯銆?
 
-规划中的 benchmark 分为三层：
+瑙勫垝涓殑 benchmark 鍒嗕负涓夊眰锛?
 
-1. <code>offline-replay</code>：脚本化 LLM/tool 响应、真实图路由和确定性 CI 断言。
-2. <code>local-llm</code>：固定 fixture、mock 外部工具与本地
-   OpenAI-compatible 模型。
-3. <code>live</code>：显式启用的 Provider 评测，使用隔离的持久化和 trace 数据。
+1. <code>offline-replay</code>锛氳剼鏈寲 LLM/tool 鍝嶅簲銆佺湡瀹炲浘璺敱鍜岀‘瀹氭€?CI 鏂█銆?
+2. <code>local-llm</code>锛氬浐瀹?fixture銆乵ock 澶栭儴宸ュ叿涓庢湰鍦?
+   OpenAI-compatible 妯″瀷銆?
+3. <code>live</code>锛氭樉寮忓惎鐢ㄧ殑 Provider 璇勬祴锛屼娇鐢ㄩ殧绂荤殑鎸佷箙鍖栧拰 trace 鏁版嵁銆?
 
-Promptfoo 可以在该架构中评估 prompt 回归；Langfuse 可以记录 benchmark trace；
-二者都不能取代 benchmark harness。
+Promptfoo 鍙互鍦ㄨ鏋舵瀯涓瘎浼?prompt 鍥炲綊锛汱angfuse 鍙互璁板綍 benchmark trace锛?
+浜岃€呴兘涓嶈兘鍙栦唬 benchmark harness銆?
 
-## 测试与质量命令
+## 娴嬭瘯涓庤川閲忓懡浠?
 
-运行确定性 Python 测试：
+杩愯纭畾鎬?Python 娴嬭瘯锛?
 
 ~~~powershell
 uv run pytest tests/unit/ -m "not integration and not live" -v --tb=short
 ~~~
 
-只有在通过 <code>ACADEMIC_CLUSTER_TEST_DATABASE_URL</code> 配置了明确可丢弃的
-测试数据库后，才运行 PostgreSQL 集成测试：
+鍙湁鍦ㄩ€氳繃 <code>ACADEMIC_CLUSTER_TEST_DATABASE_URL</code> 閰嶇疆浜嗘槑纭彲涓㈠純鐨?
+娴嬭瘯鏁版嵁搴撳悗锛屾墠杩愯 PostgreSQL 闆嗘垚娴嬭瘯锛?
 
 ~~~powershell
 uv run pytest tests/integration/ -m "integration and not live" -v --tb=short
 ~~~
 
-运行静态检查并构建 wheel：
+杩愯闈欐€佹鏌ュ苟鏋勫缓 wheel锛?
 
 ~~~powershell
 uv run ruff check src/ tests/
@@ -304,7 +304,7 @@ uv run pip-audit
 uv build --wheel
 ~~~
 
-在 <code>frontend/</code> 目录运行前端校验：
+鍦?<code>frontend/</code> 鐩綍杩愯鍓嶇鏍￠獙锛?
 
 ~~~powershell
 npm run lint
@@ -314,38 +314,38 @@ npm test
 npm run build
 ~~~
 
-确定性图 E2E 测试使用 <code>InMemorySaver</code> 和 fake provider。它可以验证图行为，
-且不会消耗 Provider 配额或依赖外部服务；它不能证明真实模型或 PostgreSQL 部署。
+纭畾鎬у浘 E2E 娴嬭瘯浣跨敤 <code>InMemorySaver</code> 鍜?fake provider銆傚畠鍙互楠岃瘉鍥捐涓猴紝
+涓斾笉浼氭秷鑰?Provider 閰嶉鎴栦緷璧栧閮ㄦ湇鍔★紱瀹冧笉鑳借瘉鏄庣湡瀹炴ā鍨嬫垨 PostgreSQL 閮ㄧ讲銆?
 
-## 项目结构
+## 椤圭洰缁撴瀯
 
 ~~~text
 src/academic_cluster/
-  agents/        LangGraph 节点、契约和 checkpoint 生命周期
-  api/           FastAPI 路由、SSE 与应用生命周期
-  config/        配置与安全校验
-  services/      Provider、持久化、观测与运行时管理
-  tools/         已审计 Agent 工具和确定性分析操作
-frontend/         React 19 + Vite 应用
-tests/            单元测试与 PostgreSQL 集成测试
-promptfoo/        离线 NodeContract fixture 与断言
-docs/             架构和契约规范
+  agents/        LangGraph 鑺傜偣銆佸绾﹀拰 checkpoint 鐢熷懡鍛ㄦ湡
+  api/           FastAPI 璺敱銆丼SE 涓庡簲鐢ㄧ敓鍛藉懆鏈?
+  config/        閰嶇疆涓庡畨鍏ㄦ牎楠?
+  services/      Provider銆佹寔涔呭寲銆佽娴嬩笌杩愯鏃剁鐞?
+  tools/         宸插璁?Agent 宸ュ叿鍜岀‘瀹氭€у垎鏋愭搷浣?
+frontend/         React 19 + Vite 搴旂敤
+tests/            鍗曞厓娴嬭瘯涓?PostgreSQL 闆嗘垚娴嬭瘯
+promptfoo/        绂荤嚎 NodeContract fixture 涓庢柇瑷€
+docs/             鏋舵瀯鍜屽绾﹁鑼?
 ~~~
 
-## 安全说明
+## 瀹夊叏璇存槑
 
-- 不要提交 <code>.env</code>、Provider 密钥、token 或生成的 benchmark 密钥。
-- Refresh Token 只通过 HttpOnly、SameSite Cookie 传输；前端不得把 Access Token
-  或 Refresh Token 写入 localStorage。
-- 项目和派生产物通过组织成员关系、请求级租户上下文和 PostgreSQL RLS 隔离；生产
-  应用账号不得使用 PostgreSQL 超级用户或 <code>BYPASSRLS</code>。
-- Provider 出站地址默认只允许 HTTPS 公网地址；本地私网 Provider 只能在非生产环境
-  通过显式开关启用，且 URL 变化必须同步轮换 API Key。
-- 集成测试必须使用可丢弃数据库。
-- 本地 LLM benchmark 是本地计算，不是确定性 replay；比较时应保留模型、prompt、
-  fixture 和输出元数据。
-- 不要将当前 Promptfoo 契约验收结果视作实时 LLM 质量或完整 E2E 正确性的证据。
+- 涓嶈鎻愪氦 <code>.env</code>銆丳rovider 瀵嗛挜銆乼oken 鎴栫敓鎴愮殑 benchmark 瀵嗛挜銆?
+- Refresh Token 鍙€氳繃 HttpOnly銆丼ameSite Cookie 浼犺緭锛涘墠绔笉寰楁妸 Access Token
+  鎴?Refresh Token 鍐欏叆 localStorage銆?
+- 椤圭洰鍜屾淳鐢熶骇鐗╅€氳繃缁勭粐鎴愬憳鍏崇郴銆佽姹傜骇绉熸埛涓婁笅鏂囧拰 PostgreSQL RLS 闅旂锛涚敓浜?
+  搴旂敤璐﹀彿涓嶅緱浣跨敤 PostgreSQL 瓒呯骇鐢ㄦ埛鎴?<code>BYPASSRLS</code>銆?
+- Provider 鍑虹珯鍦板潃榛樿鍙厑璁?HTTPS 鍏綉鍦板潃锛涙湰鍦扮缃?Provider 鍙兘鍦ㄩ潪鐢熶骇鐜
+  閫氳繃鏄惧紡寮€鍏冲惎鐢紝涓?URL 鍙樺寲蹇呴』鍚屾杞崲 API Key銆?
+- 闆嗘垚娴嬭瘯蹇呴』浣跨敤鍙涪寮冩暟鎹簱銆?
+- 鏈湴 LLM benchmark 鏄湰鍦拌绠楋紝涓嶆槸纭畾鎬?replay锛涙瘮杈冩椂搴斾繚鐣欐ā鍨嬨€乸rompt銆?
+  fixture 鍜岃緭鍑哄厓鏁版嵁銆?
+- 涓嶈灏嗗綋鍓?Promptfoo 濂戠害楠屾敹缁撴灉瑙嗕綔瀹炴椂 LLM 璐ㄩ噺鎴栧畬鏁?E2E 姝ｇ‘鎬х殑璇佹嵁銆?
 
-## 许可证
+## 璁稿彲璇?
 
-仓库当前未包含许可证文件。在对外发布项目或接受外部贡献前，请补充明确的许可证。
+浠撳簱褰撳墠鏈寘鍚鍙瘉鏂囦欢銆傚湪瀵瑰鍙戝竷椤圭洰鎴栨帴鍙楀閮ㄨ础鐚墠锛岃琛ュ厖鏄庣‘鐨勮鍙瘉銆?

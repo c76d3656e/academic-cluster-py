@@ -1,7 +1,7 @@
-"""
-Provider Pool - 基于 LiteLLM Router 的多端点负载均衡
+﻿"""
+Provider Pool - 鍩轰簬 LiteLLM Router 鐨勫绔偣璐熻浇鍧囪　
 
-LLM / Embedding 使用 LiteLLM Router；rerank 使用同一 Registry 的 HTTP 路由配置。
+LLM / Embedding 浣跨敤 LiteLLM Router锛況erank 浣跨敤鍚屼竴 Registry 鐨?HTTP 璺敱閰嶇疆銆?
 """
 
 import json
@@ -43,19 +43,19 @@ def _normalize_openai_api_base(api_url: str) -> str:
 
 
 # =============================================================================
-# LiteLLM Router Pool（用于 LLM 和 Embedding）
+# LiteLLM Router Pool锛堢敤浜?LLM 鍜?Embedding锛?
 # =============================================================================
 
 
 class LiteLLMPool:
     """
-    基于 LiteLLM Router 的 Provider Pool。
+    鍩轰簬 LiteLLM Router 鐨?Provider Pool銆?
 
-    支持：
-    - 多端点加权轮询
-    - RPM/TPM 限速（enable_pre_call_checks）
-    - 自动故障转移 + 重试
-    - 健康检查 + cooldown
+    鏀寔锛?
+    - 澶氱鐐瑰姞鏉冭疆璇?
+    - RPM/TPM 闄愰€燂紙enable_pre_call_checks锛?
+    - 鑷姩鏁呴殰杞Щ + 閲嶈瘯
+    - 鍋ュ悍妫€鏌?+ cooldown
     """
 
     def __init__(
@@ -73,7 +73,7 @@ class LiteLLMPool:
         self._router: Any = None
 
     def _ensure_router(self) -> None:
-        """延迟初始化 Router（避免导入时就需要 litellm）"""
+        """寤惰繜鍒濆鍖?Router锛堥伩鍏嶅鍏ユ椂灏遍渶瑕?litellm锛?""
         if self._router is not None:
             return
 
@@ -126,14 +126,14 @@ class LiteLLMPool:
         return self._router
 
     def get_model_name(self) -> str:
-        """获取模型别名"""
+        """鑾峰彇妯″瀷鍒悕"""
         if not self._model_list:
             raise RuntimeError(f"No deployments in {self.service_name} pool")
         return str(self._model_list[0]["model_name"])
 
     @property
     def deployments(self) -> list[dict[str, Any]]:
-        """获取所有部署配置"""
+        """鑾峰彇鎵€鏈夐儴缃查厤缃?""
         return self._model_list
 
     def get_total_rpm_limit(self, default_per_deployment: int | None = None) -> int:
@@ -155,7 +155,7 @@ class LiteLLMPool:
 
 
 # =============================================================================
-# 全局池管理
+# 鍏ㄥ眬姹犵鐞?
 # =============================================================================
 
 _llm_pool: LiteLLMPool | None = None
@@ -164,7 +164,7 @@ _rerank_providers: list[dict[str, Any]] = []
 
 
 def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict[str, Any]]:
-    """解析 JSON provider 配置为 LiteLLM model_list 格式"""
+    """瑙ｆ瀽 JSON provider 閰嶇疆涓?LiteLLM model_list 鏍煎紡"""
     if not json_str:
         return []
     try:
@@ -249,7 +249,7 @@ def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict[str
         api_url = api_url_value.strip()
         api_key = api_key_value.strip()
 
-        # LiteLLM 需要 openai/ 前缀来使用 OpenAI 兼容端点
+        # LiteLLM 闇€瑕?openai/ 鍓嶇紑鏉ヤ娇鐢?OpenAI 鍏煎绔偣
         try:
             group_name, litellm_model = _normalize_openai_model(model)
         except ValueError:
@@ -268,12 +268,12 @@ def _parse_litellm_model_list(json_str: str, service_type: str) -> list[dict[str
             # while LiteLLM selects the deployment with the smallest order first.
             "order": -priority,
         }
-        # 自定义 base_url（非默认 OpenAI 端点时必须设置）
+        # 鑷畾涔?base_url锛堥潪榛樿 OpenAI 绔偣鏃跺繀椤昏缃級
         if api_url:
             litellm_params["api_base"] = _normalize_openai_api_base(api_url)
 
-        # model_name 使用实际模型名（如 "Qwen3-8B"），同一模型的 provider 组成一个路由组
-        # 原始别名（如 "gitee-1"）存入 model_info，供 create_llm 追踪使用
+        # model_name 浣跨敤瀹為檯妯″瀷鍚嶏紙濡?"Qwen3-8B"锛夛紝鍚屼竴妯″瀷鐨?provider 缁勬垚涓€涓矾鐢辩粍
+        # 鍘熷鍒悕锛堝 "gitee-1"锛夊瓨鍏?model_info锛屼緵 create_llm 杩借釜浣跨敤
         model_list.append(
             {
                 "model_name": group_name,
@@ -351,6 +351,21 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
                     error=str(e),
                 )
                 continue
+        # 从 metadata 中解析 visibility
+        metadata_raw = row[7] if len(row) > 7 else None
+        visibility = ["public"]
+        if metadata_raw:
+            try:
+                if isinstance(metadata_raw, str):
+                    metadata = json.loads(metadata_raw)
+                elif isinstance(metadata_raw, dict):
+                    metadata = metadata_raw
+                else:
+                    metadata = {}
+                visibility = metadata.get("visibility", ["public"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         configs[kind].append(
             {
                 "name": row[1],
@@ -359,7 +374,7 @@ async def _load_enabled_provider_configs_from_db() -> tuple[
                 "api_key": api_key,
                 "rpm_limit": row[5] or _toml_default_rpm(),
                 "priority": row[6] or 100,
-                "metadata": row[7] if len(row) > 7 and isinstance(row[7], dict) else {},
+                "visibility": visibility,
             }
         )
 
@@ -479,7 +494,7 @@ async def init_pools() -> None:
         str(getattr(settings, "llm_providers_json", None) or ""), "llm"
     )
     if not llm_model_list and settings.llm_api_key:
-        # 单 provider fallback：从现有 settings 构建
+        # 鍗?provider fallback锛氫粠鐜版湁 settings 鏋勫缓
         base_url = settings.llm_base_url or "https://api.openai.com/v1"
         group_name, litellm_model = _normalize_openai_model(settings.llm_model)
 
@@ -539,7 +554,7 @@ async def init_pools() -> None:
 
 
 async def close_pools() -> None:
-    """关闭所有池"""
+    """鍏抽棴鎵€鏈夋睜"""
     global _llm_pool, _embedding_pool, _rerank_providers
     _llm_pool = None
     _embedding_pool = None
@@ -548,7 +563,7 @@ async def close_pools() -> None:
 
 
 # =============================================================================
-# 便捷访问函数
+# 渚挎嵎璁块棶鍑芥暟
 # =============================================================================
 
 
